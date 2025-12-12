@@ -11,14 +11,14 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('cities', function (Blueprint $table) {
+        Schema::create('organizations', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('city_id')->constrained()->cascadeOnDelete();
             $table->string('name');
-            $table->string('slug')->unique();
-            $table->string('state')->nullable();
-            $table->string('country', 2)->default('US');
-            $table->string('timezone')->default('America/Chicago');
+            $table->string('slug');
             $table->timestamps();
+
+            $table->unique(['city_id', 'slug']);
         });
     }
 
@@ -27,6 +27,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('cities');
+        Schema::dropIfExists('organizations');
     }
 };
