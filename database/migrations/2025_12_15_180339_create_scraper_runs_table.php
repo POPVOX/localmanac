@@ -15,14 +15,19 @@ return new class extends Migration
             $table->id();
             $table->foreignId('scraper_id')->constrained()->cascadeOnDelete();
             $table->foreignId('city_id')->constrained()->cascadeOnDelete();
-            $table->timestamp('started_at')->nullable();
-            $table->timestamp('finished_at')->nullable();
-            $table->string('status')->default('pending');
+            $table->timestampTz('started_at')->nullable();
+            $table->timestampTz('finished_at')->nullable();
+            $table->string('status')->default('running');
+            $table->unsignedInteger('items_found')->default(0);
+            $table->unsignedInteger('items_created')->default(0);
+            $table->unsignedInteger('items_updated')->default(0);
+            $table->json('meta')->nullable();
             $table->text('error_message')->nullable();
             $table->timestamps();
 
-            $table->index(['scraper_id', 'status']);
-            $table->index(['city_id', 'status']);
+            $table->index(['scraper_id', 'started_at']);
+            $table->index(['city_id', 'started_at']);
+            $table->index(['status']);
         });
     }
 

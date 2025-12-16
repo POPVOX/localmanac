@@ -16,13 +16,15 @@ return new class extends Migration
             $table->foreignId('city_id')->constrained()->cascadeOnDelete();
             $table->string('name');
             $table->string('slug');
+            $table->string('type');
             $table->string('source_url')->nullable();
-            $table->string('fetcher')->nullable();
             $table->json('config')->nullable();
-            $table->boolean('is_active')->default(true);
+            $table->boolean('is_enabled')->default(true);
+            $table->string('schedule_cron')->nullable();
             $table->timestamps();
 
             $table->unique(['city_id', 'slug']);
+            $table->index(['city_id', 'is_enabled']);
         });
     }
 

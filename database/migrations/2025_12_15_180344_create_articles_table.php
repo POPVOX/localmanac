@@ -17,15 +17,16 @@ return new class extends Migration
             $table->foreignId('scraper_id')->nullable()->constrained()->nullOnDelete();
             $table->string('title');
             $table->text('summary')->nullable();
-            $table->timestamp('published_at')->nullable();
-            $table->string('canonical_url')->nullable();
-            $table->string('content_hash')->nullable();
+            $table->timestampTz('published_at')->nullable();
+            $table->string('content_type')->default('unknown');
+            $table->text('canonical_url')->nullable();
+            $table->string('content_hash', 64)->nullable();
             $table->string('status')->default('draft');
             $table->timestamps();
 
             $table->index(['city_id', 'status']);
             $table->index(['city_id', 'published_at']);
-            $table->index(['city_id', 'canonical_url']);
+            $table->unique(['city_id', 'canonical_url']);
             $table->index(['city_id', 'content_hash']);
         });
     }

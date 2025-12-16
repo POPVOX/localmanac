@@ -17,9 +17,11 @@ return new class extends Migration
             $table->longText('raw_text')->nullable();
             $table->longText('cleaned_text')->nullable();
             $table->longText('raw_html')->nullable();
+            $table->string('lang', 10)->default('en');
+            $table->timestampTz('extracted_at')->nullable();
             $table->timestamps();
 
-            $table->index('article_id');
+            $table->unique('article_id');
         });
     }
 

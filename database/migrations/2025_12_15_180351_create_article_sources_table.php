@@ -16,11 +16,14 @@ return new class extends Migration
             $table->foreignId('city_id')->constrained()->cascadeOnDelete();
             $table->foreignId('article_id')->constrained()->cascadeOnDelete();
             $table->foreignId('organization_id')->nullable()->constrained('organizations')->nullOnDelete();
-            $table->string('source_url');
-            $table->string('source_type')->nullable();
+            $table->text('source_url');
+            $table->string('source_type')->default('web');
+            $table->string('source_uid')->nullable();
+            $table->timestampTz('accessed_at')->nullable();
             $table->timestamps();
 
-            $table->index(['city_id', 'source_url']);
+            $table->unique(['article_id', 'source_url']);
+            $table->index(['city_id', 'source_type']);
         });
     }
 

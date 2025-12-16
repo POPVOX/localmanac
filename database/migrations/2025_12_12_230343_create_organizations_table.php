@@ -16,6 +16,10 @@ return new class extends Migration
             $table->foreignId('city_id')->constrained()->cascadeOnDelete();
             $table->string('name');
             $table->string('slug');
+            $table->enum('type', ['government', 'news_media', 'nonprofit', 'business', 'school', 'other']);
+            $table->text('description')->nullable();
+            $table->string('website')->nullable();
+            $table->smallInteger('credibility_score')->default(5);
             $table->timestamps();
 
             $table->unique(['city_id', 'slug']);
