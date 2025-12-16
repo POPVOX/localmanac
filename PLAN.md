@@ -35,7 +35,9 @@
 - [ ] Implement `Ingestion\ScrapeRunner`
 - [ ] Implement Fetchers:
   - [ ] RssFetcher
-  - [ ] HtmlFetcher
+  - [ ] DocumentersFetcher (profile-based, Google Docs full-text)
+  - [ ] HtmlFetcher (generic, selector-based)
+- [ ] ScrapeRunner routes html fetchers by config.profile
 - [ ] Implement `Ingestion\Deduplicator` (URL + hash strategy)
 - [ ] Implement `Ingestion\ArticleWriter` (Article + Body + Source)
 - [ ] Add a demo scraper config and seed it
