@@ -18,9 +18,10 @@ class Article extends Model
         'title',
         'summary',
         'published_at',
+        'content_type',
+        'status',
         'canonical_url',
         'content_hash',
-        'status',
     ];
 
     /**

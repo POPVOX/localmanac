@@ -16,5 +16,16 @@ class Organization extends Model
         'city_id',
         'name',
         'slug',
+        'type',
+        'website',
+        'description',
+        'credibility_score',
+    ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected $casts = [
+        'credibility_score' => 'integer',
     ];
 }

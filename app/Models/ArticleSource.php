@@ -18,5 +18,11 @@ class ArticleSource extends Model
         'organization_id',
         'source_url',
         'source_type',
+        'source_uid',
+        'accessed_at',
+    ];
+
+    protected $casts = [
+        'accessed_at' => 'datetime',
     ];
 }

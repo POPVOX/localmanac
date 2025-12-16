@@ -16,20 +16,18 @@ class Scraper extends Model
         'city_id',
         'name',
         'slug',
+        'type',
         'source_url',
-        'fetcher',
         'config',
-        'is_active',
+        'is_enabled',
+        'schedule_cron',
     ];
 
     /**
      * @return array<string, string>
      */
-    protected function casts(): array
-    {
-        return [
-            'config' => 'array',
-            'is_active' => 'boolean',
-        ];
-    }
+    protected $casts = [
+        'config' => 'array',
+        'is_enabled' => 'boolean',
+    ];
 }

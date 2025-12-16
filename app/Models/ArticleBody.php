@@ -17,5 +17,11 @@ class ArticleBody extends Model
         'raw_text',
         'cleaned_text',
         'raw_html',
+        'lang',
+        'extracted_at',
+    ];
+
+    protected $casts = [
+        'extracted_at' => 'datetime',
     ];
 }

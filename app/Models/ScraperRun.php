@@ -15,20 +15,22 @@ class ScraperRun extends Model
     protected $fillable = [
         'scraper_id',
         'city_id',
-        'started_at',
-        'finished_at',
         'status',
         'error_message',
+        'started_at',
+        'finished_at',
+        'items_found',
+        'items_created',
+        'items_updated',
+        'meta',
     ];
 
     /**
      * @return array<string, string>
      */
-    protected function casts(): array
-    {
-        return [
-            'started_at' => 'datetime',
-            'finished_at' => 'datetime',
-        ];
-    }
+    protected $casts = [
+        'started_at' => 'datetime',
+        'finished_at' => 'datetime',
+        'meta' => 'array',
+    ];
 }
