@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Article extends Model
 {
@@ -32,5 +34,15 @@ class Article extends Model
         return [
             'published_at' => 'datetime',
         ];
+    }
+
+    public function body(): HasOne
+    {
+        return $this->hasOne(ArticleBody::class);
+    }
+
+    public function sources(): HasMany
+    {
+        return $this->hasMany(ArticleSource::class);
     }
 }

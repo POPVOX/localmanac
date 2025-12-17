@@ -6,6 +6,7 @@ use App\Models\Article;
 use App\Models\ArticleBody;
 use App\Models\ArticleSource;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 class ArticleWriter
@@ -28,7 +29,7 @@ class ArticleWriter
                 'city_id' => $cityId,
                 'scraper_id' => $item['scraper_id'] ?? null,
                 'title' => $title,
-                'summary' => $item['summary'] ?? null,
+                'summary' => $item['summary'] ?? null, // may be filled below from cleaned_text
                 'published_at' => $item['published_at'] ?? null,
                 'content_type' => $item['content_type'] ?? 'unknown',
                 'status' => $item['status'] ?? 'published',
@@ -40,6 +41,12 @@ class ArticleWriter
 
             $articleBody = $item['body'] ?? [];
 
+            // If no summary was provided, derive a short one from extracted cleaned text.
+            if (empty($article->summary) && ! empty($articleBody['cleaned_text']) && is_string($articleBody['cleaned_text'])) {
+                $article->summary = Str::limit(trim($articleBody['cleaned_text']), 200);
+                $article->save();
+            }
+
             ArticleBody::updateOrCreate(
                 ['article_id' => $article->id],
                 [
@@ -47,7 +54,7 @@ class ArticleWriter
                     'cleaned_text' => $articleBody['cleaned_text'] ?? null,
                     'raw_html' => $articleBody['raw_html'] ?? null,
                     'lang' => $articleBody['lang'] ?? 'en',
-                    'extracted_at' => null,
+                    'extracted_at' => now(),
                 ]
             );
 

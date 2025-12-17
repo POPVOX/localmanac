@@ -5,6 +5,7 @@ namespace App\Services\Ingestion;
 use App\Models\Scraper;
 use App\Models\ScraperRun;
 use App\Services\Ingestion\Fetchers\RssFetcher;
+use Illuminate\Support\Arr;
 use InvalidArgumentException;
 use Throwable;
 
@@ -23,7 +24,7 @@ class ScrapeRunner
             throw new InvalidArgumentException('Scraper is disabled');
         }
 
-        if ($scraper->type !== 'rss') {
+        if (! in_array($scraper->type, ['rss', 'html'], true)) {
             throw new InvalidArgumentException('Unsupported scraper type');
         }
 
@@ -37,7 +38,7 @@ class ScrapeRunner
         $skipped = 0;
 
         try {
-            $items = $this->rssFetcher->fetch($scraper);
+            $items = $this->fetchItems($scraper);
             $itemsFound = count($items);
             $created = 0;
             $updated = 0;
@@ -85,5 +86,27 @@ class ScrapeRunner
         }
 
         return $run;
+    }
+
+    private function fetchItems(Scraper $scraper): array
+    {
+        return match ($scraper->type) {
+            'rss' => $this->rssFetcher->fetch($scraper),
+            'html' => $this->fetchHtmlItems($scraper),
+            default => throw new InvalidArgumentException('Unsupported scraper type'),
+        };
+    }
+
+    private function fetchHtmlItems(Scraper $scraper): array
+    {
+        $profile = Arr::get($scraper->config, 'profile');
+
+        return match ($profile) {
+            'wichitadocumenters' => app(\App\Services\Ingestion\Fetchers\DocumentersFetcher::class)->fetch($scraper),
+            'generic_listing' => app(\App\Services\Ingestion\Fetchers\GenericListingFetcher::class)->fetch($scraper),
+            default => throw new InvalidArgumentException(
+                "No HTML fetcher for profile: {$profile}. Supported: wichitadocumenters, generic_listing"
+            ),
+        };
     }
 }

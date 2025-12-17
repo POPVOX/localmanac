@@ -6,6 +6,7 @@ use App\Models\Scraper;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Illuminate\Support\Arr;
 use InvalidArgumentException;
 use Symfony\Component\DomCrawler\Crawler;
 
@@ -114,23 +115,111 @@ class DocumentersFetcher
     {
         $crawler = new Crawler($html);
 
-        $parts = $crawler->filter('body p, body h1, body h2, body h3, body li')->each(function (Crawler $node) {
-            return $this->normalizeWhitespace($node->text());
+        // Prefer the main document container when parsing published Google Docs.
+        // Google Docs "Publish to the web" pages usually render content inside #contents.
+        $root = $crawler->filter('#contents');
+
+        // Fallbacks for non-Google-doc HTML variants.
+        if ($root->count() === 0) {
+            $root = $crawler->filter('main, article');
+        }
+
+        if ($root->count() === 0) {
+            $root = $crawler->filter('body');
+        }
+
+        $parts = [];
+
+        // Extract from common block elements.
+        foreach (['h1', 'h2', 'h3', 'p', 'li'] as $selector) {
+            $root->filter($selector)->each(function (Crawler $node) use (&$parts) {
+                $text = $this->normalizeWhitespace($node->text(''));
+
+                if ($text !== '') {
+                    $parts[] = $text;
+                }
+            });
+        }
+
+        // Extract table text (Google Docs often uses tables for agendas/roll calls).
+        $root->filter('table')->each(function (Crawler $table) use (&$parts) {
+            $rows = $table->filter('tr')->each(function (Crawler $tr) {
+                $cells = $tr->filter('th,td')->each(function (Crawler $cell) {
+                    return $this->normalizeWhitespace($cell->text(''));
+                });
+
+                $cells = array_values(array_filter($cells, fn (string $c) => $c !== ''));
+
+                return implode(' | ', $cells);
+            });
+
+            $rows = array_values(array_filter($rows, fn (string $r) => $r !== ''));
+
+            if (! empty($rows)) {
+                $parts[] = implode("\n", $rows);
+            }
         });
 
-        $parts = array_filter($parts, fn (string $text) => $text !== '');
+        $parts = array_values(array_filter($parts, fn (string $t) => $t !== ''));
 
-        return implode("\n\n", $parts);
+        $text = trim(implode("\n\n", $parts));
+
+        // If DomCrawler-based extraction yields nothing (common when pages are heavy on scripts),
+        // fall back to a lightweight HTML->text conversion.
+        if ($text === '') {
+            $text = $this->fallbackHtmlToText($html);
+        }
+
+        return $text;
+    }
+
+    private function fallbackHtmlToText(string $html): string
+    {
+        // Preserve some structure before stripping tags.
+        $replacements = [
+            "</p>" => "\n\n",
+            "</li>" => "\n",
+            "<br>" => "\n",
+            "<br/>" => "\n",
+            "<br />" => "\n",
+            "</h1>" => "\n\n",
+            "</h2>" => "\n\n",
+            "</h3>" => "\n\n",
+            "</tr>" => "\n",
+        ];
+
+        $value = str_ireplace(array_keys($replacements), array_values($replacements), $html);
+        $value = strip_tags($value);
+        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        // Normalize whitespace while keeping newlines.
+        $value = preg_replace("/\r\n?/", "\n", $value) ?? '';
+        $value = preg_replace("/[ \t\f\v]+/", " ", $value) ?? '';
+        $value = preg_replace("/\n{3,}/", "\n\n", $value) ?? '';
+
+        return trim($value);
     }
 
     private function extractPublishedAt(string $html): ?Carbon
     {
-        if (! preg_match('/Date:\\s*([A-Z][a-z]+\\s+\\d{1,2},\\s+\\d{4})/', $html, $matches)) {
+        $candidate = null;
+
+        if (preg_match('/Date:\s*([A-Z][a-z]+\s+\d{1,2},\s+\d{4})/', $html, $matches)) {
+            $candidate = $matches[1];
+        } else {
+            // Sometimes the visible text contains the Date label but the raw HTML is structured differently.
+            $text = $this->fallbackHtmlToText($html);
+            if (preg_match('/Date:\s*([A-Z][a-z]+\s+\d{1,2},\s+\d{4})/', $text, $m)) {
+                $candidate = $m[1];
+            }
+        }
+
+        if (! $candidate) {
             return null;
         }
 
         try {
-            return Carbon::parse($matches[1]);
+            return Carbon::parse($candidate);
         } catch (\Throwable) {
             return null;
         }
