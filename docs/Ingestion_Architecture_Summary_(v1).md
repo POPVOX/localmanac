@@ -173,6 +173,63 @@ This is an intentional design choice to avoid per‑site code and allow rapid it
 
 ### Config structure (common patterns)
 
+### Example scraper configs
+
+Below are representative examples of real scraper configurations used in Localmanac. These are meant for reference and onboarding, not as exhaustive schemas.
+
+#### Example: Documenters scraper (Google Docs)
+
+```json
+{
+  "profile": "wichitadocumenters",
+  "list": {
+    "link_selector": "h4 a[href*=\"docs.google.com\"]",
+    "link_attr": "href",
+    "max_links": 50
+  }
+}
+```
+
+This profile:
+- Scrapes a meeting listing page
+- Follows links to Google Docs
+- Extracts full meeting notes as long‑form civic text
+
+---
+
+#### Example: Generic HTML listing scraper (CommunityVoiceKS)
+
+```json
+{
+  "profile": "generic_listing",
+  "list": {
+    "link_selector": "a[href^=\"https://www.communityvoiceks.com/20\"]",
+    "link_attr": "href",
+    "max_links": 25
+  },
+  "article": {
+    "content_selector": "article .entry-content",
+    "remove_selectors": [
+      "script",
+      "style",
+      "nav",
+      "header",
+      "footer",
+      "aside",
+      ".sharedaddy",
+      ".jp-relatedposts"
+    ]
+  },
+  "best_effort": true
+}
+```
+
+This profile:
+- Scrapes a WordPress listing page
+- Follows article permalinks
+- Extracts full article content when available
+- Gracefully degrades on imperfect pages
+
 #### Profile
 - `config.profile` determines which fetcher is used.
 - Examples:
