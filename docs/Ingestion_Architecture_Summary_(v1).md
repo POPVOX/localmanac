@@ -112,6 +112,107 @@ Note: Bizjournals ingestion technically works, but snippet quality is poor; filt
 
 ---
 
+## Database structure (ingestion‑relevant)
+
+Localmanac uses a relational core with normalized tables and a small number of purpose‑built companion tables. The schema is designed to support multi‑city ingestion, deduplication, provenance, and future search/analysis.
+
+### Cities
+- Represents a geographic scope (e.g. Wichita).
+- Almost all ingestable data is scoped to a city.
+
+### Organizations
+- Represents the source organization (news outlet, government body, nonprofit, etc.).
+- First‑class `type` (e.g. government, news_media, nonprofit, school).
+- Linked to scrapers and article sources.
+
+### Scrapers
+- Defines *how* content is ingested.
+- Key fields:
+  - `type` (`rss`, `html`, etc.)
+  - `source_url` (listing page, feed URL, etc.)
+  - `is_active`
+  - `last_scraped_at`
+  - `config` (JSON / JSONB — see below)
+
+### Articles
+- Canonical record for a piece of content.
+- Contains metadata only (title, published_at, content_type, etc.).
+- Does **not** store large text blobs directly.
+
+### ArticleBodies
+- Stores large text fields:
+  - `raw_html`
+  - `cleaned_text`
+- Separated to keep the Articles table lean and index‑friendly.
+
+### ArticleSources
+- Tracks provenance and attribution.
+- Stores:
+  - canonical source URL
+  - source type
+  - organization relationship
+
+### Deduplication
+- Articles are deduplicated using a combination of:
+  - canonical URL
+  - content hash derived from cleaned_text
+  - time proximity checks (for RSS)
+
+---
+
+## Scraper config strategy (critical)
+
+Scraper behavior is driven almost entirely by the `scrapers.config` column.
+
+This is an intentional design choice to avoid per‑site code and allow rapid iteration without migrations or deploys.
+
+### Core ideas
+- Code defines *capabilities*
+- Config defines *behavior*
+- Most new sources require **config only**, not new classes
+
+### Config structure (common patterns)
+
+#### Profile
+- `config.profile` determines which fetcher is used.
+- Examples:
+  - `wichitadocumenters`
+  - `generic_listing`
+
+#### Listing configuration
+Used by listing‑based HTML scrapers:
+
+- `config.list.link_selector`
+- `config.list.link_attr`
+- `config.list.max_links`
+
+These define how article URLs are discovered.
+
+#### Article configuration
+Used when fetching individual article pages:
+
+- `config.article.content_selector`
+- `config.article.remove_selectors[]`
+
+These define how meaningful content is extracted and how boilerplate is removed.
+
+#### Best‑effort flag
+- `config.best_effort = true`
+- Allows partial ingestion instead of hard failure (e.g. paywalled sites).
+
+### Why config lives in the database
+- Enables per‑source tuning without code changes
+- Allows experimentation and rollback via SQL
+- Makes ingestion behavior auditable and explicit
+- Supports future UI‑based scraper management
+
+### Non‑goals (intentional)
+- Config is not meant to encode complex logic
+- Extremely bespoke sites may still justify custom fetchers
+- The goal is *80–90% coverage via config*, not 100%
+
+---
+
 ## What is intentionally NOT done yet
 
 These are **deliberate deferrals**, not missing features:
