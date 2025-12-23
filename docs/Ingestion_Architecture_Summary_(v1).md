@@ -10,12 +10,7 @@ This is not aspirational — it reflects the *actual implemented state* as of th
 ## High‑level goal
 Localmanac ingests civic and local news content from multiple sources, normalizes it into a consistent schema, deduplicates it, and prepares it for search, analysis, and future AI workflows.
 
-Key design principles:
-- Deterministic ingestion (no opaque agent magic by default)
-- Config‑driven behavior
-- Best‑effort handling of imperfect sources
-- Skip junk instead of poisoning the dataset
-- Preserve provenance (sources, raw HTML)
+As of v1, the ingestion pipeline is complete and stable. Full‑text search has been implemented using Laravel Scout with Meilisearch, enabling fast, city‑scoped retrieval across all ingested content. This search layer now serves as the primary foundation for future chatbot and analysis features.
 
 ---
 
@@ -72,6 +67,32 @@ Status: ✅ Implemented and validated (CommunityVoiceKS)
 
 ---
 
+## Search & indexing (WORKING)
+
+Localmanac now includes a full‑text search layer built on **Laravel Scout + Meilisearch**.
+
+Key characteristics:
+- Articles are the single searchable document type
+- Search is always scoped by `city_id`
+- Indexed content includes:
+  - article title and summary
+  - full body text from `ArticleBody.cleaned_text`
+  - organization and scraper metadata
+  - canonical source URL (for citations)
+
+Indexing behavior:
+- Articles are indexed on creation/update
+- When PDF or OCR extraction completes, the related Article is explicitly re‑indexed
+- This guarantees that delayed OCR text becomes searchable as soon as it is available
+
+Search engine:
+- Meilisearch (local development via native install)
+- Scout handles synchronization between the database and the search index
+
+Status: ✅ Implemented and validated
+
+---
+
 ## Best‑effort philosophy (important)
 
 Some sources (e.g. Bizjournals) are paywalled or partially blocked.
@@ -96,6 +117,8 @@ Note: Bizjournals ingestion technically works, but snippet quality is poor; filt
 ### ArticleBody
 - `raw_html`
 - `cleaned_text`
+
+ArticleBodies may be populated asynchronously (e.g. via OCR jobs for scanned PDFs). When body content is written or updated, the parent Article is re‑indexed so search results always reflect the latest extracted text.
 
 ### ArticleSource
 - Tracks provenance
@@ -306,9 +329,9 @@ Pick one when resuming work:
    - School district news
    - County / board announcements
 
-3. **Search & discovery**
-   - Full‑text search
-   - Facets by city, source, date
+3. **Search & discovery (IN PROGRESS)**
+   - Meilisearch + Scout indexing is implemented
+   - Next steps include relevance tuning, facets, and search‑backed chatbot retrieval
 
 4. **Analysis layer**
    - Summaries
@@ -319,11 +342,6 @@ Pick one when resuming work:
 
 ## Bottom line
 
-As of now, Localmanac has a **complete, working ingestion foundation** that:
-- handles multiple content types
-- avoids brittle site‑specific hacks
-- preserves raw source data
-- produces searchable text
+As of now, Localmanac has a **complete and production‑grade ingestion foundation** and a **working full‑text search layer**. All ingested content — regardless of whether it originated from RSS, HTML, PDF, or OCR — is normalized into Articles and made searchable on a per‑city basis.  
 
-This is the hardest part of the system — and it’s done.
-
+This establishes a solid base for the next phase: conversational search and city‑scoped question answering.
