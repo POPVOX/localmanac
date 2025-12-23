@@ -29,6 +29,10 @@
   - [ ] article_mentions_person
   - [ ] article_mentions_org
   - [ ] article_issue_area
+- [ ] Add indexes/constraints for claims:
+  - [ ] index on (article_id, claim_type)
+  - [ ] index on (city_id, claim_type)
+  - [ ] optional: unique guard for (article_id, claim_type, subject_type, subject_id, value_hash)
 
 ## Milestone 2 — Ingestion pipeline (no AI yet)
 - [x] Create `scrapers` + `scraper_runs`
@@ -44,24 +48,43 @@
 - [x] Add a command: `php artisan scrape:run {scraper}`
 
 ## Milestone 3 — Extraction v1 (text + OCR, claims later)
-- [x] Implement PDF text extraction + OCR fallback
+- [x] Implement PDF text extraction + OCR fallback 
 - [x] Persist extracted full text to ArticleBody.cleaned_text
-- [ ] Implement `Extraction\Extractor` (start heuristic; AI later)
-- [ ] Implement `Extraction\ClaimWriter`
-- [ ] Add command: `php artisan extract:article {id}`
-- [ ] Ensure extraction never writes “facts” directly (claims only)
+- [x] Implement `Extraction\Extractor` (start heuristic; AI later)
+- [x] Implement `Extraction\ClaimWriter`
+- [x] Add command: `php artisan extract:article {id}`
+- [x] Ensure extraction never writes “facts” directly (claims only)
+
+### Structured enrichment (entities + keywords + issue areas)
+- [x] Implement `Extraction\Enricher` (LLM; structured JSON output)
+  - [x] People extraction (name + role/title if present + evidence spans)
+  - [x] Organization extraction (name + type guess + evidence spans)
+  - [x] Location extraction (name/address if present + evidence spans)
+  - [x] Keyword/topic extraction (normalized keywords + evidence spans)
+  - [x] Issue area suggestions (map to `issue_areas` slugs + evidence)
+- [x] Persist enrichment outputs as Claims (never directly on Articles)
+  - [x] Use `claims` as the source of truth (with evidence spans + confidence + provenance)
+  - [x] Add `Extraction\ClaimWriter` and write claims for people/orgs/locations/keywords/issue areas
+- [x] Add projection tables (derived from Claims; optional but useful for UI/search)
+  - [x] `article_entities` (article_id, entity_type, entity_id, confidence, source)
+  - [x] `article_issue_areas` (article_id, issue_area_id, confidence, source)
+  - [x] `keywords` (city_id, name, slug) + unique (city_id, slug)
+  - [x] `article_keywords` (article_id, keyword_id, confidence, source)
+- [x] Implement `Extraction\ProjectionWriter` to upsert projection tables from approved/high-confidence claims
+- [x] Dispatch enrichment automatically after `ArticleBody.cleaned_text` is written (post-extraction), with dedicated queue isolation (e.g. `enrichment`)
 
 ## Milestone 3.5 — Analysis layer (summaries, tagging, civic relevance scoring)
-- [ ] Create `article_analyses` table (dimension scores + final score + provenance + status)
-- [ ] Implement Phase 1 heuristic scoring (fast, deterministic)
-  - [ ] reading level / jargon density
-  - [ ] timeliness (future dates, deadlines)
-  - [ ] agency signals (calls to action, comment periods, meetings)
-  - [ ] source type classification (gov/news/nonprofit/etc.)
-- [ ] Implement Phase 2 LLM scoring for high-value content (store model + prompt_version + confidence)
-- [ ] Compute weighted `civic_relevance_score` using the framework dimensions
-- [ ] Persist extracted opportunities (dates/locations/URLs) for UI + chatbot
-- [ ] Add minimal feedback capture (helpful/not helpful) for later calibration
+- [x] Create `article_analyses` table (dimension scores + final score + provenance + status)
+- [x] Implement Phase 1 heuristic scoring (fast, deterministic)
+  - [x] reading level / jargon density
+  - [x] timeliness (future dates, deadlines)
+  - [x] agency signals (calls to action, comment periods, meetings)
+  - [x] source type classification (gov/news/nonprofit/etc.)
+- [x] Implement Phase 2 LLM scoring for high-value content (store model + prompt_version + confidence)
+- [x] Compute weighted `civic_relevance_score` using the framework dimensions
+- [x] Persist extracted opportunities (dates/locations/URLs) for UI + chatbot
+- [x] Add minimal feedback capture (helpful/not helpful) for later calibration
+- [x] Analysis + enrichment executed via a single LLM call per article (Prism-powered)
 
 ## Milestone 4 — Resolution v1 (aliases-first)
 - [ ] Implement `Resolution\EntityResolver`:
@@ -91,8 +114,9 @@
 
 ## Milestone 7 — Admin UI (IN PROGRESS)
 - [x] Scraper management UI
-- [ ] Claim review UI (approve/reject)
-- [ ] Alias management UI
+- [ ] Claim review UI (pending)
+- [ ] Article enrichment UI (pending)
+- [ ] Alias management UI (pending)
 
 ## Definition of Done (v1)
 - [x] One city seeded

@@ -2,6 +2,7 @@
 
 namespace App\Services\Ingestion;
 
+use App\Jobs\EnrichArticle;
 use App\Models\Article;
 use App\Models\ArticleBody;
 use App\Models\ArticleSource;
@@ -41,6 +42,7 @@ class ArticleWriter
             $article->save();
 
             $articleBody = $item['body'] ?? null;
+            $shouldAnalyze = false;
 
             if (is_array($articleBody) && $articleBody !== []) {
                 $cleanedText = $articleBody['cleaned_text'] ?? null;
@@ -66,6 +68,7 @@ class ArticleWriter
                 );
 
                 $shouldReindex = true;
+                $shouldAnalyze = is_string($cleanedText) && trim($cleanedText) !== '';
             }
 
             ArticleSource::updateOrCreate(
@@ -82,10 +85,16 @@ class ArticleWriter
                 ]
             );
 
-            if ($shouldReindex) {
-                DB::afterCommit(function () use ($article) {
-                    $article->load(['body', 'sources', 'scraper']);
-                    $article->searchable();
+            if ($shouldReindex || $shouldAnalyze) {
+                DB::afterCommit(function () use ($article, $shouldReindex, $shouldAnalyze) {
+                    if ($shouldReindex) {
+                        $article->load(['body', 'sources', 'scraper']);
+                        $article->searchable();
+                    }
+
+                    if ($shouldAnalyze && config('enrichment.enabled', true)) {
+                        EnrichArticle::dispatch($article->id);
+                    }
                 });
             }
 

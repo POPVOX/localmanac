@@ -45,6 +45,16 @@ class Article extends Model
         return $this->hasOne(ArticleBody::class);
     }
 
+    public function analysis(): HasOne
+    {
+        return $this->hasOne(ArticleAnalysis::class);
+    }
+
+    public function opportunities(): HasMany
+    {
+        return $this->hasMany(ArticleOpportunity::class);
+    }
+
     public function sources(): HasMany
     {
         return $this->hasMany(ArticleSource::class);
@@ -53,6 +63,11 @@ class Article extends Model
     public function scraper(): BelongsTo
     {
         return $this->belongsTo(Scraper::class);
+    }
+
+    public function city(): BelongsTo
+    {
+        return $this->belongsTo(City::class);
     }
 
     public function searchableAs(): string

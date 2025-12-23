@@ -153,6 +153,7 @@ class ExtractPdfBody implements ShouldQueue
             }
 
             $this->reindexArticle($article);
+            $this->dispatchEnrichment($article);
 
             return;
         }
@@ -168,6 +169,7 @@ class ExtractPdfBody implements ShouldQueue
         }
 
         $this->reindexArticle($article);
+        $this->dispatchEnrichment($article);
     }
 
     /**
@@ -383,5 +385,14 @@ class ExtractPdfBody implements ShouldQueue
         $article->load(['body', 'sources', 'scraper']);
 
         $article->searchable();
+    }
+
+    private function dispatchEnrichment(Article $article): void
+    {
+        if (! config('enrichment.enabled', true)) {
+            return;
+        }
+
+        EnrichArticle::dispatch($article->id);
     }
 }

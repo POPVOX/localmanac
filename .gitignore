@@ -23,3 +23,14 @@ yarn-error.log
 /.zed
 organizations.csv
 scrapers.csv
+
+# IDE / agent tooling
+.cursor/
+.junie/
+data.ms/
+.mcp.json
+
+# AI agent artifacts (project-local, not app behavior)
+AGENTS.md
+CLAUDE.md
+boost.json
