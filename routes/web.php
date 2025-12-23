@@ -1,5 +1,13 @@
 <?php
 
+use App\Livewire\Admin\Cities\Form as CitiesForm;
+use App\Livewire\Admin\Cities\Index as CitiesIndex;
+use App\Livewire\Admin\Dashboard as AdminDashboard;
+use App\Livewire\Admin\Organizations\Form as OrganizationsForm;
+use App\Livewire\Admin\Organizations\Index as OrganizationsIndex;
+use App\Livewire\Admin\Scrapers\Form as ScrapersForm;
+use App\Livewire\Admin\Scrapers\Index as ScrapersIndex;
+use App\Livewire\Admin\Scrapers\Show as ScrapersShow;
 use Illuminate\Support\Facades\Route;
 use Laravel\Fortify\Features;
 use Livewire\Volt\Volt;
@@ -7,10 +15,6 @@ use Livewire\Volt\Volt;
 Route::get('/', function () {
     return view('welcome');
 })->name('home');
-
-Route::view('dashboard', 'dashboard')
-    ->middleware(['auth', 'verified'])
-    ->name('dashboard');
 
 Route::middleware(['auth'])->group(function () {
     Route::redirect('settings', 'settings/profile');
@@ -29,4 +33,23 @@ Route::middleware(['auth'])->group(function () {
             ),
         )
         ->name('two-factor.show');
+});
+
+Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
+    Route::get('dashboard', AdminDashboard::class)->name('dashboard');
+
+    Route::prefix('admin')->as('admin.')->group(function () {
+        Route::get('cities', CitiesIndex::class)->name('cities.index');
+        Route::get('cities/create', CitiesForm::class)->name('cities.create');
+        Route::get('cities/{city}/edit', CitiesForm::class)->name('cities.edit');
+
+        Route::get('organizations', OrganizationsIndex::class)->name('organizations.index');
+        Route::get('organizations/create', OrganizationsForm::class)->name('organizations.create');
+        Route::get('organizations/{organization}/edit', OrganizationsForm::class)->name('organizations.edit');
+
+        Route::get('scrapers', ScrapersIndex::class)->name('scrapers.index');
+        Route::get('scrapers/create', ScrapersForm::class)->name('scrapers.create');
+        Route::get('scrapers/{scraper}/edit', ScrapersForm::class)->name('scrapers.edit');
+        Route::get('scrapers/{scraper}', ScrapersShow::class)->name('scrapers.show');
+    });
 });

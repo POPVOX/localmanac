@@ -25,6 +25,7 @@ class ImportScrapers extends Command
 
         if (! $city) {
             $this->error("City '{$cityOption}' not found.");
+
             return self::FAILURE;
         }
 
@@ -32,6 +33,7 @@ class ImportScrapers extends Command
 
         if (! is_readable($path)) {
             $this->error("File '{$path}' not found or not readable.");
+
             return self::FAILURE;
         }
 
@@ -39,6 +41,7 @@ class ImportScrapers extends Command
 
         if (! $handle) {
             $this->error("Unable to open '{$path}'.");
+
             return self::FAILURE;
         }
 
@@ -58,6 +61,7 @@ class ImportScrapers extends Command
             if (! $name) {
                 $skipped++;
                 $this->recordSkip($skippedDetails, 'missing-name');
+
                 continue;
             }
 
@@ -67,6 +71,7 @@ class ImportScrapers extends Command
 
             $payload = [
                 'city_id' => $city->id,
+                'organization_id' => $data['organization_id'] ?? null,
                 'name' => $name,
                 'slug' => $slug,
                 'type' => $this->mapType($data['scrape_type'] ?? null),
@@ -123,8 +128,8 @@ class ImportScrapers extends Command
     }
 
     /**
-     * @param array<int, string>|false $headers
-     * @param array<int, string> $row
+     * @param  array<int, string>|false  $headers
+     * @param  array<int, string>  $row
      * @return array<string, string|null>
      */
     private function rowToAssoc($headers, array $row): array

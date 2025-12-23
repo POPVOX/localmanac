@@ -17,6 +17,7 @@ class Deduplicator
 
         $source = $item['source'] ?? [];
         $url = $item['canonical_url'] ?? ($source['source_url'] ?? null);
+        $sourceUrl = $source['source_url'] ?? null;
         $sourceUid = $source['source_uid'] ?? null;
         $contentHash = $item['content_hash'] ?? null;
 
@@ -27,6 +28,21 @@ class Deduplicator
 
             if ($byUrl) {
                 return $byUrl;
+            }
+        }
+
+        if ($sourceUrl) {
+            $bySourceUrl = Article::query()
+                ->select('articles.*')
+                ->join('article_sources', 'article_sources.article_id', '=', 'articles.id')
+                ->where('articles.city_id', $cityId)
+                ->where('article_sources.city_id', $cityId)
+                ->where('article_sources.source_url', $sourceUrl)
+                ->orderBy('articles.id')
+                ->first();
+
+            if ($bySourceUrl) {
+                return $bySourceUrl;
             }
         }
 

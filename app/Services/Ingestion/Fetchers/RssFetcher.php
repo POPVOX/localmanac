@@ -44,7 +44,7 @@ class RssFetcher
         $items = [];
         $lang = $scraper->config['lang'] ?? 'en';
         $defaultContentType = $scraper->config['default_content_type'] ?? 'news';
-        $organizationId = $scraper->config['organization_id'] ?? null;
+        $organizationId = $scraper->organization_id ?? ($scraper->config['organization_id'] ?? null);
         $maxItems = (int) ($scraper->config['max_items'] ?? 50);
         $accessedAt = now();
 

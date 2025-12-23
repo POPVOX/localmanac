@@ -23,7 +23,8 @@ class ArticleWriter
         }
 
         return DB::transaction(function () use ($item, $existing, $cityId, $title, $source, $sourceUrl) {
-            $article = $existing ?? new Article();
+            $article = $existing ?? new Article;
+            $shouldReindex = false;
 
             $article->fill([
                 'city_id' => $cityId,
@@ -39,24 +40,33 @@ class ArticleWriter
 
             $article->save();
 
-            $articleBody = $item['body'] ?? [];
+            $articleBody = $item['body'] ?? null;
 
-            // If no summary was provided, derive a short one from extracted cleaned text.
-            if (empty($article->summary) && ! empty($articleBody['cleaned_text']) && is_string($articleBody['cleaned_text'])) {
-                $article->summary = Str::limit(trim($articleBody['cleaned_text']), 200);
-                $article->save();
+            if (is_array($articleBody) && $articleBody !== []) {
+                $cleanedText = $articleBody['cleaned_text'] ?? null;
+
+                if (empty($article->summary) && is_string($cleanedText) && trim($cleanedText) !== '') {
+                    $article->summary = Str::limit(trim($cleanedText), 200);
+                    $article->save();
+                }
+
+                $extractedAt = array_key_exists('extracted_at', $articleBody)
+                    ? $articleBody['extracted_at']
+                    : now();
+
+                ArticleBody::updateOrCreate(
+                    ['article_id' => $article->id],
+                    [
+                        'raw_text' => $articleBody['raw_text'] ?? null,
+                        'cleaned_text' => $cleanedText,
+                        'raw_html' => $articleBody['raw_html'] ?? null,
+                        'lang' => $articleBody['lang'] ?? 'en',
+                        'extracted_at' => $extractedAt,
+                    ]
+                );
+
+                $shouldReindex = true;
             }
-
-            ArticleBody::updateOrCreate(
-                ['article_id' => $article->id],
-                [
-                    'raw_text' => $articleBody['raw_text'] ?? null,
-                    'cleaned_text' => $articleBody['cleaned_text'] ?? null,
-                    'raw_html' => $articleBody['raw_html'] ?? null,
-                    'lang' => $articleBody['lang'] ?? 'en',
-                    'extracted_at' => now(),
-                ]
-            );
 
             ArticleSource::updateOrCreate(
                 [
@@ -71,6 +81,13 @@ class ArticleWriter
                     'accessed_at' => $source['accessed_at'] ?? now(),
                 ]
             );
+
+            if ($shouldReindex) {
+                DB::afterCommit(function () use ($article) {
+                    $article->load(['body', 'sources', 'scraper']);
+                    $article->searchable();
+                });
+            }
 
             return $article;
         });

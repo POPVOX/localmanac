@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ScraperRun extends Model
 {
@@ -33,4 +34,14 @@ class ScraperRun extends Model
         'finished_at' => 'datetime',
         'meta' => 'array',
     ];
+
+    public function scraper(): BelongsTo
+    {
+        return $this->belongsTo(Scraper::class);
+    }
+
+    public function city(): BelongsTo
+    {
+        return $this->belongsTo(City::class);
+    }
 }

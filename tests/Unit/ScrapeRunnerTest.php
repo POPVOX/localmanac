@@ -41,13 +41,13 @@ it('runs successfully and counts created items', function () {
     ]];
 
     $fetcher = M::mock(RssFetcher::class);
-    $fetcher->shouldReceive('fetch')->once()->with($scraper)->andReturn($items);
+    $fetcher->shouldReceive('fetch')->once()->withArgs(fn (Scraper $runScraper): bool => $runScraper->is($scraper))->andReturn($items);
 
     $deduplicator = M::mock(Deduplicator::class);
     $deduplicator->shouldReceive('findExisting')->once()->andReturnNull();
 
     $writer = M::mock(ArticleWriter::class);
-    $writer->shouldReceive('write')->once()->andReturn(new Article());
+    $writer->shouldReceive('write')->once()->andReturn(new Article);
 
     $runner = new ScrapeRunner($deduplicator, $writer, $fetcher);
 
