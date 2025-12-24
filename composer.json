@@ -10,6 +10,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "aws/aws-sdk-php": "^3.369",
         "http-interop/http-factory-guzzle": "^1.2",
         "laravel/fortify": "^1.30",
         "laravel/framework": "^12.0",
