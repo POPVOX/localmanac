@@ -133,7 +133,7 @@
         <flux:toast />
 
         <script>
-            const showFluxToast = (rawDetail) => {
+            window.showFluxToast = window.showFluxToast ?? ((rawDetail) => {
                 const detail = rawDetail ?? {};
                 const message = detail.message ?? detail.text;
 
@@ -172,16 +172,18 @@
                         duration: options.duration,
                     },
                 }));
-            };
-
-            window.addEventListener('toast', (event) => {
-                showFluxToast(event.detail);
             });
 
-            @if (session()->has('toast'))
-                window.addEventListener('load', () => {
-                    showFluxToast(@json(session()->pull('toast')));
+            if (! window.__fluxToastListenerRegistered) {
+                window.addEventListener('toast', (event) => {
+                    window.showFluxToast(event.detail);
                 });
+
+                window.__fluxToastListenerRegistered = true;
+            }
+
+            @if (session()->has('toast'))
+                window.showFluxToast(@json(session()->pull('toast')));
             @endif
         </script>
         
