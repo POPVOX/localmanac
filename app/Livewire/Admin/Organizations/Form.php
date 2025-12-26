@@ -34,6 +34,8 @@ class Form extends Component
 
     public string $type = 'government';
 
+    public bool $shouldSyncSlugWithName = true;
+
     public ?string $website = null;
 
     public ?string $description = null;
@@ -56,9 +58,16 @@ class Form extends Component
 
     public function updatedName(string $value): void
     {
-        if ($this->slug === '' || ($this->organization && $this->slug === $this->organization->slug)) {
-            $this->slug = Str::slug($value);
+        if (! $this->shouldSyncSlugWithName) {
+            return;
         }
+
+        $this->slug = Str::slug($value);
+    }
+
+    public function updatedSlug(string $value): void
+    {
+        $this->shouldSyncSlugWithName = $value === '';
     }
 
     public function save(): RedirectResponse|Redirector|null
