@@ -5,6 +5,7 @@ namespace App\Livewire\Admin\Organizations;
 use App\Models\City;
 use App\Models\Organization;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Routing\Redirector;
 use Illuminate\Support\Str;
@@ -72,10 +73,11 @@ class Form extends Component
 
     public function save(): RedirectResponse|Redirector|null
     {
+        $this->slug = Str::slug($this->slug);
+
         try {
             $payload = $this->validate($this->rules());
             $payload['city_id'] = (int) $payload['cityId'];
-            $payload['slug'] = Str::slug($payload['slug']);
             unset($payload['cityId']);
 
             $isUpdating = $this->organization !== null;
@@ -92,6 +94,30 @@ class Form extends Component
             ]);
         } catch (ValidationException $exception) {
             throw $exception;
+        } catch (QueryException $exception) {
+            if ($this->isConstraintViolation($exception, '23505', 'organizations_city_id_slug_unique')) {
+                throw ValidationException::withMessages([
+                    'slug' => __('An organization with this slug already exists for the selected city.'),
+                ]);
+            }
+
+            if ($this->isConstraintViolation($exception, '23503', 'organizations_city_id_foreign')) {
+                throw ValidationException::withMessages([
+                    'cityId' => __('The selected city is invalid.'),
+                ]);
+            }
+
+            if ($this->isConstraintViolation($exception, '23514', 'organizations_type_check')) {
+                throw ValidationException::withMessages([
+                    'type' => __('The selected type is invalid.'),
+                ]);
+            }
+
+            report($exception);
+
+            $this->dispatchToast(__('Unable to save organization'), 'danger');
+
+            return null;
         } catch (Throwable $exception) {
             report($exception);
 
@@ -138,5 +164,16 @@ class Form extends Component
     private function dispatchToast(string $message, string $variant = 'success'): void
     {
         $this->dispatch('toast', message: $message, variant: $variant);
+    }
+
+    private function isConstraintViolation(QueryException $exception, string $sqlState, string $constraint): bool
+    {
+        $state = $exception->errorInfo[0] ?? null;
+
+        if ($state !== $sqlState) {
+            return false;
+        }
+
+        return str_contains($exception->getMessage(), $constraint);
     }
 }
