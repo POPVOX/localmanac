@@ -130,63 +130,73 @@
             {{ $slot }}
         </flux:main>
 
-        <flux:toast />
+        @persist('toast')
+            <flux:toast />
+        @endpersist
+
+        @fluxScripts
 
         <script>
-            window.showFluxToast = window.showFluxToast ?? ((rawDetail) => {
-                const detail = rawDetail ?? {};
-                const message = detail.message ?? detail.text;
+            (function () {
+                window.showFluxToast = window.showFluxToast ?? ((rawDetail) => {
+                    const detail = rawDetail ?? {};
+                    const message = detail.message ?? detail.text;
 
-                if (! message) {
-                    return;
-                }
+                    if (! message) {
+                        return;
+                    }
 
-                const options = {
-                    heading: detail.heading ?? null,
-                    variant: detail.variant ?? detail.type ?? 'success',
-                    duration: detail.duration ?? 5000,
-                    position: detail.position ?? null,
-                };
+                    const options = {
+                        heading: detail.heading ?? null,
+                        variant: detail.variant ?? detail.type ?? 'success',
+                        duration: detail.duration ?? 5000,
+                        position: detail.position ?? null,
+                    };
 
-                if (window.Flux?.toast) {
-                    window.Flux.toast(message, {
-                        heading: options.heading ?? undefined,
-                        variant: options.variant ?? undefined,
-                        duration: options.duration,
-                        position: options.position ?? undefined,
-                    });
+                    if (window.Flux?.toast) {
+                        window.Flux.toast(message, {
+                            heading: options.heading ?? undefined,
+                            variant: options.variant ?? undefined,
+                            duration: options.duration,
+                            position: options.position ?? undefined,
+                        });
 
-                    return;
-                }
+                        return;
+                    }
 
-                document.dispatchEvent(new CustomEvent('toast-show', {
-                    detail: {
-                        slots: {
-                            text: message,
-                            ...(options.heading ? { heading: options.heading } : {}),
+                    document.dispatchEvent(new CustomEvent('toast-show', {
+                        detail: {
+                            slots: {
+                                text: message,
+                                ...(options.heading ? { heading: options.heading } : {}),
+                            },
+                            dataset: {
+                                ...(options.variant ? { variant: options.variant } : {}),
+                                ...(options.position ? { position: options.position } : {}),
+                            },
+                            duration: options.duration,
                         },
-                        dataset: {
-                            ...(options.variant ? { variant: options.variant } : {}),
-                            ...(options.position ? { position: options.position } : {}),
-                        },
-                        duration: options.duration,
-                    },
-                }));
-            });
-
-            if (! window.__fluxToastListenerRegistered) {
-                window.addEventListener('toast', (event) => {
-                    window.showFluxToast(event.detail);
+                    }));
                 });
 
-                window.__fluxToastListenerRegistered = true;
-            }
+                if (! window.__fluxToastListenerRegistered) {
+                    window.addEventListener('toast', (event) => {
+                        window.showFluxToast(event.detail);
+                    });
 
-            @if (session()->has('toast'))
-                window.showFluxToast(@json(session()->pull('toast')));
-            @endif
+                    window.__fluxToastListenerRegistered = true;
+                }
+
+                const flashToast = @json(session()->pull('toast'));
+
+                if (! flashToast) {
+                    return;
+                }
+
+                document.addEventListener('livewire:navigated', () => {
+                    window.showFluxToast(flashToast);
+                }, { once: true });
+            })();
         </script>
-        
-        @fluxScripts
     </body>
 </html>
