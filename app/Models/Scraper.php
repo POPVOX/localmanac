@@ -12,6 +12,8 @@ class Scraper extends Model
 {
     use HasFactory;
 
+    public const DEFAULT_RUN_AT = '08:00';
+
     /**
      * @var list<string>
      */
@@ -25,6 +27,9 @@ class Scraper extends Model
         'config',
         'is_enabled',
         'schedule_cron',
+        'frequency',
+        'run_at',
+        'run_day_of_week',
     ];
 
     /**
@@ -33,6 +38,9 @@ class Scraper extends Model
     protected $casts = [
         'config' => 'array',
         'is_enabled' => 'boolean',
+        'frequency' => 'string',
+        'run_at' => 'string',
+        'run_day_of_week' => 'integer',
     ];
 
     public function city(): BelongsTo
@@ -53,5 +61,13 @@ class Scraper extends Model
     public function latestRun(): HasOne
     {
         return $this->hasOne(ScraperRun::class)->latestOfMany();
+    }
+
+    public function latestSuccessfulRun(): HasOne
+    {
+        return $this->hasOne(ScraperRun::class)
+            ->where('status', 'success')
+            ->whereNotNull('finished_at')
+            ->latestOfMany('finished_at');
     }
 }

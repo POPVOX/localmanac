@@ -51,6 +51,7 @@ it('validates config JSON before saving', function () {
         ->set('slug', 'broken-scraper')
         ->set('cityId', $city->id)
         ->set('sourceUrl', 'https://example.com/feed')
+        ->set('frequency', 'hourly')
         ->set('config', '{invalid')
         ->call('save')
         ->assertHasErrors(['config']);
@@ -77,6 +78,8 @@ it('stores a valid JSON config as an array', function () {
         ->set('slug', 'valid-scraper')
         ->set('cityId', $city->id)
         ->set('sourceUrl', 'https://example.com/feed')
+        ->set('frequency', 'daily')
+        ->set('runAt', '08:30')
         ->set('config', $configJson)
         ->call('save')
         ->assertHasNoErrors()
@@ -90,12 +93,34 @@ it('stores a valid JSON config as an array', function () {
         ->and(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'insert into "scrapers"')))->toBeTrue()
         ->and($component->get('scraper')?->is($scraper))->toBeTrue()
         ->and($scraper?->source_url)->toBe('https://example.com/feed')
+        ->and($scraper?->frequency)->toBe('daily')
+        ->and($scraper?->run_at)->toBe('08:30')
         ->and($scraper?->config)->toBe([
             'profile' => 'generic_listing',
             'list' => [
                 'link_selector' => 'article a',
             ],
         ]);
+});
+
+it('defaults run at time when left blank', function () {
+    $user = User::factory()->create();
+    $city = City::create(['name' => 'Default City', 'slug' => 'default-city']);
+
+    Livewire::actingAs($user)->test(ScraperForm::class)
+        ->set('name', 'Default Time Scraper')
+        ->set('slug', 'default-time-scraper')
+        ->set('cityId', $city->id)
+        ->set('sourceUrl', 'https://example.com/default-time')
+        ->set('frequency', 'daily')
+        ->set('runAt', '')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $scraper = Scraper::first();
+
+    expect($scraper)->not->toBeNull()
+        ->and($scraper?->run_at)->toBe(Scraper::DEFAULT_RUN_AT);
 });
 
 it('clears stray config when resetConfigField is invoked for new scrapers', function () {

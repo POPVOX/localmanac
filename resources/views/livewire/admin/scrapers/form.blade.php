@@ -62,6 +62,40 @@
                 />
             </div>
 
+            <div class="grid gap-4 md:grid-cols-3">
+                <flux:select wire:model.live="frequency" :label="__('Frequency')" required>
+                    @foreach ($frequencies as $frequencyOption)
+                        <option value="{{ $frequencyOption }}">{{ ucfirst($frequencyOption) }}</option>
+                    @endforeach
+                </flux:select>
+
+                @if ($frequency === 'daily')
+                    <flux:input
+                        wire:model.live="runAt"
+                        :label="__('Run time')"
+                        type="time"
+                        step="60"
+                        helper="{{ __('Defaults to :time if left blank.', ['time' => $defaultRunAt]) }}"
+                        class="md:col-span-2"
+                    />
+                @elseif ($frequency === 'weekly')
+                    <flux:select wire:model.live="runDayOfWeek" :label="__('Day of week')" required>
+                        <option value="">{{ __('Select a day') }}</option>
+                        @foreach ($weekdays as $value => $label)
+                            <option value="{{ $value }}">{{ $label }}</option>
+                        @endforeach
+                    </flux:select>
+
+                    <flux:input
+                        wire:model.live="runAt"
+                        :label="__('Run time')"
+                        type="time"
+                        step="60"
+                        helper="{{ __('Defaults to :time if left blank.', ['time' => $defaultRunAt]) }}"
+                    />
+                @endif
+            </div>
+
             <div class="flex items-center gap-3">
                 <flux:switch wire:model.live="isActive" :label="__('Active')" />
                 <flux:text variant="subtle">{{ __('Inactive scrapers will be skipped until re-enabled.') }}</flux:text>

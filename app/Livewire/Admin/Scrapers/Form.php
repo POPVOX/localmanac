@@ -5,6 +5,7 @@ namespace App\Livewire\Admin\Scrapers;
 use App\Models\City;
 use App\Models\Organization;
 use App\Models\Scraper;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Str;
@@ -18,6 +19,18 @@ use Throwable;
 class Form extends Component
 {
     private const TYPES = ['rss', 'html', 'json'];
+
+    private const FREQUENCIES = ['hourly', 'daily', 'weekly'];
+
+    private const WEEKDAYS = [
+        0 => 'Sunday',
+        1 => 'Monday',
+        2 => 'Tuesday',
+        3 => 'Wednesday',
+        4 => 'Thursday',
+        5 => 'Friday',
+        6 => 'Saturday',
+    ];
 
     public ?Scraper $scraper = null;
 
@@ -34,6 +47,12 @@ class Form extends Component
     public string $sourceUrl = '';
 
     public bool $isActive = true;
+
+    public string $frequency = 'daily';
+
+    public ?string $runAt = null;
+
+    public ?int $runDayOfWeek = null;
 
     public string $config = '';
 
@@ -52,10 +71,17 @@ class Form extends Component
             $this->type = $this->scraper->type;
             $this->sourceUrl = $this->scraper->source_url ?? '';
             $this->isActive = (bool) $this->scraper->is_enabled;
+            $this->frequency = $this->scraper->frequency ?? 'daily';
+            $this->runAt = $this->formatRunAt($this->scraper->run_at);
+            if ($this->runAt === null && in_array($this->frequency, ['daily', 'weekly'], true)) {
+                $this->runAt = Scraper::DEFAULT_RUN_AT;
+            }
+            $this->runDayOfWeek = $this->scraper->run_day_of_week;
             $this->config = $this->prettyPrintConfig($decodedConfig);
             $this->slugManuallySet = true;
         } else {
             $this->cityId = City::query()->orderBy('name')->value('id');
+            $this->runAt = Scraper::DEFAULT_RUN_AT;
             $this->config = '';
             $this->slugManuallySet = false;
         }
@@ -71,6 +97,17 @@ class Form extends Component
     public function updatedSlug(): void
     {
         $this->slugManuallySet = true;
+    }
+
+    public function updatedFrequency(string $value): void
+    {
+        if (! in_array($value, ['daily', 'weekly'], true)) {
+            return;
+        }
+
+        if ($this->runAt === null || trim($this->runAt) === '') {
+            $this->runAt = Scraper::DEFAULT_RUN_AT;
+        }
     }
 
     public function applyTemplate(string $template): void
@@ -117,13 +154,20 @@ class Form extends Component
     {
         try {
             $payload = $this->validate($this->rules());
+            if (in_array($payload['frequency'], ['daily', 'weekly'], true) && $this->isBlank($payload['runAt'] ?? null)) {
+                $payload['runAt'] = Scraper::DEFAULT_RUN_AT;
+            }
             $config = $this->decodeConfig();
             $payload['city_id'] = (int) $payload['cityId'];
             $payload['organization_id'] = $payload['organizationId'] ?: null;
             $payload['slug'] = Str::slug($payload['slug']);
             $payload['source_url'] = $payload['sourceUrl'];
+            $payload['run_at'] = $this->formatRunAt($payload['runAt']);
+            $payload['run_day_of_week'] = $payload['runDayOfWeek'] !== null ? (int) $payload['runDayOfWeek'] : null;
             $payload['config'] = $this->prepareConfig($config);
+            $payload = $this->normalizeSchedulePayload($payload);
             unset($payload['cityId'], $payload['organizationId'], $payload['sourceUrl']);
+            unset($payload['runAt'], $payload['runDayOfWeek']);
 
             $isUpdating = $this->scraper?->exists === true;
 
@@ -134,7 +178,7 @@ class Form extends Component
             }
 
             return redirect()->route('admin.scrapers.index')->with('toast', [
-                'message' => $isUpdating ? __('Scraper updated') : __('Scraper created'),
+                'message' => $isUpdating ? __('Scraper updated') : __('Scraper saved'),
                 'variant' => 'success',
             ]);
         } catch (ValidationException $exception) {
@@ -157,6 +201,9 @@ class Form extends Component
             'cities' => $cities,
             'organizations' => $organizations,
             'types' => self::TYPES,
+            'frequencies' => self::FREQUENCIES,
+            'weekdays' => self::WEEKDAYS,
+            'defaultRunAt' => Scraper::DEFAULT_RUN_AT,
             'title' => $this->scraper ? __('Edit Scraper') : __('Create Scraper'),
         ])->layout('layouts.admin', [
             'title' => $this->scraper ? __('Edit Scraper') : __('Create Scraper'),
@@ -180,6 +227,17 @@ class Form extends Component
             'type' => ['required', Rule::in(self::TYPES)],
             'sourceUrl' => ['required', 'url', 'max:2000'],
             'isActive' => ['boolean'],
+            'frequency' => ['required', Rule::in(self::FREQUENCIES)],
+            'runAt' => [
+                'nullable',
+                'date_format:H:i',
+            ],
+            'runDayOfWeek' => [
+                'nullable',
+                'integer',
+                'between:0,6',
+                Rule::requiredIf(fn () => $this->frequency === 'weekly'),
+            ],
             'config' => ['nullable', 'string'],
         ];
     }
@@ -297,5 +355,37 @@ class Form extends Component
         if ($this->config !== '') {
             $this->config = '';
         }
+    }
+
+    private function formatRunAt(?string $value): ?string
+    {
+        if ($value === null || trim($value) === '') {
+            return null;
+        }
+
+        return CarbonImmutable::parse($value)->format('H:i');
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function normalizeSchedulePayload(array $payload): array
+    {
+        if (($payload['frequency'] ?? null) === 'hourly') {
+            $payload['run_at'] = null;
+            $payload['run_day_of_week'] = null;
+        }
+
+        if (($payload['frequency'] ?? null) === 'daily') {
+            $payload['run_day_of_week'] = null;
+        }
+
+        return $payload;
+    }
+
+    private function isBlank(?string $value): bool
+    {
+        return $value === null || trim($value) === '';
     }
 }
