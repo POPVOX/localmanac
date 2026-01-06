@@ -93,54 +93,56 @@ The LLM never decides the weights — only the inputs.
 
 ---
 
-## Two-Phase Scoring Strategy
+## Single‑Pass Analysis + Enrichment (Current Model)
 
-### Phase 1 — Heuristic Scoring (Fast, deterministic)
+Localmanac performs **analysis and enrichment in a single LLM call per article**, using a structured Prism-powered prompt.
 
-Runs automatically when an `ArticleBody` is written or updated.
+This single pass produces:
+- Civic relevance dimension scores
+- Justifications per dimension
+- A confidence score
+- Extracted participation opportunities (dates, locations, URLs)
+- Extracted entities, keywords, and issue-area signals (with evidence spans)
 
-Signals include:
+Heuristic signals (e.g. jargon density, deadline detection, process language) are still computed locally, but they are used as:
+- inputs to the LLM prompt
+- fallback signals if LLM analysis is disabled
+- sanity checks and guardrails
 
-- reading level / jargon density
-- detection of future dates or deadlines
-- process language ("public hearing", "comment period", "vote")
-- source type (government, news, nonprofit, etc.)
-
-Outputs:
-
-- rough dimension scores
-- raw signals (counts, dates, matches)
-
-Purpose:
-
-- establish a baseline
-- cheaply identify high-value content
-- support ranking even without LLMs
+They are no longer a separate scoring phase.
 
 ---
 
-### Phase 2 — LLM Scoring (Selective, explainable)
+## Where Analysis & Enrichment Outputs Live
 
-Only runs for **high-value content**, e.g.:
+Outputs from the single analysis/enrichment pass are persisted in distinct, purpose-built structures:
 
-- government sources
-- articles with detected future action
-- articles above a heuristic relevance threshold
+### ArticleAnalysis (`article_analyses`)
+Stores interpretive outputs:
+- civic relevance dimension scores
+- final weighted `civic_relevance_score`
+- justifications and confidence
+- extracted participation opportunities
+- model, prompt_version, score_version, status
 
-The LLM produces:
+This table represents **how the system interprets an article**, not the article’s factual content.
 
-- refined dimension scores
-- short justifications per dimension
-- extracted participation opportunities (dates, locations, URLs)
-- a confidence score
+### Claims (`claims`)
+All extracted facts are written as Claims with:
+- subject / predicate / object or value_json
+- evidence spans (text offsets + quotes)
+- confidence
+- provenance (model, prompt_version)
 
-All outputs are stored with:
+Claims are the **source of truth** for extracted knowledge.
 
-- model name
-- prompt version
-- score version
+### Projection Tables
+Derived from high-confidence claims for efficient use in UI and search:
+- `article_entities`
+- `article_issue_areas`
+- `keywords` + `article_keywords`
 
-No scores are written back to the Article itself.
+Projections may be regenerated from claims at any time.
 
 ---
 
@@ -182,6 +184,9 @@ This keeps search predictable while elevating meaningful civic content.
 ---
 
 ## How Civic Relevance Affects Chatbot Retrieval
+
+The chatbot relies on the same analysis and claims produced during enrichment.
+It does not trigger additional per-article analysis calls at answer time.
 
 The chatbot never searches raw text blindly.
 
@@ -244,9 +249,7 @@ Those are future layers that can be added *on top of this foundation*.
 
 ## Relationship to PLAN.md
 
-This document corresponds directly to:
-
-- **Milestone 3.5 — Analysis layer**
+This document corresponds directly to **Milestone 3 and Milestone 3.5 — Extraction, Enrichment, and Analysis layers**.
 
 Nothing here contradicts the existing plan. It only clarifies *how* that milestone is intended to work.
 
