@@ -16,7 +16,7 @@ function makeCity(): City
 }
 
 it('creates an article with one source', function () {
-    $writer = new ArticleWriter();
+    $writer = new ArticleWriter;
     $city = makeCity();
 
     $writer->write([
@@ -37,7 +37,7 @@ it('creates an article with one source', function () {
 });
 
 it('does not duplicate article sources for the same URL', function () {
-    $writer = new ArticleWriter();
+    $writer = new ArticleWriter;
     $city = makeCity();
 
     $item = [
@@ -52,4 +52,26 @@ it('does not duplicate article sources for the same URL', function () {
     $writer->write($item, $article);
 
     expect(ArticleSource::count())->toBe(1);
+});
+
+it('stores long source uid values', function () {
+    $writer = new ArticleWriter;
+    $city = makeCity();
+    $sourceUid = str_repeat('https://example.com/long-guid/', 15);
+
+    $writer->write([
+        'city_id' => $city->id,
+        'title' => 'Long Source UID Article',
+        'source' => [
+            'source_url' => 'https://example.com/article-long',
+            'source_type' => 'rss',
+            'source_uid' => $sourceUid,
+        ],
+    ]);
+
+    $source = ArticleSource::first();
+
+    expect(strlen($sourceUid))->toBeGreaterThan(255)
+        ->and($source)->not()->toBeNull()
+        ->and($source->source_uid)->toBe($sourceUid);
 });

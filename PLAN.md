@@ -23,16 +23,16 @@
 - [x] Create `role_types` + `roles` (time-scoped)
 - [x] Create `issue_areas` (hierarchy) + `tags`
 
-### Claims (AI outputs as claims — NOT YET IMPLEMENTED)
-- [ ] Create `claims` table (subject/predicate/object/value_json + provenance)
-- [ ] Add enums/constants for the first 3 claim types:
-  - [ ] article_mentions_person
-  - [ ] article_mentions_org
-  - [ ] article_issue_area
-- [ ] Add indexes/constraints for claims:
-  - [ ] index on (article_id, claim_type)
-  - [ ] index on (city_id, claim_type)
-  - [ ] optional: unique guard for (article_id, claim_type, subject_type, subject_id, value_hash)
+### Claims (AI outputs as claims)
+- [x] Create `claims` table (subject/predicate/object/value_json + provenance)
+- [x] Add enums/constants for the first 3 claim types:
+  - [x] article_mentions_person
+  - [x] article_mentions_org
+  - [x] article_issue_area
+- [x] Add indexes/constraints for claims:
+  - [x] index on (article_id, claim_type)
+  - [x] index on (city_id, claim_type)
+  - [x] optional: unique guard for (article_id, claim_type, subject_type, subject_id, value_hash)
 
 ## Milestone 2 — Ingestion pipeline (no AI yet)
 - [x] Create `scrapers` + `scraper_runs`
@@ -47,7 +47,7 @@
 - [x] Add a demo scraper config and seed it
 - [x] Add a command: `php artisan scrape:run {scraper}`
 
-## Milestone 3 — Extraction v1 (text + OCR, claims later)
+## Milestone 3 — Extraction v1 (text + OCR + enrichment)
 - [x] Implement PDF text extraction + OCR fallback 
 - [x] Persist extracted full text to ArticleBody.cleaned_text
 - [x] Implement `Extraction\Extractor` (start heuristic; AI later)
@@ -84,7 +84,7 @@
 - [x] Compute weighted `civic_relevance_score` using the framework dimensions
 - [x] Persist extracted opportunities (dates/locations/URLs) for UI + chatbot
 - [x] Add minimal feedback capture (helpful/not helpful) for later calibration
-- [x] Analysis + enrichment executed via a single LLM call per article (Prism-powered)
+- [x] Analysis + enrichment executed via Prism-powered multi-pass LLM calls (analysis, entities, explainer, projections)
 
 ## Milestone 4 — Resolution v1 (aliases-first)
 - [ ] Implement `Resolution\EntityResolver`:
@@ -101,6 +101,7 @@
 - [x] City-scoped search enforced
 - [ ] Tune Meilisearch filters/sorting (city_id, published_at)
 - [ ] Add a simple search endpoint: `/search?q=...`
+- [ ] Incorporate civic_relevance_score into search reranking
 
 ## Milestone 6 — Q&A v1 (context builder + citations)
 - [ ] Implement `Query\ContextBuilder`:
@@ -123,4 +124,5 @@
 - [x] 2–3 scrapers reliably ingesting
 - [x] Search returns sane results
 - [ ] Ask endpoint answers with citations
-- [ ] Claims exist + can be reviewed
+- [x] Claims exist (persisted + projected)
+- [ ] Claims can be reviewed in UI

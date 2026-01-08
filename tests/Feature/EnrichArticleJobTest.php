@@ -10,7 +10,10 @@ use App\Models\ArticleKeyword;
 use App\Models\City;
 use App\Models\Claim;
 use App\Models\IssueArea;
+use App\Services\Analysis\ArticleExplainerProjector;
+use App\Services\Analysis\CivicActionProjector;
 use App\Services\Analysis\CivicRelevanceCalculator;
+use App\Services\Analysis\ProcessTimelineProjector;
 use App\Services\Analysis\ScoreDimensions;
 use App\Services\Extraction\ClaimWriter;
 use App\Services\Extraction\Enricher;
@@ -95,6 +98,10 @@ it('writes claims and projections when enrichment job runs', function () {
                 ],
             ],
         ],
+        'process_timeline' => [
+            'items' => [],
+            'current_key' => null,
+        ],
         'confidence' => 0.8,
     ];
 
@@ -113,6 +120,9 @@ it('writes claims and projections when enrichment job runs', function () {
         app(Enricher::class),
         app(ClaimWriter::class),
         app(ProjectionWriter::class),
+        app(CivicActionProjector::class),
+        app(ProcessTimelineProjector::class),
+        app(ArticleExplainerProjector::class),
         app(CivicRelevanceCalculator::class)
     );
 
@@ -127,10 +137,14 @@ it('writes claims and projections when enrichment job runs', function () {
 
     $analysis = ArticleAnalysis::first();
     $expectedScore = app(CivicRelevanceCalculator::class)->compute($payload['analysis']['dimensions']);
+    $analysisPayload = array_merge($payload['analysis'], [
+        'process_timeline' => $payload['process_timeline'],
+        'explainer' => null,
+    ]);
 
     expect($analysis)->not->toBeNull()
         ->and($analysis?->status)->toBe('llm_done')
-        ->and($analysis?->llm_scores)->toBe($payload['analysis']);
+        ->and($analysis?->llm_scores)->toBe($analysisPayload);
 
     expect((float) $analysis?->civic_relevance_score)
         ->toBeGreaterThanOrEqual($expectedScore - 0.001)

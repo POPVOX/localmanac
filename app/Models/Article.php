@@ -50,6 +50,11 @@ class Article extends Model
         return $this->hasOne(ArticleAnalysis::class);
     }
 
+    public function explainer(): HasOne
+    {
+        return $this->hasOne(ArticleExplainer::class);
+    }
+
     public function opportunities(): HasMany
     {
         return $this->hasMany(ArticleOpportunity::class);
@@ -58,6 +63,31 @@ class Article extends Model
     public function sources(): HasMany
     {
         return $this->hasMany(ArticleSource::class);
+    }
+
+    public function articleEntities(): HasMany
+    {
+        return $this->hasMany(ArticleEntity::class);
+    }
+
+    public function articleKeywords(): HasMany
+    {
+        return $this->hasMany(ArticleKeyword::class);
+    }
+
+    public function articleIssueAreas(): HasMany
+    {
+        return $this->hasMany(ArticleIssueArea::class);
+    }
+
+    public function civicActions(): HasMany
+    {
+        return $this->hasMany(CivicAction::class)->orderBy('position');
+    }
+
+    public function processTimelineItems(): HasMany
+    {
+        return $this->hasMany(ProcessTimelineItem::class)->orderBy('position');
     }
 
     public function scraper(): BelongsTo
@@ -109,7 +139,7 @@ class Article extends Model
 
         return [
             'id' => (int) $this->id,
-            'city_id' => $this->city_id === null ? null : (int) $this->city_id,
+            'city_id' => (int) $this->city_id,
             'title' => $this->title,
             'summary' => $this->summary,
             'body' => $body,
