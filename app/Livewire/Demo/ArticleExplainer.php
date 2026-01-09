@@ -434,7 +434,7 @@ class ArticleExplainer extends Component
                 'title' => $title,
                 'description' => $title ?? $notes,
                 'location' => $this->stringValue($opportunity->location),
-                'url' => $this->stringValue($opportunity->url),
+                'url' => $this->normalizeUrl($this->stringValue($opportunity->url)),
                 'starts_at' => $startsAt,
                 'ends_at' => $endsAt,
                 'has_time' => $hasTime,
@@ -463,6 +463,7 @@ class ArticleExplainer extends Component
     private function normalizePayloadOpportunities(array $payloadOpportunities): array
     {
         $normalized = [];
+        $timezone = $this->article->city?->timezone ?: config('app.timezone');
 
         foreach ($payloadOpportunities as $opportunity) {
             if (! is_array($opportunity)) {
@@ -475,12 +476,12 @@ class ArticleExplainer extends Component
             $description = $this->stringValue($opportunity['description'] ?? $opportunity['title'] ?? null);
             $title = $this->stringValue($opportunity['title'] ?? null);
             $location = $this->stringValue($opportunity['location'] ?? null);
-            $url = $this->stringValue($opportunity['url'] ?? null);
+            $url = $this->normalizeUrl($this->stringValue($opportunity['url'] ?? null));
             $date = $this->stringValue($opportunity['date'] ?? null);
             $time = $this->stringValue($opportunity['time'] ?? null);
             $hasTime = $time !== null;
 
-            $startsAt = $this->parseOpportunityDate($date, $time)
+            $startsAt = $this->parseOpportunityDate($date, $time, $timezone)
                 ?? $this->parseDateValue($opportunity['starts_at'] ?? null);
             $endsAt = $this->parseDateValue($opportunity['ends_at'] ?? null);
             $sortAt = $startsAt ?? $endsAt;
@@ -501,16 +502,32 @@ class ArticleExplainer extends Component
         return $normalized;
     }
 
-    private function parseOpportunityDate(?string $date, ?string $time): ?Carbon
+    private function parseOpportunityDate(?string $date, ?string $time, string $timezone): ?Carbon
     {
+        if (! $date) {
+            return null;
+        }
+
+        $date = trim($date);
+        $time = $time ? trim($time) : null;
         $input = trim(implode(' ', array_filter([$date, $time])));
 
         if ($input === '') {
             return null;
         }
 
+        $formats = $time ? ['Y-m-d H:i', 'Y-m-d H:i:s', 'Y-m-d g:i A', 'Y-m-d g:i a'] : ['Y-m-d'];
+
+        foreach ($formats as $format) {
+            try {
+                return Carbon::createFromFormat($format, $input, $timezone);
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
         try {
-            return Carbon::parse($input);
+            return Carbon::parse($input, $timezone);
         } catch (\Throwable) {
             return null;
         }
@@ -612,6 +629,21 @@ class ArticleExplainer extends Component
         return $value === '' ? null : $value;
     }
 
+    private function normalizeUrl(?string $value): ?string
+    {
+        if (! $value) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        if ($value === '' || Str::lower($value) === 'null') {
+            return null;
+        }
+
+        return $value;
+    }
+
     private function isDecisionMaker(string $name): bool
     {
         $name = Str::lower($name);
@@ -653,7 +685,7 @@ class ArticleExplainer extends Component
         $startsAt = $opportunity['starts_at'] ?? null;
         $endsAt = $opportunity['ends_at'] ?? null;
         $hasTime = (bool) ($opportunity['has_time'] ?? false);
-        $url = $this->stringValue($opportunity['url'] ?? null);
+        $url = $this->normalizeUrl($this->stringValue($opportunity['url'] ?? null));
 
         if (! is_string($type)) {
             return null;

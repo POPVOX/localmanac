@@ -50,7 +50,7 @@
                         <flux:text class="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
                             {{ __("What's happening") }}
                         </flux:text>
-                        <flux:text class="text-base leading-relaxed text-zinc-900 dark:text-zinc-100">
+                        <flux:text class="leading-relaxed text-zinc-900 dark:text-zinc-100">
                             {{ $whatsHappening ?? (\Illuminate\Support\Str::limit($bodyText, 600) ?: __('Summary unavailable.')) }}
                         </flux:text>
                     </div>
@@ -60,7 +60,7 @@
                             <flux:text class="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
                                 {{ __('Why it matters') }}
                             </flux:text>
-                            <flux:text class="text-base leading-relaxed text-zinc-900 dark:text-zinc-100">
+                            <flux:text class="leading-relaxed text-zinc-900 dark:text-zinc-100">
                                 {{ $whyItMatters }}
                             </flux:text>
                         </div>

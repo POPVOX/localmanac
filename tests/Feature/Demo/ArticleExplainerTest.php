@@ -146,6 +146,42 @@ test('it renders participation badges for public comments', function () {
         ->assertSee('Closes Jan 15');
 });
 
+test('it renders civic action times in the city timezone', function () {
+    $city = City::factory()->create([
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $article = Article::factory()->create([
+        'city_id' => $city->id,
+    ]);
+
+    ArticleBody::factory()->create([
+        'article_id' => $article->id,
+        'cleaned_text' => str_repeat('Cleaned text excerpt. ', 20),
+    ]);
+
+    ArticleAnalysis::factory()->create([
+        'article_id' => $article->id,
+        'final_scores' => [
+            'opportunities' => [
+                [
+                    'type' => 'meeting',
+                    'date' => '2025-10-21',
+                    'time' => '09:00',
+                    'location' => 'City Hall',
+                    'description' => 'Public hearing on the proposal.',
+                ],
+            ],
+        ],
+    ]);
+
+    $response = $this->get(route('demo.articles.show', $article));
+
+    $response->assertOk()
+        ->assertSee('9:00 AM')
+        ->assertDontSee('4:00 AM');
+});
+
 test('it renders the explainer when analysis is missing', function () {
     $article = Article::factory()->create([
         'summary' => 'Summary should not appear.',

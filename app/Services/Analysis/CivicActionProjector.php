@@ -149,7 +149,7 @@ class CivicActionProjector
         $rawType = $this->stringValue($opportunity['type'] ?? $opportunity['kind'] ?? null);
         $normalizedType = $this->normalizeType($rawType);
         $description = $this->stringValue($opportunity['description'] ?? null);
-        $rawUrl = $this->stringValue($opportunity['url'] ?? null);
+        $rawUrl = $this->normalizeUrl($this->stringValue($opportunity['url'] ?? null));
         $kind = $this->classifyKind($normalizedType, $description, $rawUrl);
         $titleAndSubtitle = $this->titleAndSubtitle($kind, $normalizedType, $description, $decisionBody);
         $locationLine = $this->formatLocationLine($this->stringValue($opportunity['location'] ?? null));
@@ -189,7 +189,22 @@ class CivicActionProjector
         $hasTime = $time !== null;
 
         try {
-            $local = Carbon::parse(trim($date.' '.$time), $timezone);
+            $input = trim($date.' '.$time);
+            $formats = $time ? ['Y-m-d H:i', 'Y-m-d H:i:s', 'Y-m-d g:i A', 'Y-m-d g:i a'] : ['Y-m-d'];
+            $local = null;
+
+            foreach ($formats as $format) {
+                try {
+                    $local = Carbon::createFromFormat($format, $input, $timezone);
+                    break;
+                } catch (\Throwable) {
+                    continue;
+                }
+            }
+
+            if (! $local) {
+                $local = Carbon::parse($input, $timezone);
+            }
 
             if (! $hasTime) {
                 $local = $local->setTime(12, 0);
@@ -201,6 +216,21 @@ class CivicActionProjector
 
             return null;
         }
+    }
+
+    private function normalizeUrl(?string $value): ?string
+    {
+        if (! $value) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        if ($value === '' || Str::lower($value) === 'null') {
+            return null;
+        }
+
+        return $value;
     }
 
     private function badgeText(string $kind, ?Carbon $startsAt, bool $hasTime, string $timezone): ?string
