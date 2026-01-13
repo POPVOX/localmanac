@@ -30,8 +30,11 @@ class EventWriter
             throw new InvalidArgumentException('Event starts_at is required');
         }
 
+        $locationName = $this->sanitizeLocation($event->locationName);
+        $locationAddress = $this->sanitizeLocation($event->locationAddress);
+
         $normalizedTitle = $this->normalizer->normalizeTitle($title);
-        $normalizedLocation = $this->normalizer->normalizeLocation($event->locationName, $event->locationAddress);
+        $normalizedLocation = $this->normalizer->normalizeLocation($locationName, $locationAddress);
         $startsAtUtc = $startsAt->copy()->utc()->format('Y-m-d H:i:s');
         $sourceHash = $this->resolveSourceHash($event, $cityId, $normalizedTitle, $normalizedLocation, $startsAtUtc);
 
@@ -41,7 +44,7 @@ class EventWriter
             $source->source_url
         );
 
-        return DB::transaction(function () use ($source, $event, $cityId, $title, $sourceHash, $eventUrl, $sourceUrl) {
+        return DB::transaction(function () use ($source, $event, $cityId, $title, $sourceHash, $eventUrl, $sourceUrl, $locationName, $locationAddress) {
             $model = Event::updateOrCreate(
                 ['source_hash' => $sourceHash],
                 [
@@ -50,8 +53,8 @@ class EventWriter
                     'starts_at' => $event->startsAt,
                     'ends_at' => $event->endsAt,
                     'all_day' => $event->allDay,
-                    'location_name' => $event->locationName,
-                    'location_address' => $event->locationAddress,
+                    'location_name' => $locationName,
+                    'location_address' => $locationAddress,
                     'description' => $event->description,
                     'event_url' => $eventUrl,
                 ]
@@ -107,5 +110,17 @@ class EventWriter
         }
 
         return sha1($value);
+    }
+
+    private function sanitizeLocation(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $cleaned = str_replace('\\', '', $value);
+        $cleaned = trim(preg_replace('/\s+/', ' ', $cleaned) ?? '');
+
+        return $cleaned !== '' ? $cleaned : null;
     }
 }
