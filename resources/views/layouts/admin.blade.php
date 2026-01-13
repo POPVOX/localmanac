@@ -9,7 +9,6 @@
 
             <a href="{{ route('dashboard') }}" class="me-5 flex items-center space-x-2 rtl:space-x-reverse" wire:navigate>
                 <x-app-logo />
-                <span class="text-lg font-semibold text-zinc-800 dark:text-white">Localmanac</span>
             </a>
 
             <flux:navlist variant="outline">

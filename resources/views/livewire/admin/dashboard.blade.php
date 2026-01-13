@@ -23,7 +23,7 @@
         @endforeach
     </div>
 
-    <div class="grid gap-4 lg:grid-cols-2">
+    <div class="grid gap-4 lg:grid-cols-3">
         <flux:card padding="xl" variant="subtle" class="space-y-4">
             <flux:heading size="lg">{{ __('Article ingestion') }}</flux:heading>
             @if ($hasArticlesTable)
@@ -39,6 +39,24 @@
                 </div>
             @else
                 <flux:text variant="subtle">{{ __('Articles table not available yet. Run migrations to track ingest stats.') }}</flux:text>
+            @endif
+        </flux:card>
+
+        <flux:card padding="xl" variant="subtle" class="space-y-4">
+            <flux:heading size="lg">{{ __('Event ingestion') }}</flux:heading>
+            @if ($hasEventRunsTable)
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <div class="relative flex-1 rounded-lg px-6 py-4 bg-zinc-50 dark:bg-zinc-700">
+                        <flux:subheading>{{ __('Last 24 hours') }}</flux:subheading>
+                        <flux:heading size="xl" class="mb-2">{{ $eventsLast24h }}</flux:heading>
+                    </div>
+                    <div class="relative flex-1 rounded-lg px-6 py-4 bg-zinc-50 dark:bg-zinc-700">
+                        <flux:subheading>{{ __('Last 7 days') }}</flux:subheading>
+                        <flux:heading size="xl" class="mb-2">{{ $eventsLast7d }}</flux:heading>
+                    </div>
+                </div>
+            @else
+                <flux:text variant="subtle">{{ __('Event ingestion runs not available yet. Run migrations to track ingest stats.') }}</flux:text>
             @endif
         </flux:card>
 
@@ -107,5 +125,65 @@
                 @endforelse
             </flux:table.rows>
         </flux:table>
+    </flux:card>
+
+    <flux:card padding="xl" variant="subtle" class="space-y-4">
+        <div class="flex items-center justify-between">
+            <flux:heading size="lg">{{ __('Recent event ingestion activity') }}</flux:heading>
+            <flux:text>
+                <flux:link :href="route('admin.event-sources.index')" wire:navigate>
+                    {{ __('View all') }}
+                </flux:link>
+            </flux:text>
+        </div>
+
+        @if ($hasEventRunsTable)
+            <flux:table>
+                <flux:table.columns sticky>
+                    <flux:table.column sticky>{{ __('Source') }}</flux:table.column>
+                    <flux:table.column>{{ __('City') }}</flux:table.column>
+                    <flux:table.column>{{ __('Status') }}</flux:table.column>
+                    <flux:table.column align="end">{{ __('Items written') }}</flux:table.column>
+                    <flux:table.column>{{ __('Finished at') }}</flux:table.column>
+                </flux:table.columns>
+
+                <flux:table.rows>
+                    @forelse ($recentEventRuns as $run)
+                        @php
+                            $source = $run->eventSource;
+                        @endphp
+                        <flux:table.row :key="$run->id">
+                            <flux:table.cell variant="strong" sticky>
+                                @if ($source)
+                                    <flux:link :href="route('admin.event-sources.show', $source)" wire:navigate>
+                                        {{ $source->name ?: __('Source :id', ['id' => $source->id]) }}
+                                    </flux:link>
+                                @else
+                                    {{ __('Source :id', ['id' => $run->event_source_id]) }}
+                                @endif
+                            </flux:table.cell>
+                            <flux:table.cell>{{ $source?->city?->name ?? __('Unknown') }}</flux:table.cell>
+                            <flux:table.cell>
+                                <flux:badge :color="$run->status === 'success' ? 'green' : ($run->status === 'failed' ? 'red' : 'yellow')">
+                                    {{ ucfirst($run->status) }}
+                                </flux:badge>
+                            </flux:table.cell>
+                            <flux:table.cell align="end">{{ $run->items_written }}</flux:table.cell>
+                            <flux:table.cell>
+                                {{ ($run->finished_at ?? $run->started_at)?->toDayDateTimeString() ?? __('Pending') }}
+                            </flux:table.cell>
+                        </flux:table.row>
+                    @empty
+                        <flux:table.row>
+                            <flux:table.cell colspan="5">
+                                <flux:text variant="subtle">{{ __('No event ingestion activity recorded yet.') }}</flux:text>
+                            </flux:table.cell>
+                        </flux:table.row>
+                    @endforelse
+                </flux:table.rows>
+            </flux:table>
+        @else
+            <flux:text variant="subtle">{{ __('Event ingestion runs not available yet. Run migrations to track ingest stats.') }}</flux:text>
+        @endif
     </flux:card>
 </div>
