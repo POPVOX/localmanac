@@ -111,5 +111,28 @@ class EventSourceSeeder extends Seeder
                 'is_active' => true,
             ]
         );
+
+        EventSource::updateOrCreate(
+            [
+                'city_id' => $city->id,
+                'source_url' => 'https://www.century2.com/events/calendar/{year}/{month}',
+            ],
+            [
+                'name' => 'Century II Performing Arts Center',
+                'source_type' => 'json_api',
+                'config' => [
+                    'profile' => 'century2_calendar',
+                    'json' => [
+                        'root_path' => 'events',
+                        'url_template' => 'https://www.century2.com/events/calendar/{year}/{month}',
+                        'months_forward' => 12,
+                        'start_month' => 'current',
+                        'timezone' => $city->timezone,
+                    ],
+                ],
+                'frequency' => 'daily',
+                'is_active' => true,
+            ]
+        );
     }
 }

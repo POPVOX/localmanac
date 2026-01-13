@@ -259,6 +259,123 @@ it('parses Wichita Public Library libnet json into event dtos', function () {
         ->and($event->sourceHash)->toBe(sha1('libnet:12345:2025-12-28 14:30:00'));
 });
 
+it('parses Century II calendar json into event dtos', function () {
+    $payload = json_decode(
+        file_get_contents(base_path('tests/Fixtures/century2_calendar.json')),
+        true,
+        512,
+        JSON_THROW_ON_ERROR
+    );
+
+    Http::fake([
+        'https://www.century2.com/events/calendar/2026/1' => Http::response($payload, 200),
+    ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'json_api',
+        'source_url' => 'https://www.century2.com/events/calendar/2026/1',
+        'config' => [
+            'profile' => 'century2_calendar',
+            'json' => [
+                'root_path' => 'events',
+                'timezone' => 'America/Chicago',
+            ],
+        ],
+    ]);
+
+    $fetcher = new JsonApiFetcher(new CalendarDateParser, new EventNormalizer);
+    $events = $fetcher->fetch($source);
+
+    $first = $events[0] ?? null;
+    $second = $events[1] ?? null;
+
+    expect($events)->toHaveCount(3)
+        ->and($first)->not->toBeNull()
+        ->and($second)->not->toBeNull()
+        ->and($first->title)->toBe('Water for Elephants')
+        ->and($first->startsAt->format('Y-m-d H:i:s'))->toBe('2026-01-12 19:30:00')
+        ->and($first->endsAt->format('Y-m-d H:i:s'))->toBe('2026-01-12 21:55:00')
+        ->and($first->eventUrl)->toBe('https://www.century2.com/events/detail/wfe')
+        ->and($first->locationName)->toBe('Concert Hall')
+        ->and($first->sourceHash)->toBe(sha1('century2:360:2026-01-12T19:30:00.0000000'))
+        ->and($second->sourceHash)->toBe(sha1('century2:360:2026-01-13T19:30:00.0000000'))
+        ->and($first->sourceHash)->not->toBe($second->sourceHash);
+});
+
+it('loops month-based json api sources', function () {
+    $januaryPayload = [
+        'events' => [
+            [
+                'EventID' => '901',
+                'Title' => 'January Event',
+                'Description' => '<div><h4>Main Hall</h4></div>',
+                'StartDateTime' => '2026-01-05T10:00:00.0000000',
+                'EndDateTime' => '2026-01-05T11:00:00.0000000',
+                'URL' => 'https://www.century2.com/events/detail/jan-event',
+            ],
+        ],
+    ];
+
+    $februaryPayload = [
+        'events' => [
+            [
+                'EventID' => '902',
+                'Title' => 'February Event',
+                'Description' => '<div><h4>Main Hall</h4></div>',
+                'StartDateTime' => '2026-02-02T10:00:00.0000000',
+                'EndDateTime' => '2026-02-02T11:00:00.0000000',
+                'URL' => 'https://www.century2.com/events/detail/feb-event',
+            ],
+        ],
+    ];
+
+    $requests = [];
+
+    Http::fake(function (Request $request) use (&$requests, $januaryPayload, $februaryPayload) {
+        $requests[] = $request->url();
+
+        if (str_contains($request->url(), '/2026/1')) {
+            return Http::response($januaryPayload, 200);
+        }
+
+        if (str_contains($request->url(), '/2026/2')) {
+            return Http::response($februaryPayload, 200);
+        }
+
+        return Http::response([], 404);
+    });
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'json_api',
+        'source_url' => 'https://www.century2.com/events/calendar',
+        'config' => [
+            'profile' => 'century2_calendar',
+            'json' => [
+                'root_path' => 'events',
+                'url_template' => 'https://www.century2.com/events/calendar/{year}/{month}',
+                'months_forward' => 2,
+                'start_month' => '2026-01-01',
+                'timezone' => 'America/Chicago',
+            ],
+        ],
+    ]);
+
+    $fetcher = new JsonApiFetcher(new CalendarDateParser, new EventNormalizer);
+    $events = $fetcher->fetch($source);
+
+    expect($requests)->toHaveCount(2)
+        ->and($requests[0])->toContain('/2026/1')
+        ->and($requests[1])->toContain('/2026/2');
+
+    expect($events)->toHaveCount(2)
+        ->and($events[0]->title)->toBe('January Event')
+        ->and($events[1]->title)->toBe('February Event');
+});
+
 it('parses html calendar listings into event dtos', function () {
     $html = '<div class="calendar">'
         .'<ul>'

@@ -29,18 +29,21 @@ class RunScrape extends Command
 
         if (! $scraper) {
             $this->error("Scraper not found: {$identifier}");
+
             return self::FAILURE;
         }
 
         try {
             $run = $runner->run($scraper);
-        } catch (InvalidArgumentException | \RuntimeException $e) {
+        } catch (InvalidArgumentException|\RuntimeException $e) {
             $this->error($e->getMessage());
+
             return self::FAILURE;
         }
 
         if ($run->status === 'failed') {
             $this->error($run->error_message ?? 'Scrape failed');
+
             return self::FAILURE;
         }
 

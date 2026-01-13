@@ -314,8 +314,7 @@ class GenericListingFetcher
     }
 
     /**
-     * @param array<int, string> $removeSelectors
-     *
+     * @param  array<int, string>  $removeSelectors
      * @return array{0: ?string, 1: string}
      */
     private function extractBody(Crawler $crawler, string $contentSelector, array $removeSelectors): array
@@ -432,15 +431,15 @@ class GenericListingFetcher
     private function fallbackHtmlToText(string $html): string
     {
         $replacements = [
-            "</p>" => "\n\n",
-            "</li>" => "\n",
-            "<br>" => "\n",
-            "<br/>" => "\n",
-            "<br />" => "\n",
-            "</h1>" => "\n\n",
-            "</h2>" => "\n\n",
-            "</h3>" => "\n\n",
-            "</tr>" => "\n",
+            '</p>' => "\n\n",
+            '</li>' => "\n",
+            '<br>' => "\n",
+            '<br/>' => "\n",
+            '<br />' => "\n",
+            '</h1>' => "\n\n",
+            '</h2>' => "\n\n",
+            '</h3>' => "\n\n",
+            '</tr>' => "\n",
         ];
 
         $value = str_ireplace(array_keys($replacements), array_values($replacements), $html);
@@ -448,7 +447,7 @@ class GenericListingFetcher
         $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
         $value = preg_replace("/\r\n?/", "\n", $value) ?? '';
-        $value = preg_replace("/[ \t\f\v]+/", " ", $value) ?? '';
+        $value = preg_replace("/[ \t\f\v]+/", ' ', $value) ?? '';
         $value = preg_replace("/\n{3,}/", "\n\n", $value) ?? '';
 
         return trim($value);

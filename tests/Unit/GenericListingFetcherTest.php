@@ -61,7 +61,7 @@ it('extracts links and ingests article content in best-effort mode', function ()
         ),
     ]);
 
-    $fetcher = new GenericListingFetcher();
+    $fetcher = new GenericListingFetcher;
     $items = $fetcher->fetch($scraper);
 
     expect($items)->toHaveCount(2);

@@ -1,0 +1,30 @@
+{
+  "events": [
+    {
+      "EventID": "360",
+      "Title": "Water for Elephants",
+      "Description": "<div><h4>Concert Hall</h4></div>",
+      "StartDateTime": "2026-01-12T19:30:00.0000000",
+      "EndDateTime": "2026-01-12T21:55:00.0000000",
+      "URL": "https://www.century2.com/events/detail/wfe",
+      "ImageURL": "https://www.century2.com/assets/img/WFE.png"
+    },
+    {
+      "EventID": "360",
+      "Title": "Water for Elephants",
+      "Description": "<div><h4>Concert Hall</h4></div>",
+      "StartDateTime": "2026-01-13T19:30:00.0000000",
+      "EndDateTime": "2026-01-13T21:30:00.0000000",
+      "URL": "https://www.century2.com/events/detail/wfe",
+      "ImageURL": "https://www.century2.com/assets/img/WFE.png"
+    },
+    {
+      "EventID": "479",
+      "Title": "Wichita Bridal Expo",
+      "Description": "<div><h4>Convention Hall</h4></div>",
+      "StartDateTime": "2026-01-10T10:00:00.0000000",
+      "EndDateTime": "2026-01-10T17:00:00.0000000",
+      "URL": "https://www.century2.com/events/detail/bridal-jan26"
+    }
+  ]
+}

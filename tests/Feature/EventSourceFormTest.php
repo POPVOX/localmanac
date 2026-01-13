@@ -113,6 +113,31 @@ it('stores a valid JSON config as an array', function () {
         ]);
 });
 
+it('accepts url templates with placeholders', function () {
+    $user = User::factory()->create();
+    $city = City::create([
+        'name' => 'Template URL City',
+        'slug' => 'template-url-city',
+        'state' => 'OK',
+        'country' => 'US',
+        'timezone' => 'America/Denver',
+    ]);
+
+    Livewire::actingAs($user)->test(EventSourceForm::class)
+        ->set('name', 'Template URL Source')
+        ->set('cityId', $city->id)
+        ->set('sourceType', 'json_api')
+        ->set('sourceUrl', 'https://www.century2.com/events/calendar/{year}/{month}')
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertRedirect(route('admin.event-sources.index'));
+
+    $source = EventSource::query()->where('name', 'Template URL Source')->first();
+
+    expect($source)->not->toBeNull()
+        ->and($source?->source_url)->toBe('https://www.century2.com/events/calendar/{year}/{month}');
+});
+
 it('clears stray config when resetConfigField is invoked for new sources', function () {
     $user = User::factory()->create();
     City::create([

@@ -41,24 +41,28 @@ class JsonApiFetcher implements EventSourceFetcher
 
         $timezone = Arr::get($config, 'timezone') ?? $source->city?->timezone ?? 'UTC';
         $http = Http::timeout(15)->retry(2, 250);
+        $payloads = [];
 
         if ($profile === 'visit_wichita_simpleview') {
             [$requestUrl, $query] = $this->buildVisitWichitaRequest($sourceUrl, $sourceConfig, $timezone);
             $response = $http->withOptions(['query' => $query])->get($requestUrl);
             $sourceUrl = $requestUrl;
+            if (! $response->successful()) {
+                throw new InvalidArgumentException('Failed to fetch JSON feed');
+            }
+            $payloads[$sourceUrl] = $response->json();
         } elseif ($profile === 'wichita_libnet_libcal') {
             $requestUrl = $this->buildWichitaLibnetRequest($sourceUrl, $config, $timezone);
             $response = $http->get($requestUrl);
             $sourceUrl = $requestUrl;
+            if (! $response->successful()) {
+                throw new InvalidArgumentException('Failed to fetch JSON feed');
+            }
+            $payloads[$sourceUrl] = $response->json();
         } else {
-            $response = $http->get($sourceUrl);
+            $payloads = $this->fetchJsonPayloads($sourceUrl, $config, $timezone, $http);
         }
 
-        if (! $response->successful()) {
-            throw new InvalidArgumentException('Failed to fetch JSON feed');
-        }
-
-        $payload = $response->json();
         $listPath = Arr::get($config, 'list_path');
 
         if ($listPath === null) {
@@ -69,21 +73,73 @@ class JsonApiFetcher implements EventSourceFetcher
             throw new InvalidArgumentException('EventSource config.json.list_path or config.json.root_path is required');
         }
 
-        $items = $listPath === '' ? $payload : data_get($payload, $listPath, []);
-
-        if (! is_array($items)) {
-            return [];
-        }
-
-        if ($profile === 'visit_wichita_simpleview') {
-            return $this->mapVisitWichitaSimpleview($items, $source, $timezone);
-        }
-
-        if ($profile === 'wichita_libnet_libcal') {
-            return $this->mapWichitaLibnetLibcal($items, $source, $timezone, $sourceUrl);
-        }
-
         $mapping = Arr::get($config, 'mapping', []);
+        $results = [];
+
+        foreach ($payloads as $requestUrl => $payload) {
+            $items = $listPath === '' ? $payload : data_get($payload, $listPath, []);
+
+            if (! is_array($items)) {
+                continue;
+            }
+
+            if ($profile === 'visit_wichita_simpleview') {
+                return $this->mapVisitWichitaSimpleview($items, $source, $timezone);
+            }
+
+            if ($profile === 'wichita_libnet_libcal') {
+                return $this->mapWichitaLibnetLibcal($items, $source, $timezone, $requestUrl);
+            }
+
+            if ($profile === 'century2_calendar') {
+                $results = array_merge(
+                    $results,
+                    $this->mapCentury2Calendar($items, $source, $timezone, $requestUrl)
+                );
+
+                continue;
+            }
+
+            $results = array_merge(
+                $results,
+                $this->mapGenericItems($items, $mapping, $timezone, $requestUrl)
+            );
+        }
+
+        return $results;
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     * @return array<string, mixed>
+     */
+    private function fetchJsonPayloads(string $sourceUrl, array $config, string $timezone, mixed $http): array
+    {
+        $payloads = [];
+        $urls = $this->shouldUseMonthLoop($config)
+            ? $this->buildMonthLoopUrls($sourceUrl, $config, $timezone)
+            : [$sourceUrl];
+
+        foreach ($urls as $url) {
+            $response = $http->get($url);
+
+            if (! $response->successful()) {
+                throw new InvalidArgumentException('Failed to fetch JSON feed');
+            }
+
+            $payloads[$url] = $response->json();
+        }
+
+        return $payloads;
+    }
+
+    /**
+     * @param  array<int, mixed>  $items
+     * @param  array<string, string>  $mapping
+     * @return array<int, EventDTO>
+     */
+    private function mapGenericItems(array $items, array $mapping, string $timezone, string $sourceUrl): array
+    {
         $results = [];
 
         foreach ($items as $item) {
@@ -150,6 +206,243 @@ class JsonApiFetcher implements EventSourceFetcher
         }
 
         return $results;
+    }
+
+    /**
+     * @param  array<int, mixed>  $items
+     * @return array<int, EventDTO>
+     */
+    private function mapCentury2Calendar(array $items, EventSource $source, string $timezone, string $sourceUrl): array
+    {
+        $results = [];
+
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $title = $this->stringValue(data_get($item, 'Title'));
+            $description = $this->stringValue(data_get($item, 'Description'));
+            $startsAtValue = $this->stringValue(data_get($item, 'StartDateTime'));
+            $endsAtValue = $this->stringValue(data_get($item, 'EndDateTime'));
+            $eventUrl = $this->stringValue(data_get($item, 'URL'));
+            $externalId = $this->stringValue(data_get($item, 'EventID'));
+
+            if ($startsAtValue === '') {
+                continue;
+            }
+
+            $startResult = $this->dateParser->parseIso($startsAtValue, $timezone);
+            $endResult = $endsAtValue !== '' ? $this->dateParser->parseIso($endsAtValue, $timezone) : null;
+
+            $startsAt = $startResult['starts_at'] ?? null;
+            $endsAt = $endResult['starts_at'] ?? null;
+
+            if (! $startsAt) {
+                continue;
+            }
+
+            $normalizedEventUrl = $this->normalizer->normalizeUrl($eventUrl, $sourceUrl);
+            $locationName = $this->parseCentury2LocationName($description);
+            $allDay = $this->normalizeAllDay(null, $startResult['all_day'] ?? false, $endResult['all_day'] ?? false);
+            $sourceHash = $this->buildCentury2SourceHash($item, $startsAtValue, $eventUrl);
+
+            $results[] = new EventDTO(
+                title: $title !== '' ? $title : 'Untitled event',
+                startsAt: $startsAt,
+                endsAt: $endsAt,
+                allDay: $allDay,
+                locationName: $locationName,
+                locationAddress: null,
+                description: $description !== '' ? $description : null,
+                eventUrl: $normalizedEventUrl,
+                externalId: $externalId !== '' ? $externalId : null,
+                sourceUrl: $normalizedEventUrl,
+                sourceHash: $sourceHash,
+                rawPayload: [
+                    'item' => $item,
+                ],
+            );
+        }
+
+        return $results;
+    }
+
+    private function parseCentury2LocationName(string $description): ?string
+    {
+        if ($description === '') {
+            return null;
+        }
+
+        if (! preg_match_all('/<h4[^>]*>(.*?)<\/h4>/is', $description, $matches)) {
+            return null;
+        }
+
+        foreach ($matches[1] as $match) {
+            $candidate = trim(strip_tags($match));
+
+            if ($candidate === '' || strtolower($candidate) === 'venue') {
+                continue;
+            }
+
+            return $candidate;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function buildCentury2SourceHash(array $item, string $startsAtValue, string $eventUrl): ?string
+    {
+        $externalId = $this->stringValue(data_get($item, 'EventID'));
+
+        if ($externalId !== '' && $startsAtValue !== '') {
+            return sha1("century2:{$externalId}:{$startsAtValue}");
+        }
+
+        if ($eventUrl !== '' && $startsAtValue !== '') {
+            return sha1("century2:{$eventUrl}:{$startsAtValue}");
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    private function shouldUseMonthLoop(array $config): bool
+    {
+        return $this->resolveMonthsForward($config) > 0;
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    private function resolveMonthsForward(array $config): int
+    {
+        $monthsForward = Arr::get($config, 'months_forward');
+
+        if ($monthsForward === null) {
+            $monthsForward = Arr::get($config, 'month_loop') ? 1 : 0;
+        }
+
+        if (! is_numeric($monthsForward)) {
+            return 0;
+        }
+
+        $monthsForward = (int) $monthsForward;
+
+        return $monthsForward > 0 ? $monthsForward : 0;
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     * @return array<int, string>
+     */
+    private function buildMonthLoopUrls(string $sourceUrl, array $config, string $timezone): array
+    {
+        $template = $this->stringValue(Arr::get($config, 'url_template'));
+
+        if ($template === '') {
+            $template = $sourceUrl;
+        }
+
+        if (! str_contains($template, '{year}') || ! str_contains($template, '{month}')) {
+            throw new InvalidArgumentException('Month loop requires {year} and {month} placeholders in the URL template.');
+        }
+
+        $monthsForward = $this->resolveMonthsForward($config);
+        $startMonth = $this->resolveStartMonth($config, $timezone);
+        $monthQuery = $this->normalizeMonthQuery(Arr::get($config, 'month_query', []));
+        $urls = [];
+
+        for ($offset = 0; $offset < $monthsForward; $offset++) {
+            $month = $startMonth->copy()->addMonthsNoOverflow($offset);
+            $url = str_replace(
+                ['{year}', '{month}'],
+                [$month->format('Y'), $month->format('n')],
+                $template
+            );
+            $urls[] = $this->applyQuery($url, $monthQuery);
+        }
+
+        return $urls;
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    private function resolveStartMonth(array $config, string $timezone): Carbon
+    {
+        $startMonth = Arr::get($config, 'start_month');
+
+        if (is_string($startMonth)) {
+            $startMonth = trim($startMonth);
+
+            if ($startMonth === '' || in_array(strtolower($startMonth), ['current', 'now', 'today'], true)) {
+                return Carbon::now($timezone)->startOfMonth();
+            }
+
+            try {
+                return Carbon::parse($startMonth, $timezone)->startOfMonth();
+            } catch (Throwable) {
+                return Carbon::now($timezone)->startOfMonth();
+            }
+        }
+
+        if ($startMonth instanceof Carbon) {
+            return $startMonth->copy()->startOfMonth();
+        }
+
+        return Carbon::now($timezone)->startOfMonth();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function normalizeMonthQuery(mixed $query): array
+    {
+        if (! is_array($query)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($query as $key => $value) {
+            if (! is_string($key) && ! is_int($key)) {
+                continue;
+            }
+
+            if (is_array($value)) {
+                $value = json_encode($value, JSON_UNESCAPED_SLASHES) ?: '';
+            } elseif (is_bool($value)) {
+                $value = $value ? '1' : '0';
+            } else {
+                $value = (string) $value;
+            }
+
+            $normalized[(string) $key] = $value;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<string, string>  $query
+     */
+    private function applyQuery(string $url, array $query): string
+    {
+        if ($query === []) {
+            return $url;
+        }
+
+        $existing = $this->extractQueryParams($url);
+        $base = $this->stripQueryFromUrl($url);
+        $merged = array_merge($existing, $query);
+
+        return $merged === [] ? $base : $base.'?'.http_build_query($merged);
     }
 
     /**

@@ -23,6 +23,7 @@ class ImportOrganizations extends Command
 
         if (! $city) {
             $this->error("City '{$cityOption}' not found.");
+
             return self::FAILURE;
         }
 
@@ -30,6 +31,7 @@ class ImportOrganizations extends Command
 
         if (! is_readable($path)) {
             $this->error("File '{$path}' not found or not readable.");
+
             return self::FAILURE;
         }
 
@@ -37,6 +39,7 @@ class ImportOrganizations extends Command
 
         if (! $handle) {
             $this->error("Unable to open '{$path}'.");
+
             return self::FAILURE;
         }
 
@@ -55,6 +58,7 @@ class ImportOrganizations extends Command
 
             if (! $legacyId || ! $name) {
                 $skipped++;
+
                 continue;
             }
 
@@ -110,8 +114,8 @@ class ImportOrganizations extends Command
     }
 
     /**
-     * @param array<int, string>|false $headers
-     * @param array<int, string> $row
+     * @param  array<int, string>|false  $headers
+     * @param  array<int, string>  $row
      * @return array<string, string|null>
      */
     private function rowToAssoc($headers, array $row): array
@@ -167,7 +171,7 @@ class ImportOrganizations extends Command
             return;
         }
 
-        $table = (new Organization())->getTable();
+        $table = (new Organization)->getTable();
         DB::statement("
             SELECT setval(
                 pg_get_serial_sequence('{$table}', 'id'),

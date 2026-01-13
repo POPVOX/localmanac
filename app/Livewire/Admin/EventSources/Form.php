@@ -154,7 +154,24 @@ class Form extends Component
             'cityId' => ['required', 'integer', 'exists:cities,id'],
             'name' => ['required', 'string', 'max:255'],
             'sourceType' => ['required', Rule::in(self::TYPES)],
-            'sourceUrl' => ['required', 'url', 'max:2000'],
+            'sourceUrl' => [
+                'required',
+                'string',
+                'max:2000',
+                function (string $attribute, mixed $value, callable $fail): void {
+                    $url = trim((string) $value);
+
+                    if ($url === '') {
+                        return;
+                    }
+
+                    $normalized = preg_replace('/\{[^}]+\}/', '1', $url) ?? $url;
+
+                    if (! filter_var($normalized, FILTER_VALIDATE_URL)) {
+                        $fail(__('The source url field must be a valid URL.'));
+                    }
+                },
+            ],
             'isActive' => ['boolean'],
             'config' => ['nullable', 'string'],
         ];

@@ -27,7 +27,7 @@ function makeArticle(City $city, array $overrides = []): Article
 }
 
 it('matches by canonical url first', function () {
-    $deduplicator = new Deduplicator();
+    $deduplicator = new Deduplicator;
     $city = makeTestCity();
 
     $canonicalArticle = makeArticle($city, [
@@ -54,7 +54,7 @@ it('matches by canonical url first', function () {
 });
 
 it('matches by source uid when canonical url is absent', function () {
-    $deduplicator = new Deduplicator();
+    $deduplicator = new Deduplicator;
     $city = makeTestCity();
 
     $article = makeArticle($city);
@@ -79,7 +79,7 @@ it('matches by source uid when canonical url is absent', function () {
 });
 
 it('matches by content hash when no higher priority match exists', function () {
-    $deduplicator = new Deduplicator();
+    $deduplicator = new Deduplicator;
     $city = makeTestCity();
 
     $article = makeArticle($city, [
@@ -97,7 +97,7 @@ it('matches by content hash when no higher priority match exists', function () {
 });
 
 it('prioritizes source uid over content hash when canonical url is missing', function () {
-    $deduplicator = new Deduplicator();
+    $deduplicator = new Deduplicator;
     $city = makeTestCity();
 
     $sourceUidArticle = makeArticle($city, [
@@ -129,7 +129,7 @@ it('prioritizes source uid over content hash when canonical url is missing', fun
 });
 
 it('throws when city_id is missing', function () {
-    $deduplicator = new Deduplicator();
+    $deduplicator = new Deduplicator;
 
     $deduplicator->findExisting([]);
 })->throws(InvalidArgumentException::class);

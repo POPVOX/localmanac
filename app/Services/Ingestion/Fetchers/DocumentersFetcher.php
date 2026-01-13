@@ -6,7 +6,6 @@ use App\Models\Scraper;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
-use Illuminate\Support\Arr;
 use InvalidArgumentException;
 use Symfony\Component\DomCrawler\Crawler;
 
@@ -177,15 +176,15 @@ class DocumentersFetcher
     {
         // Preserve some structure before stripping tags.
         $replacements = [
-            "</p>" => "\n\n",
-            "</li>" => "\n",
-            "<br>" => "\n",
-            "<br/>" => "\n",
-            "<br />" => "\n",
-            "</h1>" => "\n\n",
-            "</h2>" => "\n\n",
-            "</h3>" => "\n\n",
-            "</tr>" => "\n",
+            '</p>' => "\n\n",
+            '</li>' => "\n",
+            '<br>' => "\n",
+            '<br/>' => "\n",
+            '<br />' => "\n",
+            '</h1>' => "\n\n",
+            '</h2>' => "\n\n",
+            '</h3>' => "\n\n",
+            '</tr>' => "\n",
         ];
 
         $value = str_ireplace(array_keys($replacements), array_values($replacements), $html);
@@ -194,7 +193,7 @@ class DocumentersFetcher
 
         // Normalize whitespace while keeping newlines.
         $value = preg_replace("/\r\n?/", "\n", $value) ?? '';
-        $value = preg_replace("/[ \t\f\v]+/", " ", $value) ?? '';
+        $value = preg_replace("/[ \t\f\v]+/", ' ', $value) ?? '';
         $value = preg_replace("/\n{3,}/", "\n\n", $value) ?? '';
 
         return trim($value);

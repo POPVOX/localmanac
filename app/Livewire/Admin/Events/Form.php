@@ -164,7 +164,7 @@ class Form extends Component
 
     private function formatDateTime(?DateTimeInterface $value, string $timezone): ?string
     {
-        if ($value === null || trim($value) === '') {
+        if ($value === null) {
             return null;
         }
 

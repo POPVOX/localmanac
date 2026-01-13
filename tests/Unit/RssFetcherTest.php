@@ -32,7 +32,7 @@ it('parses rss items and prefers content encoded', function () {
         ],
     ]);
 
-    $xml = <<<XML
+    $xml = <<<'XML'
 <?xml version="1.0" encoding="UTF-8" ?>
 <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
@@ -59,7 +59,7 @@ XML;
         'https://example.com/feed' => Http::response($xml, 200),
     ]);
 
-    $fetcher = new RssFetcher();
+    $fetcher = new RssFetcher;
     $items = $fetcher->fetch($scraper);
 
     expect($items)->toHaveCount(2);
