@@ -134,5 +134,22 @@ class EventSourceSeeder extends Seeder
                 'is_active' => true,
             ]
         );
+
+        EventSource::updateOrCreate(
+            [
+                'city_id' => $city->id,
+                'source_url' => 'https://www.wichitachamber.org/index.php?src=events&srctype=events_lister_ajax_chamber_events&direct=y',
+            ],
+            [
+                'name' => 'Wichita Chamber',
+                'source_type' => 'html',
+                'config' => [
+                    'profile' => 'wichita_chamber_events',
+                    'timezone' => $city->timezone,
+                ],
+                'frequency' => 'daily',
+                'is_active' => true,
+            ]
+        );
     }
 }

@@ -421,3 +421,39 @@ it('parses html calendar listings into event dtos', function () {
         ->and($events[0]->title)->toBe('HTML Event')
         ->and($events[0]->eventUrl)->toBe('https://example.com/event-1');
 });
+
+it('parses Wichita Chamber html listings into event dtos', function () {
+    $html = file_get_contents(base_path('tests/Fixtures/wichita_chamber_events.html'));
+
+    Http::fake([
+        'https://www.wichitachamber.org/index.php?src=events&srctype=events_lister_ajax_chamber_events&direct=y' => Http::response($html, 200),
+    ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'html',
+        'source_url' => 'https://www.wichitachamber.org/index.php?src=events&srctype=events_lister_ajax_chamber_events&direct=y',
+        'config' => [
+            'profile' => 'wichita_chamber_events',
+            'timezone' => 'America/Chicago',
+        ],
+    ]);
+
+    $fetcher = new HtmlCalendarFetcher(new CalendarDateParser, new EventNormalizer);
+    $events = $fetcher->fetch($source);
+
+    $first = $events[0] ?? null;
+    $target = collect($events)->first(
+        fn ($event) => $event->eventUrl === 'https://www.wichitachamber.org/events/2026/03/04/engagement-department/member-business-exchange/'
+    );
+
+    expect($events)->not->toBeEmpty()
+        ->and($first)->not->toBeNull()
+        ->and($first->title)->not->toBe('')
+        ->and($first->eventUrl)->toStartWith('https://www.wichitachamber.org/')
+        ->and($target)->not->toBeNull()
+        ->and($target->startsAt->format('Y-m-d H:i:s'))->toBe('2026-03-04 15:30:00')
+        ->and($target->endsAt->format('Y-m-d H:i:s'))->toBe('2026-03-04 17:00:00')
+        ->and($target->sourceHash)->toBe(sha1($target->eventUrl.'|'.$target->startsAt->toIso8601String()));
+});
