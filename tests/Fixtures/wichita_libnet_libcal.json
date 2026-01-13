@@ -1,0 +1,25 @@
+[
+  {
+    "id": 12345,
+    "title": "Coloring with Jay Walter",
+    "description": "<p>Coloring session with Jay Walter.</p>",
+    "long_description": "<p>Join Jay Walter for an afternoon of coloring and conversation.</p>",
+    "event_start": "2025-12-28 14:30:00",
+    "event_end": "2025-12-28 15:30:00",
+    "raw_start_time": "2025-12-28 14:30:00",
+    "raw_end_time": "2025-12-28 15:30:00",
+    "location": "Westlink Branch Library",
+    "library": "Westlink Branch Library",
+    "url": "https://wichitalibrary.libnet.info//event/12345",
+    "recurring_id": "9876",
+    "event_contact": "events@wichitalibrary.org",
+    "tagsArray": [
+      "Arts",
+      "Kids"
+    ],
+    "agesArray": [
+      "Kids"
+    ],
+    "event_type": "Programs"
+  }
+]

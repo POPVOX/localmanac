@@ -89,7 +89,8 @@ class Form extends Component
             }
 
             return redirect()->route('admin.organizations.index')->with('toast', [
-                'message' => $isUpdating ? __('Organization updated') : __('Organization created'),
+                'heading' => $isUpdating ? __('Organization updated') : __('Organization created'),
+                'message' => __('Your changes have been saved.'),
                 'variant' => 'success',
             ]);
         } catch (ValidationException $exception) {
@@ -115,13 +116,13 @@ class Form extends Component
 
             report($exception);
 
-            $this->dispatchToast(__('Unable to save organization'), 'danger');
+            $this->dispatchToast(__('Organization save failed'), __('We could not save the organization.'), 'danger');
 
             return null;
         } catch (Throwable $exception) {
             report($exception);
 
-            $this->dispatchToast(__('Unable to save organization'), 'danger');
+            $this->dispatchToast(__('Organization save failed'), __('We could not save the organization.'), 'danger');
 
             return null;
         }
@@ -161,9 +162,9 @@ class Form extends Component
         ];
     }
 
-    private function dispatchToast(string $message, string $variant = 'success'): void
+    private function dispatchToast(string $heading, string $message, string $variant = 'success'): void
     {
-        $this->dispatch('toast', message: $message, variant: $variant);
+        $this->dispatch('toast', heading: $heading, message: $message, variant: $variant);
     }
 
     private function isConstraintViolation(QueryException $exception, string $sqlState, string $constraint): bool

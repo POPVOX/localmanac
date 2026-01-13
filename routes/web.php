@@ -4,12 +4,19 @@ use App\Http\Controllers\ArticleSourceController;
 use App\Livewire\Admin\Cities\Form as CitiesForm;
 use App\Livewire\Admin\Cities\Index as CitiesIndex;
 use App\Livewire\Admin\Dashboard as AdminDashboard;
+use App\Livewire\Admin\Events\Form as EventsForm;
+use App\Livewire\Admin\Events\Index as EventsIndex;
+use App\Livewire\Admin\Events\Show as EventsShow;
+use App\Livewire\Admin\EventSources\Form as EventSourcesForm;
+use App\Livewire\Admin\EventSources\Index as EventSourcesIndex;
+use App\Livewire\Admin\EventSources\Show as EventSourcesShow;
 use App\Livewire\Admin\Organizations\Form as OrganizationsForm;
 use App\Livewire\Admin\Organizations\Index as OrganizationsIndex;
 use App\Livewire\Admin\Scrapers\Form as ScrapersForm;
 use App\Livewire\Admin\Scrapers\Index as ScrapersIndex;
 use App\Livewire\Admin\Scrapers\Show as ScrapersShow;
 use App\Livewire\Demo\ArticleExplainer;
+use App\Livewire\Demo\Calendar as DemoCalendar;
 use Illuminate\Support\Facades\Route;
 use Laravel\Fortify\Features;
 use Livewire\Volt\Volt;
@@ -18,6 +25,7 @@ Route::get('/', function () {
     return view('welcome');
 })->name('home');
 
+Route::get('demo/calendar', DemoCalendar::class)->name('demo.calendar');
 Route::get('demo/articles/{article}', ArticleExplainer::class)->name('demo.articles.show');
 Route::get('articles/{article}/source', ArticleSourceController::class)->name('articles.source');
 
@@ -56,5 +64,14 @@ Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
         Route::get('scrapers/create', ScrapersForm::class)->name('scrapers.create');
         Route::get('scrapers/{scraper}/edit', ScrapersForm::class)->name('scrapers.edit');
         Route::get('scrapers/{scraper}', ScrapersShow::class)->name('scrapers.show');
+
+        Route::get('event-sources', EventSourcesIndex::class)->name('event-sources.index');
+        Route::get('event-sources/create', EventSourcesForm::class)->name('event-sources.create');
+        Route::get('event-sources/{source}/edit', EventSourcesForm::class)->name('event-sources.edit');
+        Route::get('event-sources/{source}', EventSourcesShow::class)->name('event-sources.show');
+
+        Route::get('events', EventsIndex::class)->name('events.index');
+        Route::get('events/{event}/edit', EventsForm::class)->name('events.edit');
+        Route::get('events/{event}', EventsShow::class)->name('events.show');
     });
 });

@@ -99,6 +99,7 @@ return [
     'waits' => [
         'redis:default' => 60,
         'redis:scraping' => 60,
+        'redis:calendar' => 60,
     ],
 
     /*
@@ -200,7 +201,7 @@ return [
     'defaults' => [
         'supervisor-1' => [
             'connection' => 'redis',
-            'queue' => ['default', 'scraping', 'analysis'],
+            'queue' => ['default', 'scraping', 'analysis', 'calendar'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,

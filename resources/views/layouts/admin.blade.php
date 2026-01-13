@@ -26,6 +26,12 @@
                     <flux:navlist.item icon="cpu-chip" :href="route('admin.scrapers.index')" :current="request()->routeIs('admin.scrapers.*')" wire:navigate>
                         {{ __('Scrapers') }}
                 </flux:navlist.item>
+                <flux:navlist.item icon="calendar" :href="route('admin.event-sources.index')" :current="request()->routeIs('admin.event-sources.*')" wire:navigate>
+                        {{ __('Event Sources') }}
+                    </flux:navlist.item>
+                    <flux:navlist.item icon="calendar-days" :href="route('admin.events.index')" :current="request()->routeIs('admin.events.*')" wire:navigate>
+                        {{ __('Events') }}
+                    </flux:navlist.item>
             </flux:navlist.group>
         </flux:navlist>
 

@@ -28,13 +28,17 @@ class Show extends Component
                 'is_enabled' => ! $this->scraper->is_enabled,
             ]);
 
-            $this->dispatchToast($this->scraper->is_enabled ? __('Scraper enabled') : __('Scraper disabled'));
+            if ($this->scraper->is_enabled) {
+                $this->dispatchToast(__('Scraper enabled'), __('Runs will be included in schedules.'));
+            } else {
+                $this->dispatchToast(__('Scraper disabled'), __('Runs will be skipped until re-enabled.'));
+            }
 
             $this->refreshScraper();
         } catch (Throwable $exception) {
             report($exception);
 
-            $this->dispatchToast(__('Unable to update scraper'), 'danger');
+            $this->dispatchToast(__('Update failed'), __('We could not update the scraper.'), 'danger');
         }
     }
 
@@ -49,13 +53,13 @@ class Show extends Component
                 ->exists();
 
             if ($hasActiveRun) {
-                $this->dispatchToast(__('Already running'), 'warning');
+                $this->dispatchToast(__('Already running'), __('A run is already queued or in progress.'), 'warning');
 
                 return;
             }
 
             if (! $this->scraper->is_enabled || ! in_array($this->scraper->type, ['rss', 'html'], true)) {
-                $this->dispatchToast(__('Enable the scraper before queuing a run.'), 'danger');
+                $this->dispatchToast(__('Scraper disabled'), __('Enable it before queuing a run.'), 'danger');
 
                 return;
             }
@@ -64,13 +68,13 @@ class Show extends Component
 
             RunScraperRun::dispatch($run->id);
 
-            $this->dispatchToast(__('Scrape queued'));
+            $this->dispatchToast(__('Scrape queued'), __('We will run this scraper in the background.'));
 
             $this->refreshScraper();
         } catch (Throwable $exception) {
             report($exception);
 
-            $this->dispatchToast(__('Unable to queue scraper'), 'danger');
+            $this->dispatchToast(__('Queue failed'), __('We could not queue this run.'), 'danger');
         }
     }
 
@@ -96,8 +100,8 @@ class Show extends Component
         $this->scraper->refresh()->load(['city', 'organization', 'latestRun']);
     }
 
-    private function dispatchToast(string $message, string $variant = 'success'): void
+    private function dispatchToast(string $heading, string $message, string $variant = 'success'): void
     {
-        $this->dispatch('toast', message: $message, variant: $variant);
+        $this->dispatch('toast', heading: $heading, message: $message, variant: $variant);
     }
 }

@@ -31,6 +31,16 @@ class City extends Model
         return $this->hasMany(Organization::class);
     }
 
+    public function eventSources(): HasMany
+    {
+        return $this->hasMany(EventSource::class);
+    }
+
+    public function events(): HasMany
+    {
+        return $this->hasMany(Event::class);
+    }
+
     public function scrapers(): HasMany
     {
         return $this->hasMany(Scraper::class);

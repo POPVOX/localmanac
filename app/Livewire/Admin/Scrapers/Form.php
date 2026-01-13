@@ -178,7 +178,8 @@ class Form extends Component
             }
 
             return redirect()->route('admin.scrapers.index')->with('toast', [
-                'message' => $isUpdating ? __('Scraper updated') : __('Scraper saved'),
+                'heading' => $isUpdating ? __('Scraper updated') : __('Scraper saved'),
+                'message' => __('Your changes have been saved.'),
                 'variant' => 'success',
             ]);
         } catch (ValidationException $exception) {
@@ -186,7 +187,7 @@ class Form extends Component
         } catch (Throwable $exception) {
             report($exception);
 
-            $this->dispatchToast(__('Unable to save scraper'), 'danger');
+            $this->dispatchToast(__('Scraper save failed'), __('We could not save the scraper.'), 'danger');
 
             return null;
         }
@@ -341,9 +342,9 @@ class Form extends Component
         return $parsed;
     }
 
-    private function dispatchToast(string $message, string $variant = 'success'): void
+    private function dispatchToast(string $heading, string $message, string $variant = 'success'): void
     {
-        $this->dispatch('toast', message: $message, variant: $variant);
+        $this->dispatch('toast', heading: $heading, message: $message, variant: $variant);
     }
 
     public function resetConfigField(): void

@@ -1,0 +1,31 @@
+{
+  "docs": {
+    "docs": [
+      {
+        "recid": "1001",
+        "title": "Winter Gala",
+        "description": "<p>Annual fundraising event.</p>",
+        "location": "Century II",
+        "address1": "225 W Douglas Ave",
+        "city": "Wichita",
+        "state": "KS",
+        "url": "/event/winter-gala/",
+        "date": "2026-01-13T05:59:59.000Z",
+        "startTime": "19:30:00"
+      },
+      {
+        "recid": "1002",
+        "title": "Downtown Art Walk",
+        "description": "Explore galleries.",
+        "listing": {
+          "title": "Downtown Wichita Association"
+        },
+        "address1": "120 N Main St",
+        "city": "Wichita",
+        "state": "KS",
+        "url": "/event/downtown-art-walk/",
+        "date": "2026-02-10T06:00:00.000Z"
+      }
+    ]
+  }
+}
