@@ -136,8 +136,9 @@
 - [ ] Article enrichment UI (pending)
 - [ ] Alias management UI (pending)
 
-## Milestone 8 — Calendar events admin (parity with articles admin)
-- [ ] Bring events admin to feature parity with articles admin (create/edit workflows, review tools)
+## Milestone 8 — Calendar events admin
+- [x] Event sources admin (index/show/create/edit + run controls)
+- [x] Events admin (index/show/edit with filters and source trace)
 
 ## Definition of Done (v1)
 - [x] One city seeded
