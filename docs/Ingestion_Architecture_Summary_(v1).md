@@ -1,5 +1,10 @@
 # Localmanac Ingestion Architecture — v1 Summary
 
+## Current State (as of 2026-01-14)
+- Article ingestion is working across RSS, Documenters, and generic HTML listing sources.
+- Calendar ingestion is implemented for ics, rss, json/json_api, and html sources via profile registries.
+- Enrichment + analysis run via Prism multi-pass prompts with evidence packs and explainer projections.
+
 ## Purpose of this document
 This document captures **where the project is right now**, **what is working**, and **where it is headed**, so work can resume cleanly even if chat context is lost.
 
@@ -8,9 +13,9 @@ This is not aspirational — it reflects the *actual implemented state* as of th
 ---
 
 ## High‑level goal
-Localmanac ingests civic and local news content from multiple sources, normalizes it into a consistent schema, deduplicates it, and prepares it for search, analysis, and future AI workflows.
+Localmanac ingests civic and local news content plus calendar events from multiple sources, normalizes them into consistent schemas, deduplicates them, and prepares them for search and analysis workflows.
 
-As of v1, the ingestion pipeline is complete and stable. Full‑text search has been implemented using Laravel Scout with Meilisearch, enabling fast, city‑scoped retrieval across all ingested content. This search layer now serves as the primary foundation for future chatbot and analysis features.
+As of v1, article ingestion + search are working, and calendar ingestion is live alongside it. Analysis and enrichment run via Prism multi-pass flows with evidence packs and explainer projections.
 
 ---
 
@@ -67,6 +72,21 @@ Status: ✅ Implemented and validated (CommunityVoiceKS)
 
 ---
 
+### 4. Calendar ingestion (ICS/JSON/HTML + RSS)
+**Use case:** Public event calendars (city events, libraries, venues)
+
+Sources are defined in `event_sources` and fetched by type:
+- `ics` feeds
+- `rss` feeds
+- `json` / `json_api` feeds (profile registry + generic fallback)
+- `html` calendars (profile registry + generic list fallback)
+
+Profile registries handle source-specific parsing and normalization while keeping the core fetchers generic.
+
+Status: ✅ Implemented and working
+
+---
+
 ## Search & indexing (WORKING)
 
 Localmanac now includes a full‑text search layer built on **Laravel Scout + Meilisearch**.
@@ -74,6 +94,7 @@ Localmanac now includes a full‑text search layer built on **Laravel Scout + Me
 Key characteristics:
 - Articles are the single searchable document type
 - Search is always scoped by `city_id`
+- Events are not indexed yet (calendar and admin read from the DB)
 - Indexed content includes:
   - article title and summary
   - full body text from `ArticleBody.cleaned_text`
@@ -123,6 +144,21 @@ ArticleBodies may be populated asynchronously (e.g. via OCR jobs for scanned PDF
 ### ArticleSource
 - Tracks provenance
 - Stores canonical source URL
+
+### Events
+- Core record for each calendar item
+- Stored with `starts_at` / `ends_at` (timestampTz), `all_day`, and a `source_hash` for dedupe
+
+### EventSource
+- Defines where calendars come from (ics, rss, json/json_api, html)
+- Holds per-source config (profile, timezone, date parsing hints)
+
+### EventSourceItem
+- Links events back to source payloads and external IDs
+- Stores raw payload for traceability
+
+### EventIngestionRun
+- Tracks each calendar source run (status, counts, errors)
 
 ### Scrapers
 - Config‑driven ingestion definitions
@@ -174,6 +210,24 @@ Localmanac uses a relational core with normalized tables and a small number of p
   - canonical source URL
   - source type
   - organization relationship
+
+### EventSources
+- Defines calendar ingestion sources per city.
+- Key fields:
+  - `source_type` (`ics`, `rss`, `json`, `json_api`, `html`)
+  - `source_url`
+  - `config` (JSON / JSONB for profile + timezone + parsing rules)
+
+### Events
+- Canonical record for a calendar item.
+- Stored with `starts_at`/`ends_at` (timestampTz), `all_day`, `event_url`, and `source_hash`.
+
+### EventSourceItems
+- Links events to ingestion payloads and external IDs.
+- Stores raw payload for traceability.
+
+### EventIngestionRuns
+- Tracks ingestion run status, counts, and errors per source.
 
 ### Deduplication
 - Articles are deduplicated using a combination of:
@@ -293,6 +347,16 @@ These define how meaningful content is extracted and how boilerplate is removed.
 
 ---
 
+## Event source config strategy (calendar)
+Event source behavior is driven by `event_sources.config`, with a `profile` key used to select JSON/HTML profile handlers.
+
+Core ideas:
+- JSON/HTML profile registries provide source-specific parsing with a generic fallback.
+- `timezone` defaults to the city timezone when not provided.
+- The event writer dedupes by `source_hash` and links raw payloads via `event_source_items`.
+
+---
+
 ## What is intentionally NOT done yet
 
 These are **deliberate deferrals**, not missing features:
@@ -312,7 +376,7 @@ The ingestion layer is intentionally solidified first.
 - Tighten snippet vs full classification
 - Add boilerplate rejection rules for paywalled sites
 - Possibly split GenericListingFetcher into listing/article helpers
-- Add search indexing once enough content accumulates
+- Search relevance tuning and facets
 
 ---
 
@@ -324,24 +388,22 @@ Pick one when resuming work:
    - Stricter skip rules
    - Content‑type semantics cleanup
 
-2. **More HTML sources**
+2. **More sources (articles + calendars)**
    - City press releases
    - School district news
    - County / board announcements
+   - Additional venue/library calendars
 
 3. **Search & discovery (IN PROGRESS)**
-   - Meilisearch + Scout indexing is implemented
-   - Next steps include relevance tuning, facets, and search‑backed chatbot retrieval
+   - Relevance tuning, facets, and search-backed chatbot retrieval
 
-4. **Analysis layer**
-   - Summaries
-   - Topic tagging
-   - Civic relevance scoring
+4. **Calendar admin parity**
+   - Bring events admin closer to articles admin workflows
 
 ---
 
 ## Bottom line
 
-As of now, Localmanac has a **complete and production‑grade ingestion foundation** and a **working full‑text search layer**. All ingested content — regardless of whether it originated from RSS, HTML, PDF, or OCR — is normalized into Articles and made searchable on a per‑city basis.  
+As of now, Localmanac has a **working ingestion foundation** for articles and calendar events, a **full-text search layer for articles**, and Prism-based enrichment/analysis with evidence-backed projections. Article content is normalized into Articles and searchable by city, while events are stored in Events with city scoping and provenance.
 
-This establishes a solid base for the next phase: conversational search and city‑scoped question answering.
+Next focus: event admin parity, claim review/resolution, and search tuning for question answering.

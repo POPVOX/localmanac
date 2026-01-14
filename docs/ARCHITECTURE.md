@@ -1,5 +1,9 @@
 # LocAlmanac Architecture (V1)
 
+## Current State (as of 2026-01-14)
+- Article + calendar ingestion are implemented end-to-end (scrapers + event sources, runner, admin, demo calendar).
+- Enrichment and analysis run via Prism multi-pass prompts with evidence packs and explainer projections.
+
 ## Goals
 LocAlmanac is a civic information platform that ingests public sources (news, agendas, minutes, etc.), normalizes them into structured entities, and answers questions with citations.
 
@@ -38,6 +42,15 @@ V1 prioritizes:
 - `article_bodies` store raw + cleaned text (and optionally raw_html).
 - `article_sources` store source URLs + type and optionally organization attribution.
 
+### Events / Calendar
+- `event_sources` define city-scoped calendar feeds + config (source_type, frequency, config).
+- `event_ingestion_runs` track per-source ingestion runs and outcomes.
+- `events` store normalized event records (starts_at/ends_at, all_day, location, event_url, source_hash).
+- `event_source_items` link events to source payloads + external IDs.
+- City scoping is explicit via `event_sources.city_id` and `events.city_id`.
+- Ingestion sources include ics, rss, json/json_api (profile registry), and html calendars (profile registry).
+- Timezone for parsing defaults to `event_sources.config.timezone`, then `cities.timezone`, and is stored in `timestampTz` fields.
+
 ### Entities
 - `organizations`, `people`, `locations`
 - `entity_aliases` provides alternative names for resolution (polymorphic by entity_type/entity_id).
@@ -67,10 +80,10 @@ Claims are the bridge between unstructured content and structured entities.
 ## Application Layers
 
 ### 1) Ingestion (Scrape → Store)
-- Inputs: scraper config
-- Outputs: Article + ArticleBody + ArticleSource (+ ScraperRun record)
+- Inputs: scraper config (articles) and event source config (calendar)
+- Outputs: Article + ArticleBody + ArticleSource (+ ScraperRun record) and Events + EventSourceItem + EventIngestionRun
 - Responsibilities:
-  - fetching (rss/html/pdf/api)
+  - fetching (rss/html/pdf/api) and calendars (ics/rss/json/html)
   - parsing
   - dedupe (canonical URL + content hash + source UID)
   - writing normalized content to DB

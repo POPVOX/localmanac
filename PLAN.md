@@ -1,5 +1,10 @@
 # LocAlmanac V1 Plan
 
+## Current State (as of 2026-01-14)
+- Calendar ingestion (events) is implemented end-to-end, including sources, fetchers, runner, writer, and a demo calendar page.
+- Enrichment + analysis run in a Prism multi-pass flow with evidence packs and explainer projections.
+- Admin UI exists for scrapers and event sources/events, with claim review and alias management still pending.
+
 ## Milestone 0 — Project baseline
 - [x] Set DB to PostgreSQL (local + env templates)
 - [x] Add Pint + Pest (or PHPUnit) + basic CI-friendly scripts
@@ -47,6 +52,14 @@
 - [x] Add a demo scraper config and seed it
 - [x] Add a command: `php artisan scrape:run {scraper}`
 
+## Milestone 2.5 — Calendar ingestion (events)
+- [x] Create `event_sources`, `event_ingestion_runs`, `events`, `event_source_items`
+- [x] Implement `Ingestion\EventIngestionRunner` + `EventWriter`
+- [x] Implement event fetchers (ics, rss, json/json_api, html)
+- [x] Add JSON + HTML profile registries (with per-source config)
+- [x] Add admin UI for event sources and event views
+- [x] Add demo calendar page
+
 ## Milestone 3 — Extraction v1 (text + OCR + enrichment)
 - [x] Implement PDF text extraction + OCR fallback 
 - [x] Persist extracted full text to ArticleBody.cleaned_text
@@ -84,7 +97,9 @@
 - [x] Compute weighted `civic_relevance_score` using the framework dimensions
 - [x] Persist extracted opportunities (dates/locations/URLs) for UI + chatbot
 - [x] Add minimal feedback capture (helpful/not helpful) for later calibration
-- [x] Analysis + enrichment executed via Prism-powered multi-pass LLM calls (analysis, entities, explainer, projections)
+- [x] Build evidence packs to keep LLM prompts bounded and evidence-driven
+- [x] Analysis + enrichment executed via Prism-powered multi-pass LLM calls (analysis, timeline/actions, explainer, enrichment)
+- [x] Project explainers with evidence into `article_explainers`
 
 ## Milestone 4 — Resolution v1 (aliases-first)
 - [ ] Implement `Resolution\EntityResolver`:
@@ -115,9 +130,14 @@
 
 ## Milestone 7 — Admin UI (IN PROGRESS)
 - [x] Scraper management UI
+- [x] Event sources admin UI
+- [x] Events admin UI (index/show/edit)
 - [ ] Claim review UI (pending)
 - [ ] Article enrichment UI (pending)
 - [ ] Alias management UI (pending)
+
+## Milestone 8 — Calendar events admin (parity with articles admin)
+- [ ] Bring events admin to feature parity with articles admin (create/edit workflows, review tools)
 
 ## Definition of Done (v1)
 - [x] One city seeded
