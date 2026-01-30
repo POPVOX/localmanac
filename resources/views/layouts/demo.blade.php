@@ -13,12 +13,27 @@
 
             <flux:spacer />
 
-            <flux:navbar class="-mb-px">
-                <flux:navbar.item href="#">Search</flux:navbar.item>
-                <flux:navbar.item href="#">Issues</flux:navbar.item>
-                <flux:navbar.item href="#">Calendar</flux:navbar.item>
-                <flux:navbar.item href="#">Questions</flux:navbar.item>
-            </flux:navbar>
+            @auth
+                <flux:navbar class="-mb-px">
+                    <flux:navbar.item href="#">Search</flux:navbar.item>
+                    <flux:navbar.item href="#">Issues</flux:navbar.item>
+                    <flux:navbar.item href="{{ route('demo.calendar') }}" wire:navigate>Calendar</flux:navbar.item>
+                    <flux:navbar.item href="#">Questions</flux:navbar.item>
+                </flux:navbar>
+            @endauth
+
+            @guest
+                <flux:navbar class="-mb-px">
+                    <flux:navbar.item href="{{ route('login') }}" wire:navigate>
+                        {{ __('Log in') }}
+                    </flux:navbar.item>
+                    @if (Route::has('register'))
+                        <flux:navbar.item href="{{ route('register') }}" wire:navigate>
+                            {{ __('Create account') }}
+                        </flux:navbar.item>
+                    @endif
+                </flux:navbar>
+            @endguest
 
             @auth
                 <flux:dropdown position="top" align="start" class="ms-3">

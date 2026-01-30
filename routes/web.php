@@ -21,9 +21,7 @@ use Illuminate\Support\Facades\Route;
 use Laravel\Fortify\Features;
 use Livewire\Volt\Volt;
 
-Route::get('/', function () {
-    return view('welcome');
-})->name('home');
+Route::view('/', 'welcome')->name('home');
 
 Route::get('demo/calendar', DemoCalendar::class)->name('demo.calendar');
 Route::get('demo/articles/{article}', ArticleExplainer::class)->name('demo.articles.show');
