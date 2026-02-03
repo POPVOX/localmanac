@@ -24,7 +24,7 @@ use Livewire\Volt\Volt;
 Route::view('/', 'welcome')->name('home');
 
 Route::get('demo/calendar', DemoCalendar::class)->name('demo.calendar');
-Route::get('demo/articles/{article}', ArticleExplainer::class)->name('demo.articles.show');
+Route::livewire('demo/articles/{article}', ArticleExplainer::class)->name('demo.articles.show');
 Route::get('articles/{article}/source', ArticleSourceController::class)->name('articles.source');
 
 Route::middleware(['auth'])->group(function () {
