@@ -6,8 +6,8 @@ use App\Jobs\EnrichArticle;
 use App\Models\Article;
 use App\Models\ArticleBody;
 use App\Models\ArticleSource;
+use App\Services\Articles\ArticleTextService;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use InvalidArgumentException;
 
 class ArticleWriter
@@ -47,9 +47,8 @@ class ArticleWriter
             if (is_array($articleBody) && $articleBody !== []) {
                 $cleanedText = $articleBody['cleaned_text'] ?? null;
 
-                if (empty($article->summary) && is_string($cleanedText) && trim($cleanedText) !== '') {
-                    $article->summary = Str::limit(trim($cleanedText), 200);
-                    $article->save();
+                if (is_string($cleanedText) && trim($cleanedText) !== '') {
+                    app(ArticleTextService::class)->refresh($article, cleanedText: $cleanedText);
                 }
 
                 $extractedAt = array_key_exists('extracted_at', $articleBody)

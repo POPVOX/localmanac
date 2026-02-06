@@ -8,6 +8,7 @@ use App\Services\Analysis\ArticleExplainerProjector;
 use App\Services\Analysis\CivicActionProjector;
 use App\Services\Analysis\CivicRelevanceCalculator;
 use App\Services\Analysis\ProcessTimelineProjector;
+use App\Services\Articles\ArticleTextService;
 use App\Services\Extraction\ClaimWriter;
 use App\Services\Extraction\Enricher;
 use App\Services\Extraction\ProjectionWriter;
@@ -43,7 +44,8 @@ class EnrichArticle implements ShouldQueue
         CivicActionProjector $projector,
         ProcessTimelineProjector $processTimelineProjector,
         ArticleExplainerProjector $articleExplainerProjector,
-        CivicRelevanceCalculator $calculator
+        CivicRelevanceCalculator $calculator,
+        ArticleTextService $articleTextService
     ): void {
         $article = Article::query()
             ->with(['body', 'city', 'scraper.organization'])
@@ -97,5 +99,6 @@ class EnrichArticle implements ShouldQueue
         $projector->projectForArticle($article);
         $processTimelineProjector->projectForArticle($article, $payload);
         $articleExplainerProjector->projectForArticle($article, $payload);
+        $articleTextService->refresh($article);
     }
 }

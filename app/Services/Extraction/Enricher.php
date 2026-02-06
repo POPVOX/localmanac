@@ -369,6 +369,7 @@ Source organization: {$organization}
 
 TASK
 Produce a concise, demo-style explainer with:
+- headline: short, clear headline (4–10 words, <= 80 chars). Must read like a title, not a sentence.
 - whats_happening: 2–4 sentences summarizing the situation in plain English.
 - why_it_matters: 1–3 sentences explaining why a resident should care.
 - key_details: up to 5 bullet-style strings (dates, times, locations, dollar amounts, deadlines) ONLY if explicitly present.
@@ -378,6 +379,7 @@ Produce a concise, demo-style explainer with:
 STYLE
 - No jargon unless the text uses it; if needed, explain it briefly.
 - Be specific with dates/times/places when present.
+- Avoid starting the headline with "The city of..." or "The City is...".
 - If details are missing, omit that list item instead of guessing.
 
 EVIDENCE RULES
@@ -410,6 +412,7 @@ PROMPT;
             name: 'explainer',
             description: 'Demo-style explainer content.',
             properties: [
+                new StringSchema('headline', 'Short headline for the article.', true),
                 new StringSchema('whats_happening', 'Plain-English summary.', true),
                 new StringSchema('why_it_matters', 'Why a resident should care.', true),
                 new ArraySchema('key_details', 'Up to 5 key details.', new StringSchema('item', 'A key detail.')),
@@ -425,7 +428,7 @@ PROMPT;
                     allowAdditionalProperties: false
                 ),
             ],
-            requiredFields: ['whats_happening', 'why_it_matters', 'key_details', 'what_to_watch', 'evidence'],
+            requiredFields: ['headline', 'whats_happening', 'why_it_matters', 'key_details', 'what_to_watch', 'evidence'],
             allowAdditionalProperties: false
         );
 

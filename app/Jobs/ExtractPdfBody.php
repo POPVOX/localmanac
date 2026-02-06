@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Article;
 use App\Models\ArticleBody;
 use App\Models\Scraper;
+use App\Services\Articles\ArticleTextService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -147,9 +148,8 @@ class ExtractPdfBody implements ShouldQueue
 
             $this->persistBody($article, $rawText, $cleanedText, $status, $error, $meta);
 
-            if ($article->summary === null && $cleanedText !== '') {
-                $article->summary = Str::limit($cleanedText, 200);
-                $article->save();
+            if ($cleanedText !== '') {
+                app(ArticleTextService::class)->refresh($article, cleanedText: $cleanedText);
             }
 
             $this->reindexArticle($article);
@@ -163,9 +163,8 @@ class ExtractPdfBody implements ShouldQueue
 
         $this->persistBody($article, $rawText, $cleanedText, $status, $error, $meta);
 
-        if ($article->summary === null && $cleanedText !== '') {
-            $article->summary = Str::limit($cleanedText, 200);
-            $article->save();
+        if ($cleanedText !== '') {
+            app(ArticleTextService::class)->refresh($article, cleanedText: $cleanedText);
         }
 
         $this->reindexArticle($article);

@@ -1,6 +1,9 @@
 <?php
 
 use App\Http\Controllers\ArticleSourceController;
+use App\Http\Controllers\AskController;
+use App\Livewire\Admin\ChatSources\Form as ChatSourcesForm;
+use App\Livewire\Admin\ChatSources\Index as ChatSourcesIndex;
 use App\Livewire\Admin\Cities\Form as CitiesForm;
 use App\Livewire\Admin\Cities\Index as CitiesIndex;
 use App\Livewire\Admin\Dashboard as AdminDashboard;
@@ -15,16 +18,20 @@ use App\Livewire\Admin\Organizations\Index as OrganizationsIndex;
 use App\Livewire\Admin\Scrapers\Form as ScrapersForm;
 use App\Livewire\Admin\Scrapers\Index as ScrapersIndex;
 use App\Livewire\Admin\Scrapers\Show as ScrapersShow;
+use App\Livewire\Dashboard as UserDashboard;
 use App\Livewire\Demo\ArticleExplainer;
 use App\Livewire\Demo\Calendar as DemoCalendar;
+use App\Livewire\Demo\Questions as DemoQuestions;
 use Illuminate\Support\Facades\Route;
 use Laravel\Fortify\Features;
 
 Route::view('/', 'welcome')->name('home');
 
 Route::get('demo/calendar', DemoCalendar::class)->name('demo.calendar');
-Route::livewire('demo/articles/{article}', ArticleExplainer::class)->name('demo.articles.show');
+Route::livewire('articles/{article}', ArticleExplainer::class)->name('articles.show');
 Route::get('articles/{article}/source', ArticleSourceController::class)->name('articles.source');
+Route::get('questions', DemoQuestions::class)->name('questions');
+Route::post('ask', AskController::class)->name('ask')->middleware('throttle:ask');
 
 Route::middleware(['auth'])->group(function () {
     Route::redirect('settings', 'settings/profile');
@@ -45,10 +52,13 @@ Route::middleware(['auth'])->group(function () {
         ->name('two-factor.show');
 });
 
-Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
-    Route::get('dashboard', AdminDashboard::class)->name('dashboard');
+Route::middleware(['auth', 'verified'])->group(function () {
+    Route::get('dashboard', UserDashboard::class)->name('dashboard');
+});
 
+Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
     Route::prefix('admin')->as('admin.')->group(function () {
+        Route::get('dashboard', AdminDashboard::class)->name('dashboard');
         Route::get('cities', CitiesIndex::class)->name('cities.index');
         Route::get('cities/create', CitiesForm::class)->name('cities.create');
         Route::get('cities/{city}/edit', CitiesForm::class)->name('cities.edit');
@@ -70,5 +80,9 @@ Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
         Route::get('events', EventsIndex::class)->name('events.index');
         Route::get('events/{event}/edit', EventsForm::class)->name('events.edit');
         Route::get('events/{event}', EventsShow::class)->name('events.show');
+
+        Route::get('chat-sources', ChatSourcesIndex::class)->name('chat-sources.index');
+        Route::get('chat-sources/create', ChatSourcesForm::class)->name('chat-sources.create');
+        Route::get('chat-sources/{source}/edit', ChatSourcesForm::class)->name('chat-sources.edit');
     });
 });

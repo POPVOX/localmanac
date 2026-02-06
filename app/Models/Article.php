@@ -77,7 +77,9 @@ class Article extends Model
 
     public function articleIssueAreas(): HasMany
     {
-        return $this->hasMany(ArticleIssueArea::class);
+        return $this->hasMany(ArticleIssueArea::class)
+            ->orderByDesc('confidence')
+            ->orderBy('issue_area_id');
     }
 
     public function civicActions(): HasMany

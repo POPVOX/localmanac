@@ -23,5 +23,8 @@ class DatabaseSeeder extends Seeder
                 'email_verified_at' => now(),
             ]
         );
+
+        $this->call(IssueAreaSeeder::class);
+        $this->call(ChatSourceSeeder::class);
     }
 }
