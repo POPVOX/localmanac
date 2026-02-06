@@ -3,13 +3,19 @@
     <head>
         @include('partials.head')
     </head>
-    <body class="min-h-screen bg-white text-zinc-900 antialiased dark:bg-zinc-900 dark:text-zinc-100">
-        <flux:header container class="bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
-            <flux:brand href="{{ route('home') }}" name="LocAlmanac" wire:navigate>
-                <x-slot name="logo">
-                    <x-app-logo-icon class="size-5 text-zinc-900 dark:text-zinc-100" />
-                </x-slot>
-            </flux:brand>
+    <body class="min-h-screen bg-[radial-gradient(circle_at_top,_#f8fafc,_#eef2f7_55%,_#ffffff_100%)] text-zinc-900 antialiased dark:bg-zinc-900 dark:text-zinc-100">
+        <flux:header container class="bg-white/90 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700 backdrop-blur">
+            <div class="flex items-center gap-3">
+                <flux:brand href="{{ route('dashboard') }}" name="LocAlmanac" wire:navigate>
+                    <x-slot name="logo">
+                        <x-app-logo-icon class="size-5 text-zinc-900 dark:text-zinc-100" />
+                    </x-slot>
+                </flux:brand>
+
+                <flux:badge color="zinc" variant="subtle" class="uppercase tracking-wide">
+                    {{ __('Pilot') }}
+                </flux:badge>
+            </div>
 
             <flux:spacer />
 
@@ -63,7 +69,7 @@
             @endauth
         </flux:header>
 
-        <flux:main container>
+        <flux:main container class="py-8">
             {{ $slot }}
         </flux:main>
 

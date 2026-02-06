@@ -50,4 +50,9 @@ class City extends Model
     {
         return $this->hasMany(ScraperRun::class);
     }
+
+    public function chatSources(): HasMany
+    {
+        return $this->hasMany(ChatSource::class);
+    }
 }

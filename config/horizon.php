@@ -100,6 +100,8 @@ return [
         'redis:default' => 60,
         'redis:scraping' => 60,
         'redis:calendar' => 60,
+        'redis:ingestion' => 300,
+        'redis:embedding' => 300,
     ],
 
     /*
@@ -212,6 +214,32 @@ return [
             'timeout' => 60,
             'nice' => 0,
         ],
+        'supervisor-ingestion' => [
+            'connection' => 'redis',
+            'queue' => ['ingestion'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 256,
+            'tries' => 1,
+            'timeout' => (int) env('CHAT_CRAWL_JOB_TIMEOUT', 1200),
+            'nice' => 0,
+        ],
+        'supervisor-embedding' => [
+            'connection' => 'redis',
+            'queue' => ['embedding'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 256,
+            'tries' => 1,
+            'timeout' => 600,
+            'nice' => 0,
+        ],
     ],
 
     'environments' => [
@@ -221,10 +249,22 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
+            'supervisor-ingestion' => [
+                'maxProcesses' => 2,
+            ],
+            'supervisor-embedding' => [
+                'maxProcesses' => 2,
+            ],
         ],
 
         'local' => [
             'supervisor-1' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-ingestion' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-embedding' => [
                 'maxProcesses' => 1,
             ],
         ],

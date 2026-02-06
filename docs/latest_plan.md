@@ -1,4 +1,4 @@
-CODEX CHECKLIST — Add Headless Browser Fetcher (Playwright) as a LAST-RESORT fetcher
+Add Headless Browser Fetcher (Playwright) as a LAST-RESORT fetcher
 
 Goal:
 - Add a new fetcher that uses a headless browser ONLY for sources that explicitly opt into it.
