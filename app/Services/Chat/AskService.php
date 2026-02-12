@@ -3,6 +3,7 @@
 namespace App\Services\Chat;
 
 use App\Models\City;
+use App\Models\User;
 use Illuminate\Support\Collection;
 use RuntimeException;
 
@@ -10,7 +11,6 @@ class AskService
 {
     public function __construct(
         private readonly ChatSourceSelector $selector,
-        private readonly ChatSourceRetriever $retriever,
         private readonly AnswerSynthesizer $synthesizer,
     ) {}
 
@@ -25,32 +25,28 @@ class AskService
     public function answer(string $question, ?int $cityId = null, ?string $citySlug = null): array
     {
         $question = trim($question);
-
         $city = $this->resolveCity($cityId, $citySlug);
-
         $sources = $this->selector->select($city->id, $question);
-        $fetch = $this->retriever->retrieve($sources, $question);
-        $evidence = $this->filterEvidence($fetch['evidence']);
-        $meta = $fetch['meta'];
 
-        if ($evidence === []) {
-            return $this->fallbackResponse($city, $sources, $meta, $evidence);
+        if ($sources->isEmpty()) {
+            return $this->fallbackResponse($city, $sources);
         }
 
         try {
-            $answerPayload = $this->synthesizer->synthesize($question, $city, $evidence);
+            $answerPayload = $this->synthesizer->synthesize($question, $city, $sources);
         } catch (\Throwable) {
-            return $this->fallbackResponse($city, $sources, $meta, $evidence);
-        }
-        $answer = (string) ($answerPayload['answer'] ?? '');
-        $citations = $this->mapCitations($answerPayload['citation_ids'], $evidence);
-
-        if ($citations === [] && trim($answer) !== '' && $evidence !== []) {
-            $citations = $this->fallbackCitations($evidence);
+            return $this->fallbackResponse($city, $sources);
         }
 
-        if ($citations === [] || trim($answer) === '') {
-            return $this->fallbackResponse($city, $sources, $meta, $evidence);
+        $answer = trim((string) ($answerPayload['answer'] ?? ''));
+        $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
+
+        if ($citations === [] && $answer !== '') {
+            $citations = $this->fallbackCitations($sources);
+        }
+
+        if ($citations === [] || $answer === '') {
+            return $this->fallbackResponse($city, $sources);
         }
 
         return [
@@ -63,9 +59,86 @@ class AskService
             ],
             'meta' => [
                 'sources_used' => $sources->count(),
-                'pages_fetched' => $meta['pages_fetched'] ?? 0,
-                'cache_hits' => $meta['cache_hits'] ?? 0,
+                'pages_fetched' => $this->pagesFetchedFromCitations($citations),
+                'cache_hits' => 0,
             ],
+        ];
+    }
+
+    /**
+     * @return array{
+     *     answer: string,
+     *     citations: array<int, array{title: string, source_url: string, type: string}>,
+     *     city: array{id: int, name: string, slug: string},
+     *     meta: array{sources_used: int, pages_fetched: int, cache_hits: int},
+     *     conversation_id: string|null
+     * }
+     */
+    public function answerStreamingForUser(
+        string $question,
+        int|string|null $citySelector,
+        User $user,
+        ?string $conversationId,
+        callable $onDelta,
+    ): array {
+        $question = trim($question);
+        $city = $this->resolveCityFromSelector($citySelector);
+        $sources = $this->selector->select($city->id, $question);
+
+        if ($sources->isEmpty()) {
+            $fallback = $this->fallbackResponse($city, $sources);
+
+            return array_merge($fallback, ['conversation_id' => $conversationId]);
+        }
+
+        try {
+            $answerPayload = $this->synthesizer->synthesizeStreaming(
+                question: $question,
+                city: $city,
+                sources: $sources,
+                user: $user,
+                conversationId: $conversationId,
+                onDelta: $onDelta,
+            );
+        } catch (\Throwable) {
+            $fallback = $this->fallbackResponse($city, $sources);
+
+            return array_merge($fallback, ['conversation_id' => $conversationId]);
+        }
+
+        $answer = trim((string) ($answerPayload['answer'] ?? ''));
+        $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
+
+        if ($citations === [] && $answer !== '') {
+            $citations = $this->fallbackCitations($sources);
+        }
+
+        if ($citations === [] || $answer === '') {
+            $fallback = $this->fallbackResponse($city, $sources);
+
+            return array_merge($fallback, [
+                'conversation_id' => is_string($answerPayload['conversation_id'] ?? null)
+                    ? $answerPayload['conversation_id']
+                    : $conversationId,
+            ]);
+        }
+
+        return [
+            'answer' => $answer,
+            'citations' => $citations,
+            'city' => [
+                'id' => (int) $city->id,
+                'name' => $city->name,
+                'slug' => $city->slug,
+            ],
+            'meta' => [
+                'sources_used' => $sources->count(),
+                'pages_fetched' => $this->pagesFetchedFromCitations($citations),
+                'cache_hits' => 0,
+            ],
+            'conversation_id' => is_string($answerPayload['conversation_id'] ?? null)
+                ? $answerPayload['conversation_id']
+                : $conversationId,
         ];
     }
 
@@ -97,23 +170,37 @@ class AskService
         return $city;
     }
 
+    private function resolveCityFromSelector(int|string|null $citySelector): City
+    {
+        if (is_int($citySelector)) {
+            return $this->resolveCity($citySelector, null);
+        }
+
+        if (is_string($citySelector) && trim($citySelector) !== '') {
+            return $this->resolveCity(null, $citySelector);
+        }
+
+        return $this->resolveCity(null, null);
+    }
+
     /**
-     * @param  array<int, string>  $citationIds
-     * @param  array<int, array<string, mixed>>  $evidence
+     * @param  array<int, mixed>  $citations
      * @return array<int, array{title: string, source_url: string, type: string}>
      */
-    private function mapCitations(array $citationIds, array $evidence): array
+    private function normalizeCitations(array $citations): array
     {
-        $byId = collect($evidence)->keyBy('id');
+        return collect($citations)
+            ->filter(fn ($item): bool => is_array($item))
+            ->map(function (array $item): array {
+                $sourceUrl = trim((string) ($item['source_url'] ?? ''));
 
-        return collect($citationIds)
-            ->map(fn (string $id) => $byId->get($id))
-            ->filter()
-            ->map(fn (array $item) => [
-                'title' => (string) ($item['title'] ?? 'Source'),
-                'source_url' => (string) ($item['source_url'] ?? ''),
-                'type' => (string) ($item['type'] ?? 'html'),
-            ])
+                return [
+                    'title' => trim((string) ($item['title'] ?? 'Source')) ?: 'Source',
+                    'source_url' => $sourceUrl,
+                    'type' => trim((string) ($item['type'] ?? $this->inferCitationType($sourceUrl))) ?: 'html',
+                ];
+            })
+            ->filter(fn (array $item): bool => $item['source_url'] !== '')
             ->unique('source_url')
             ->values()
             ->all();
@@ -121,7 +208,6 @@ class AskService
 
     /**
      * @param  Collection<int, \App\Models\ChatSource>  $sources
-     * @param  array<int, array<string, mixed>>  $evidence
      * @return array{
      *     answer: string,
      *     citations: array<int, array{title: string, source_url: string, type: string}>,
@@ -129,9 +215,9 @@ class AskService
      *     meta: array{sources_used: int, pages_fetched: int, cache_hits: int}
      * }
      */
-    private function fallbackResponse(City $city, Collection $sources, array $meta, array $evidence): array
+    private function fallbackResponse(City $city, Collection $sources): array
     {
-        $citations = $this->fallbackCitations($evidence);
+        $citations = $this->fallbackCitations($sources);
 
         return [
             'answer' => __('I could not find the answer in the sources I checked. Try a different wording or a more specific question.'),
@@ -143,45 +229,49 @@ class AskService
             ],
             'meta' => [
                 'sources_used' => $sources->count(),
-                'pages_fetched' => $meta['pages_fetched'] ?? 0,
-                'cache_hits' => $meta['cache_hits'] ?? 0,
+                'pages_fetched' => $this->pagesFetchedFromCitations($citations),
+                'cache_hits' => 0,
             ],
         ];
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $evidence
-     * @return array<int, array<string, mixed>>
-     */
-    private function filterEvidence(array $evidence): array
-    {
-        $minScore = (int) config('chat.min_evidence_score_per_page', 2);
-
-        if ($minScore <= 0) {
-            return $evidence;
-        }
-
-        return array_values(array_filter(
-            $evidence,
-            fn (array $item) => (int) ($item['score'] ?? 0) >= $minScore
-        ));
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $evidence
+     * @param  Collection<int, \App\Models\ChatSource>  $sources
      * @return array<int, array{title: string, source_url: string, type: string}>
      */
-    private function fallbackCitations(array $evidence): array
+    private function fallbackCitations(Collection $sources): array
     {
-        return collect($this->filterEvidence($evidence))
+        return $sources
             ->take(3)
-            ->map(fn (array $item) => [
-                'title' => (string) ($item['title'] ?? 'Source'),
-                'source_url' => (string) ($item['source_url'] ?? ''),
-                'type' => (string) ($item['type'] ?? 'html'),
-            ])
+            ->map(function ($source): array {
+                $url = trim((string) ($source->source_url ?? ''));
+
+                return [
+                    'title' => trim((string) ($source->name ?? 'Source')) ?: 'Source',
+                    'source_url' => $url,
+                    'type' => $this->inferCitationType($url),
+                ];
+            })
+            ->filter(fn (array $citation): bool => $citation['source_url'] !== '')
             ->unique('source_url')
             ->values()
             ->all();
+    }
+
+    /**
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $citations
+     */
+    private function pagesFetchedFromCitations(array $citations): int
+    {
+        return collect($citations)
+            ->pluck('source_url')
+            ->filter()
+            ->unique()
+            ->count();
+    }
+
+    private function inferCitationType(string $url): string
+    {
+        return str_ends_with(mb_strtolower($url), '.pdf') ? 'pdf' : 'html';
     }
 }

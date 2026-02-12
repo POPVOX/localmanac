@@ -2,7 +2,17 @@
 
 return [
     'provider' => env('CHAT_PROVIDER', config('enrichment.provider', 'openai')),
+    'provider_chain' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('CHAT_PROVIDER_CHAIN', env('CHAT_PROVIDER', config('enrichment.provider', 'openai'))))
+    ))),
     'model' => env('CHAT_MODEL', config('enrichment.model', 'gpt-4o-mini')),
+    'retrieval_mode' => env('CHAT_RETRIEVAL_MODE', 'local_then_web'),
+    'streaming_enabled' => (bool) env('CHAT_STREAMING_ENABLED', true),
+    'streaming_refine_citations' => (bool) env('CHAT_STREAMING_REFINE_CITATIONS', false),
+    'memory_enabled' => (bool) env('CHAT_MEMORY_ENABLED', true),
+    'memory_session_key' => env('CHAT_MEMORY_SESSION_KEY', 'chat.conversation_id'),
+    'memory_max_messages' => (int) env('CHAT_MEMORY_MAX_MESSAGES', 100),
     'max_sources' => 12,
     'link_limit' => 6,
     'max_chars_per_page' => 12000,
@@ -13,8 +23,14 @@ return [
     'vector_enabled' => (bool) env('CHAT_VECTOR_ENABLED', true),
     'fts_enabled' => (bool) env('CHAT_FTS_ENABLED', true),
     'embedding_provider' => env('CHAT_EMBEDDING_PROVIDER', 'openai'),
+    'embedding_provider_chain' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('CHAT_EMBEDDING_PROVIDER_CHAIN', env('CHAT_EMBEDDING_PROVIDER', 'openai')))
+    ))),
     'embedding_model' => env('CHAT_EMBEDDING_MODEL', 'text-embedding-3-small'),
     'embedding_dimensions' => (int) env('CHAT_EMBEDDING_DIMENSIONS', 1536),
+    'embedding_cache' => (bool) env('CHAT_EMBEDDING_CACHE', true),
+    'embedding_cache_seconds' => (int) env('CHAT_EMBEDDING_CACHE_SECONDS', 0),
     'embedding_api_key' => env('CHAT_EMBEDDING_API_KEY', env('OPENAI_API_KEY')),
     'embedding_base_url' => env('CHAT_EMBEDDING_BASE_URL', 'https://api.openai.com/v1'),
     'embedding_timeout' => (int) env('CHAT_EMBEDDING_TIMEOUT', 30),
@@ -38,6 +54,42 @@ return [
     'min_evidence_score_per_page' => 1,
     'min_evidence_score_total' => 2,
     'min_evidence_count' => 1,
+    'tools' => [
+        'similarity' => [
+            'enabled' => (bool) env('CHAT_TOOL_SIMILARITY_ENABLED', true),
+            'min_similarity' => (float) env('CHAT_TOOL_SIMILARITY_MIN', 0.65),
+            'limit' => (int) env('CHAT_TOOL_SIMILARITY_LIMIT', 12),
+        ],
+        'web_search' => [
+            'enabled' => (bool) env('CHAT_TOOL_WEB_SEARCH_ENABLED', true),
+            'max_searches' => (int) env('CHAT_TOOL_WEB_SEARCH_MAX', 2),
+            'only_when_fresh_intent' => (bool) env('CHAT_TOOL_WEB_SEARCH_FRESH_ONLY', true),
+            'use_city_location' => (bool) env('CHAT_TOOL_WEB_SEARCH_USE_CITY_LOCATION', true),
+            'location_city' => env('CHAT_TOOL_WEB_SEARCH_CITY'),
+            'location_region' => env('CHAT_TOOL_WEB_SEARCH_REGION'),
+            'default_country' => env('CHAT_TOOL_WEB_SEARCH_COUNTRY', 'US'),
+            'allowed_domains_mode' => env('CHAT_TOOL_WEB_SEARCH_ALLOWED_MODE', 'source_domains'),
+            'allowed_domains' => array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) env('CHAT_TOOL_WEB_SEARCH_ALLOWED_DOMAINS', ''))
+            ))),
+        ],
+    ],
+    'events' => [
+        'enabled' => (bool) env('CHAT_EVENTS_ENABLED', true),
+        'intent_mode' => env('CHAT_EVENTS_INTENT_MODE', 'intent'),
+        'max_results' => (int) env('CHAT_EVENTS_MAX_RESULTS', 8),
+        'no_results_suggest_alternatives' => (bool) env('CHAT_EVENTS_NO_RESULTS_SUGGEST', true),
+        'web_fallback' => [
+            'enabled' => (bool) env('CHAT_EVENTS_WEB_FALLBACK_ENABLED', true),
+            'only_when_local_empty' => (bool) env('CHAT_EVENTS_WEB_FALLBACK_ONLY_LOCAL_EMPTY', true),
+            'allowed_domains_mode' => env('CHAT_EVENTS_WEB_FALLBACK_ALLOWED_MODE', 'city_event_sources_merged'),
+            'allowed_domains' => array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) env('CHAT_EVENTS_WEB_FALLBACK_ALLOWED_DOMAINS', ''))
+            ))),
+        ],
+    ],
     'cache_ttl' => (int) env('CHAT_CACHE_TTL', 1800),
     'http_timeout' => (int) env('CHAT_HTTP_TIMEOUT', 20),
     'http_retries' => (int) env('CHAT_HTTP_RETRIES', 2),

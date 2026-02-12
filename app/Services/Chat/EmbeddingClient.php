@@ -2,8 +2,8 @@
 
 namespace App\Services\Chat;
 
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Laravel\Ai\Embeddings;
 
 class EmbeddingClient
 {
@@ -19,53 +19,36 @@ class EmbeddingClient
             return [];
         }
 
-        if (config('chat.embedding_provider') !== 'openai') {
+        if (! config('chat.vector_enabled', true)) {
             return [];
         }
 
-        $apiKey = (string) config('chat.embedding_api_key');
+        $dimensions = (int) config('chat.embedding_dimensions', 1536);
+        $model = (string) config('chat.embedding_model', 'text-embedding-3-small');
 
-        if ($apiKey === '') {
-            Log::warning('Embedding API key missing.');
+        try {
+            $request = Embeddings::for($inputs)->dimensions($dimensions);
 
-            return [];
-        }
-
-        $response = Http::withToken($apiKey)
-            ->acceptJson()
-            ->timeout((int) config('chat.embedding_timeout', 30))
-            ->retry((int) config('chat.embedding_retries', 2), 250)
-            ->post(rtrim((string) config('chat.embedding_base_url', 'https://api.openai.com/v1'), '/').'/embeddings', [
-                'model' => config('chat.embedding_model', 'text-embedding-3-small'),
-                'input' => $inputs,
-            ]);
-
-        if (! $response->successful()) {
-            Log::warning('Embedding request failed.', [
-                'status' => $response->status(),
-                'body' => $response->body(),
-            ]);
-
-            return [];
-        }
-
-        $payload = $response->json();
-        $data = $payload['data'] ?? [];
-
-        if (! is_array($data)) {
-            return [];
-        }
-
-        $vectors = [];
-        foreach ($data as $item) {
-            if (! is_array($item) || ! isset($item['embedding']) || ! is_array($item['embedding'])) {
-                continue;
+            if ((bool) config('chat.embedding_cache', true)) {
+                $cacheSeconds = (int) config('chat.embedding_cache_seconds', 0);
+                $request->cache($cacheSeconds > 0 ? $cacheSeconds : null);
             }
 
-            $vectors[] = array_map('floatval', $item['embedding']);
-        }
+            $response = $request->generate(
+                provider: $this->providerPreference($model),
+            );
 
-        return $vectors;
+            return array_map(
+                fn (array $embedding): array => array_map('floatval', $embedding),
+                $response->embeddings
+            );
+        } catch (\Throwable $exception) {
+            Log::warning('Embedding request failed.', [
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [];
+        }
     }
 
     /**
@@ -76,5 +59,37 @@ class EmbeddingClient
         $vectors = $this->embed([$input]);
 
         return $vectors[0] ?? null;
+    }
+
+    /**
+     * @return array<string, string|null>|string
+     */
+    private function providerPreference(string $model): array|string
+    {
+        $providers = config('chat.embedding_provider_chain');
+
+        if (! is_array($providers) || $providers === []) {
+            return [
+                (string) config('chat.embedding_provider', 'openai') => $model,
+            ];
+        }
+
+        $resolved = [];
+
+        foreach (array_values($providers) as $index => $provider) {
+            if (! is_string($provider) || trim($provider) === '') {
+                continue;
+            }
+
+            $resolved[$provider] = $index === 0 ? $model : null;
+        }
+
+        if ($resolved === []) {
+            return [
+                (string) config('chat.embedding_provider', 'openai') => $model,
+            ];
+        }
+
+        return $resolved;
     }
 }

@@ -3,6 +3,10 @@
 return [
     'enabled' => true,
     'provider' => 'openai',
+    'provider_chain' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('ENRICHMENT_PROVIDER_CHAIN', 'openai'))
+    ))),
     'model' => 'gpt-4o-mini',
     'prompt_version' => 'enrich_v1_prompt_002',
     'min_cleaned_text_chars' => 800,

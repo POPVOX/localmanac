@@ -14,6 +14,19 @@
             </div>
         </div>
 
+        @if ($conversationId || count($messages) > 0)
+            <div class="flex justify-end">
+                <flux:button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    wire:click="startNewConversation"
+                >
+                    {{ __('New conversation') }}
+                </flux:button>
+            </div>
+        @endif
+
         <div
             x-data="{
                 pendingQuestion: '',
@@ -97,13 +110,19 @@
                     <div class="flex w-full justify-start">
                         <div class="w-full max-w-2xl space-y-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-sm">
                             <flux:badge color="emerald" variant="subtle" class="w-fit">{{ __('Assistant') }}</flux:badge>
-                            <div class="flex items-center gap-3 text-sm text-zinc-500" role="status" aria-live="polite">
-                                <div class="flex items-center gap-1">
-                                    <span class="h-2 w-2 animate-bounce rounded-full bg-emerald-400 [animation-delay:-0.24s] motion-reduce:animate-none"></span>
-                                    <span class="h-2 w-2 animate-bounce rounded-full bg-emerald-400 [animation-delay:-0.12s] motion-reduce:animate-none"></span>
-                                    <span class="h-2 w-2 animate-bounce rounded-full bg-emerald-400 motion-reduce:animate-none"></span>
-                                </div>
-                                <span>{{ __('Thinking…') }}</span>
+                            <div
+                                role="status"
+                                aria-live="polite"
+                                data-testid="assistant-typing-indicator"
+                                class="flex items-center gap-2 text-xs font-medium text-zinc-500"
+                            >
+                                <span class="sr-only">{{ __('Assistant is thinking') }}</span>
+                                <span class="inline-flex items-center gap-1">
+                                    <span class="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-bounce [animation-delay:0ms]"></span>
+                                    <span class="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-bounce [animation-delay:120ms]"></span>
+                                    <span class="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-bounce [animation-delay:240ms]"></span>
+                                </span>
+                                <span>{{ __('Thinking') }}</span>
                             </div>
                         </div>
                     </div>
@@ -137,8 +156,8 @@
                                 wire:loading.attr="disabled"
                                 aria-label="{{ __('Send question') }}"
                             >
-                                <flux:icon icon="paper-airplane" class="size-4" />
-                                <span wire:loading class="sr-only">{{ __('Thinking...') }}</span>
+                                <flux:icon icon="paper-airplane" class="size-4" wire:loading.remove wire:target="ask" />
+                                <flux:icon icon="arrow-path" class="size-4 animate-spin" wire:loading wire:target="ask" />
                             </flux:button>
                         </x-slot>
                     </flux:composer>

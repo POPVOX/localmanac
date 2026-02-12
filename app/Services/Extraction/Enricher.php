@@ -4,18 +4,20 @@ namespace App\Services\Extraction;
 
 use App\Models\Article;
 use App\Models\IssueArea;
+use App\Services\Extraction\Agents\CivicAnalysisAgent;
+use App\Services\Extraction\Agents\EntityEnrichmentAgent;
+use App\Services\Extraction\Agents\ExplainerAgent;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
-use Prism\Prism\Contracts\Schema;
-use Prism\Prism\Facades\Prism;
-use Prism\Prism\Schema\ArraySchema;
-use Prism\Prism\Schema\EnumSchema;
-use Prism\Prism\Schema\NumberSchema;
-use Prism\Prism\Schema\ObjectSchema;
-use Prism\Prism\Schema\StringSchema;
 
 class Enricher
 {
+    public function __construct(
+        private readonly CivicAnalysisAgent $civicAnalysisAgent,
+        private readonly EntityEnrichmentAgent $entityEnrichmentAgent,
+        private readonly ExplainerAgent $explainerAgent,
+    ) {}
+
     /**
      * @return array{
      *   analysis: array{
@@ -99,27 +101,21 @@ class Enricher
             ->all();
 
         try {
-            $response = Prism::structured()
-                ->using(
-                    config('enrichment.provider', 'openai'),
-                    config('enrichment.model', 'gpt-4o-mini')
-                )
-                ->withSchema($this->civicSchema($issueAreaSlugs))
-                ->withPrompt($this->civicPrompt($article, $packText, $issueAreaSlugs))
-                ->withClientOptions([
-                    'timeout' => (int) config('enrichment.http_timeout', 120),
-                ])
-                ->withClientRetry(
-                    (int) config('enrichment.http_retries', 2),
-                    (int) config('enrichment.http_retry_sleep_ms', 250)
-                )
-                ->asStructured();
+            $response = $this->civicAnalysisAgent->prompt(
+                $this->civicPrompt($article, $packText, $issueAreaSlugs),
+                provider: $this->providerPreference(
+                    chainConfigKey: 'enrichment.provider_chain',
+                    fallbackProviderConfigKey: 'enrichment.provider',
+                    model: (string) config('enrichment.model', 'gpt-4o-mini'),
+                ),
+                timeout: (int) config('enrichment.http_timeout', 120),
+            );
 
             Log::debug('Civic enrichment call completed.', [
                 'article_id' => $article->id,
             ]);
-
-            $civicPayload = $this->normalizeCivicPayload($response->structured);
+            $structured = is_array($response->structured ?? null) ? $response->structured : [];
+            $civicPayload = $this->normalizeCivicPayload($structured);
         } catch (\Throwable $e) {
             report($e);
 
@@ -139,27 +135,21 @@ class Enricher
         ];
 
         try {
-            $response = Prism::structured()
-                ->using(
-                    config('enrichment.provider', 'openai'),
-                    config('enrichment.model', 'gpt-4o-mini')
-                )
-                ->withSchema($this->enrichmentSchema($issueAreaSlugs))
-                ->withPrompt($this->enrichmentPrompt($article, $packText, $issueAreaSlugs))
-                ->withClientOptions([
-                    'timeout' => (int) config('enrichment.http_timeout', 120),
-                ])
-                ->withClientRetry(
-                    (int) config('enrichment.http_retries', 2),
-                    (int) config('enrichment.http_retry_sleep_ms', 250)
-                )
-                ->asStructured();
+            $response = $this->entityEnrichmentAgent->prompt(
+                $this->enrichmentPrompt($article, $packText, $issueAreaSlugs),
+                provider: $this->providerPreference(
+                    chainConfigKey: 'enrichment.provider_chain',
+                    fallbackProviderConfigKey: 'enrichment.provider',
+                    model: (string) config('enrichment.model', 'gpt-4o-mini'),
+                ),
+                timeout: (int) config('enrichment.http_timeout', 120),
+            );
 
             Log::debug('Entity enrichment call completed.', [
                 'article_id' => $article->id,
             ]);
-
-            $enrichmentPayload = $this->normalizeEnrichmentPayload($response->structured, $issueAreaSlugs);
+            $structured = is_array($response->structured ?? null) ? $response->structured : [];
+            $enrichmentPayload = $this->normalizeEnrichmentPayload($structured, $issueAreaSlugs);
         } catch (\Throwable $e) {
             report($e);
 
@@ -178,27 +168,21 @@ class Enricher
 
         // Explainer pass (demo-style "What's happening" / "Why it matters")
         try {
-            $response = Prism::structured()
-                ->using(
-                    config('enrichment.provider', 'openai'),
-                    config('enrichment.model', 'gpt-4o-mini')
-                )
-                ->withSchema($this->explainerSchema())
-                ->withPrompt($this->explainerPrompt($article, $packText))
-                ->withClientOptions([
-                    'timeout' => (int) config('enrichment.http_timeout', 120),
-                ])
-                ->withClientRetry(
-                    (int) config('enrichment.http_retries', 2),
-                    (int) config('enrichment.http_retry_sleep_ms', 250)
-                )
-                ->asStructured();
+            $response = $this->explainerAgent->prompt(
+                $this->explainerPrompt($article, $packText),
+                provider: $this->providerPreference(
+                    chainConfigKey: 'enrichment.provider_chain',
+                    fallbackProviderConfigKey: 'enrichment.provider',
+                    model: (string) config('enrichment.model', 'gpt-4o-mini'),
+                ),
+                timeout: (int) config('enrichment.http_timeout', 120),
+            );
 
             Log::debug('Explainer enrichment call completed.', [
                 'article_id' => $article->id,
             ]);
-
-            $payload['explainer'] = $this->normalizeExplainer($response->structured['explainer'] ?? null);
+            $structured = is_array($response->structured ?? null) ? $response->structured : [];
+            $payload['explainer'] = $this->normalizeExplainer($structured['explainer'] ?? null);
         } catch (\Throwable $e) {
             report($e);
 
@@ -393,56 +377,6 @@ ARTICLE TEXT
 PROMPT;
     }
 
-    private function explainerSchema(): Schema
-    {
-        $evidenceSchema = $this->evidenceSchema();
-
-        $explainerEvidenceMapSchema = new ObjectSchema(
-            name: 'explainer_evidence',
-            description: 'Evidence quotes for explainer sections.',
-            properties: [
-                new ArraySchema('whats_happening', 'Evidence quotes for whats_happening.', $evidenceSchema),
-                new ArraySchema('why_it_matters', 'Evidence quotes for why_it_matters.', $evidenceSchema),
-            ],
-            requiredFields: ['whats_happening', 'why_it_matters'],
-            allowAdditionalProperties: false
-        );
-
-        $explainerSchema = new ObjectSchema(
-            name: 'explainer',
-            description: 'Demo-style explainer content.',
-            properties: [
-                new StringSchema('headline', 'Short headline for the article.', true),
-                new StringSchema('whats_happening', 'Plain-English summary.', true),
-                new StringSchema('why_it_matters', 'Why a resident should care.', true),
-                new ArraySchema('key_details', 'Up to 5 key details.', new StringSchema('item', 'A key detail.')),
-                new ArraySchema('what_to_watch', 'Up to 3 things to watch.', new StringSchema('item', 'A watch item.')),
-                new ObjectSchema(
-                    name: 'evidence',
-                    description: 'Optional evidence map.',
-                    properties: [
-                        new ArraySchema('whats_happening', 'Evidence quotes for whats_happening.', $evidenceSchema),
-                        new ArraySchema('why_it_matters', 'Evidence quotes for why_it_matters.', $evidenceSchema),
-                    ],
-                    requiredFields: ['whats_happening', 'why_it_matters'],
-                    allowAdditionalProperties: false
-                ),
-            ],
-            requiredFields: ['headline', 'whats_happening', 'why_it_matters', 'key_details', 'what_to_watch', 'evidence'],
-            allowAdditionalProperties: false
-        );
-
-        return new ObjectSchema(
-            name: 'explainer_payload',
-            description: 'Structured explainer response.',
-            properties: [
-                $explainerSchema,
-            ],
-            requiredFields: ['explainer'],
-            allowAdditionalProperties: false
-        );
-    }
-
     /**
      * @param  array<int, string>  $issueAreaSlugs
      */
@@ -498,281 +432,38 @@ PROMPT;
     }
 
     /**
-     * @param  array<int, string>  $issueAreaSlugs
+     * @return array<string, string|null>
      */
-    private function civicSchema(array $issueAreaSlugs): Schema
-    {
-        $evidenceSchema = $this->evidenceSchema();
+    private function providerPreference(
+        string $chainConfigKey,
+        string $fallbackProviderConfigKey,
+        string $model,
+    ): array {
+        $providers = config($chainConfigKey);
 
-        return new ObjectSchema(
-            name: 'civic_payload',
-            description: 'Structured civic relevance analysis response.',
-            properties: [
-                $this->analysisSchema($evidenceSchema),
-                $this->processTimelineSchema($evidenceSchema),
-                new NumberSchema('confidence', 'Overall confidence from 0 to 1.', false, null, 1, null, 0),
-            ],
-            requiredFields: ['analysis', 'process_timeline', 'confidence'],
-            allowAdditionalProperties: false
-        );
-    }
-
-    /**
-     * @param  array<int, string>  $issueAreaSlugs
-     */
-    private function enrichmentSchema(array $issueAreaSlugs): Schema
-    {
-        $evidenceSchema = $this->evidenceSchema();
-
-        return new ObjectSchema(
-            name: 'enrichment_payload',
-            description: 'Structured entity enrichment response.',
-            properties: [
-                $this->enrichmentPayloadSchema($evidenceSchema, $issueAreaSlugs),
-                new NumberSchema('confidence', 'Overall confidence from 0 to 1.', false, null, 1, null, 0),
-            ],
-            requiredFields: ['enrichment', 'confidence'],
-            allowAdditionalProperties: false
-        );
-    }
-
-    private function evidenceSchema(): ObjectSchema
-    {
-        return new ObjectSchema(
-            name: 'evidence_item',
-            description: 'A direct quote from the article text with optional character offsets.',
-            properties: [
-                new StringSchema('quote', 'Exact quote from the article text.'),
-                new NumberSchema('start', 'Start offset of the quote in the text.', true),
-                new NumberSchema('end', 'End offset of the quote in the text.', true),
-            ],
-            requiredFields: ['quote', 'start', 'end'],
-            allowAdditionalProperties: false
-        );
-    }
-
-    private function analysisSchema(ObjectSchema $evidenceSchema): ObjectSchema
-    {
-        $analysisDimensionsSchema = new ObjectSchema(
-            name: 'dimensions',
-            description: 'Six civic relevance dimension scores.',
-            properties: [
-                new NumberSchema('comprehensibility', 'Score 0..1', false, null, 1, null, 0),
-                new NumberSchema('orientation', 'Score 0..1', false, null, 1, null, 0),
-                new NumberSchema('representation', 'Score 0..1', false, null, 1, null, 0),
-                new NumberSchema('agency', 'Score 0..1', false, null, 1, null, 0),
-                new NumberSchema('relevance', 'Score 0..1', false, null, 1, null, 0),
-                new NumberSchema('timeliness', 'Score 0..1', false, null, 1, null, 0),
-            ],
-            requiredFields: [
-                'comprehensibility',
-                'orientation',
-                'representation',
-                'agency',
-                'relevance',
-                'timeliness',
-            ],
-            allowAdditionalProperties: false
-        );
-
-        $analysisJustificationsSchema = new ObjectSchema(
-            name: 'justifications',
-            description: 'Justification sentences for each dimension.',
-            properties: [
-                new StringSchema('comprehensibility', 'Justification for comprehensibility.'),
-                new StringSchema('orientation', 'Justification for orientation.'),
-                new StringSchema('representation', 'Justification for representation.'),
-                new StringSchema('agency', 'Justification for agency.'),
-                new StringSchema('relevance', 'Justification for relevance.'),
-                new StringSchema('timeliness', 'Justification for timeliness.'),
-            ],
-            requiredFields: [
-                'comprehensibility',
-                'orientation',
-                'representation',
-                'agency',
-                'relevance',
-                'timeliness',
-            ],
-            allowAdditionalProperties: false
-        );
-
-        $opportunitySchema = new ObjectSchema(
-            name: 'opportunity',
-            description: 'Civic participation opportunity.',
-            properties: [
-                new EnumSchema('type', 'Opportunity type.', ['meeting', 'public_comment', 'deadline', 'application', 'other']),
-                new StringSchema('date', 'YYYY-MM-DD if present.', true),
-                new StringSchema('time', 'HH:MM if present.', true),
-                new StringSchema('location', 'Location if present.', true),
-                new StringSchema('url', 'URL if present.', true),
-                new StringSchema('description', 'Short description.'),
-                new ArraySchema('evidence', 'Supporting quotes.', $evidenceSchema),
-            ],
-            requiredFields: [
-                'type',
-                'date',
-                'time',
-                'location',
-                'url',
-                'description',
-                'evidence',
-            ],
-            allowAdditionalProperties: false
-        );
-
-        return new ObjectSchema(
-            name: 'analysis',
-            description: 'Civic relevance analysis for this article.',
-            properties: [
-                $analysisDimensionsSchema,
-                $analysisJustificationsSchema,
-                new ArraySchema('opportunities', 'Participation opportunities.', $opportunitySchema),
-                new NumberSchema('confidence', 'Confidence from 0 to 1.', false, null, 1, null, 0),
-            ],
-            requiredFields: ['dimensions', 'justifications', 'opportunities', 'confidence'],
-            allowAdditionalProperties: false
-        );
-    }
-
-    private function processTimelineSchema(ObjectSchema $evidenceSchema): ObjectSchema
-    {
-        $processTimelineItemSchema = new ObjectSchema(
-            name: 'process_timeline_item',
-            description: 'A step in the civic process timeline.',
-            properties: [
-                new StringSchema('key', 'Stable key for this step.'),
-                new StringSchema('label', 'Short label for this step.'),
-                new StringSchema('date', 'YYYY-MM-DD if present.', true),
-                new EnumSchema('status', 'Status of this step.', ['completed', 'current', 'upcoming', 'unknown']),
-                new StringSchema('badge_text', 'Short badge text if present.', true),
-                new StringSchema('note', 'Optional short detail for this step.', true),
-                new ArraySchema('evidence', 'Supporting quotes.', $evidenceSchema),
-            ],
-            requiredFields: [
-                'key',
-                'label',
-                'date',
-                'status',
-                'badge_text',
-                'note',
-                'evidence',
-            ],
-            allowAdditionalProperties: false
-        );
-
-        return new ObjectSchema(
-            name: 'process_timeline',
-            description: 'Timeline for where we are in the process.',
-            properties: [
-                new ArraySchema('items', 'Timeline items.', $processTimelineItemSchema),
-                new StringSchema('current_key', 'Key of the current step.', true),
-            ],
-            requiredFields: ['items', 'current_key'],
-            allowAdditionalProperties: false
-        );
-    }
-
-    /**
-     * @param  array<int, string>  $issueAreaSlugs
-     */
-    private function enrichmentPayloadSchema(ObjectSchema $evidenceSchema, array $issueAreaSlugs): ObjectSchema
-    {
-        $peopleSchema = new ObjectSchema(
-            name: 'person',
-            description: 'A person mentioned in the article.',
-            properties: [
-                new StringSchema('name', 'Full name.'),
-                new StringSchema('role', 'Role or title if stated.', true),
-                new NumberSchema('confidence', 'Confidence from 0 to 1.', false, null, 1, null, 0),
-                new ArraySchema('evidence', 'Supporting quotes.', $evidenceSchema),
-            ],
-            requiredFields: ['name', 'role', 'confidence', 'evidence'],
-            allowAdditionalProperties: false
-        );
-
-        $organizationSchema = new ObjectSchema(
-            name: 'organization',
-            description: 'An organization mentioned in the article.',
-            properties: [
-                new StringSchema('name', 'Organization name.'),
-                new EnumSchema(
-                    'type_guess',
-                    'Best-fit type.',
-                    ['government', 'news_media', 'nonprofit', 'business', 'school', 'other']
-                ),
-                new NumberSchema('confidence', 'Confidence from 0 to 1.', false, null, 1, null, 0),
-                new ArraySchema('evidence', 'Supporting quotes.', $evidenceSchema),
-            ],
-            requiredFields: ['name', 'type_guess', 'confidence', 'evidence'],
-            allowAdditionalProperties: false
-        );
-
-        $locationSchema = new ObjectSchema(
-            name: 'location',
-            description: 'A location mentioned in the article.',
-            properties: [
-                new StringSchema('name', 'Location name.'),
-                new StringSchema('address', 'Address if present.', true),
-                new NumberSchema('confidence', 'Confidence from 0 to 1.', false, null, 1, null, 0),
-                new ArraySchema('evidence', 'Supporting quotes.', $evidenceSchema),
-            ],
-            requiredFields: ['name', 'address', 'confidence', 'evidence'],
-            allowAdditionalProperties: false
-        );
-
-        $keywordSchema = new ObjectSchema(
-            name: 'keyword',
-            description: 'A topical keyword or short phrase.',
-            properties: [
-                new StringSchema('keyword', 'Keyword or short phrase.'),
-                new NumberSchema('confidence', 'Confidence from 0 to 1.', false, null, 1, null, 0),
-                new ArraySchema('evidence', 'Supporting quotes.', $evidenceSchema),
-            ],
-            requiredFields: ['keyword', 'confidence', 'evidence'],
-            allowAdditionalProperties: false
-        );
-
-        $issueAreaSchema = new ObjectSchema(
-            name: 'issue_area',
-            description: 'Issue area slug from the allowed list.',
-            properties: [
-                new StringSchema('slug', 'Issue area slug.'),
-                new NumberSchema('confidence', 'Confidence from 0 to 1.', false, null, 1, null, 0),
-                new ArraySchema('evidence', 'Supporting quotes.', $evidenceSchema),
-            ],
-            requiredFields: ['slug', 'confidence', 'evidence'],
-            allowAdditionalProperties: false
-        );
-
-        if ($issueAreaSlugs !== []) {
-            $issueAreaSchema = new ObjectSchema(
-                name: 'issue_area',
-                description: 'Issue area slug from the allowed list.',
-                properties: [
-                    new EnumSchema('slug', 'Issue area slug.', $issueAreaSlugs),
-                    new NumberSchema('confidence', 'Confidence from 0 to 1.', false, null, 1, null, 0),
-                    new ArraySchema('evidence', 'Supporting quotes.', $evidenceSchema),
-                ],
-                requiredFields: ['slug', 'confidence', 'evidence'],
-                allowAdditionalProperties: false
-            );
+        if (! is_array($providers) || $providers === []) {
+            return [
+                (string) config($fallbackProviderConfigKey, 'openai') => $model,
+            ];
         }
 
-        return new ObjectSchema(
-            name: 'enrichment',
-            description: 'Structured enrichment extraction response.',
-            properties: [
-                new ArraySchema('people', 'People mentioned in the article.', $peopleSchema),
-                new ArraySchema('organizations', 'Organizations mentioned in the article.', $organizationSchema),
-                new ArraySchema('locations', 'Locations mentioned in the article.', $locationSchema),
-                new ArraySchema('keywords', 'Keywords mentioned in the article.', $keywordSchema),
-                new ArraySchema('issue_areas', 'Issue areas relevant to the article.', $issueAreaSchema),
-                new NumberSchema('confidence', 'Overall enrichment confidence from 0 to 1.', false, null, 1, null, 0),
-            ],
-            requiredFields: ['people', 'organizations', 'locations', 'keywords', 'issue_areas', 'confidence'],
-            allowAdditionalProperties: false
-        );
+        $resolved = [];
+
+        foreach (array_values($providers) as $index => $provider) {
+            if (! is_string($provider) || trim($provider) === '') {
+                continue;
+            }
+
+            $resolved[$provider] = $index === 0 ? $model : null;
+        }
+
+        if ($resolved === []) {
+            return [
+                (string) config($fallbackProviderConfigKey, 'openai') => $model,
+            ];
+        }
+
+        return $resolved;
     }
 
     /**

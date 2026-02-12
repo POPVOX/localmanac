@@ -28,9 +28,15 @@ class Dashboard extends Component
 
     public ?int $cityId = null;
 
+    public ?string $conversationId = null;
+
     public function mount(): void
     {
         $this->cityId = request()->integer('city_id') ?: null;
+
+        if ($this->memoryEnabled()) {
+            $this->conversationId = session()->get($this->conversationSessionKey());
+        }
     }
 
     public function ask(): void
@@ -48,11 +54,33 @@ class Dashboard extends Component
 
         try {
             $city = $this->resolveCity();
-            $response = app(AskService::class)->answer(
-                question: $question,
-                cityId: $city?->id,
-                citySlug: null,
-            );
+            $response = [];
+
+            if (auth()->user()) {
+                $response = app(AskService::class)->answerStreamingForUser(
+                    question: $question,
+                    citySelector: $city?->id,
+                    user: auth()->user(),
+                    conversationId: $this->memoryEnabled() ? $this->conversationId : null,
+                    onDelta: static fn (string $delta): null => null,
+                );
+
+                if ($this->memoryEnabled()) {
+                    $this->conversationId = is_string($response['conversation_id'] ?? null)
+                        ? $response['conversation_id']
+                        : null;
+
+                    if ($this->conversationId) {
+                        session()->put($this->conversationSessionKey(), $this->conversationId);
+                    }
+                }
+            } else {
+                $response = app(AskService::class)->answer(
+                    question: $question,
+                    cityId: $city?->id,
+                    citySlug: null,
+                );
+            }
 
             $this->messages[] = [
                 'role' => 'assistant',
@@ -69,6 +97,14 @@ class Dashboard extends Component
         }
 
         $this->question = '';
+        $this->dispatch('chat-updated');
+    }
+
+    public function startNewConversation(): void
+    {
+        $this->conversationId = null;
+        session()->forget($this->conversationSessionKey());
+        $this->messages = [];
         $this->dispatch('chat-updated');
     }
 
@@ -169,6 +205,16 @@ class Dashboard extends Component
             ->where('slug', 'wichita')
             ->first()
             ?? City::query()->first();
+    }
+
+    private function memoryEnabled(): bool
+    {
+        return (bool) config('chat.memory_enabled', true) && auth()->check();
+    }
+
+    private function conversationSessionKey(): string
+    {
+        return (string) config('chat.memory_session_key', 'chat.conversation_id');
     }
 
     private function resolveTimezone(?City $city): string

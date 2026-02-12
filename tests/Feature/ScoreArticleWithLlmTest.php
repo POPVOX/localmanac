@@ -7,6 +7,7 @@ use App\Models\ArticleBody;
 use App\Models\City;
 use App\Models\Organization;
 use App\Models\Scraper;
+use App\Services\Analysis\Agents\LlmScoringAgent;
 use App\Services\Analysis\AnalysisGate;
 use App\Services\Analysis\CivicRelevanceCalculator;
 use App\Services\Analysis\LlmScorer;
@@ -131,4 +132,49 @@ it('stores llm scores when the gate allows scoring', function () {
     expect($analysis?->status)->toBe('llm_done')
         ->and($analysis?->llm_scores)->not->toBeNull()
         ->and($analysis?->model)->toBe('test-model');
+});
+
+it('scores an article using the laravel ai agent implementation', function () {
+    config()->set('analysis.llm.enabled', true);
+    config()->set('analysis.llm.provider_chain', ['openai']);
+    config()->set('analysis.llm.model', 'gpt-4o-mini');
+
+    $article = makeArticleWithAnalysis([
+        ScoreDimensions::AGENCY => 0.8,
+        ScoreDimensions::TIMELINESS => 0.6,
+    ], 0.7, 'news_media');
+
+    LlmScoringAgent::fake([
+        [
+            'dimensions' => [
+                ScoreDimensions::COMPREHENSIBILITY => 0.7,
+                ScoreDimensions::ORIENTATION => 0.6,
+                ScoreDimensions::REPRESENTATION => 0.5,
+                ScoreDimensions::AGENCY => 0.8,
+                ScoreDimensions::RELEVANCE => 0.4,
+                ScoreDimensions::TIMELINESS => 0.9,
+            ],
+            'justifications' => [
+                ScoreDimensions::COMPREHENSIBILITY => 'Clear writing.',
+                ScoreDimensions::AGENCY => 'Includes participation steps.',
+            ],
+            'opportunities' => [
+                [
+                    'kind' => 'meeting',
+                    'title' => 'Public meeting',
+                    'starts_at' => now()->addDays(10)->toISOString(),
+                    'url' => 'https://example.com/meeting',
+                    'confidence' => 0.8,
+                ],
+            ],
+            'confidence' => 0.82,
+        ],
+    ]);
+
+    $result = app(LlmScorer::class)->score($article->fresh());
+
+    expect($result['dimensions'][ScoreDimensions::AGENCY])->toBe(0.8)
+        ->and($result['confidence'])->toBe(0.82)
+        ->and($result['opportunities'][0]['kind'])->toBe('meeting')
+        ->and($result['model'])->toBe('gpt-4o-mini');
 });

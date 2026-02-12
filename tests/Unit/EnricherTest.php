@@ -4,13 +4,11 @@ use App\Models\Article;
 use App\Models\ArticleBody;
 use App\Models\City;
 use App\Models\IssueArea;
+use App\Services\Extraction\Agents\CivicAnalysisAgent;
+use App\Services\Extraction\Agents\EntityEnrichmentAgent;
+use App\Services\Extraction\Agents\ExplainerAgent;
 use App\Services\Extraction\Enricher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Prism\Prism\Enums\FinishReason;
-use Prism\Prism\Facades\Prism;
-use Prism\Prism\Structured\Response as StructuredResponse;
-use Prism\Prism\ValueObjects\Meta;
-use Prism\Prism\ValueObjects\Usage;
 
 uses(Tests\TestCase::class, RefreshDatabase::class);
 
@@ -88,15 +86,14 @@ it('returns civic analysis and timeline when enrichment call fails', function ()
         'confidence' => 0.82,
     ];
 
-    Prism::fake([
-        new StructuredResponse(
-            steps: collect([]),
-            text: '',
-            structured: $civicStructured,
-            finishReason: FinishReason::Stop,
-            usage: new Usage(0, 0),
-            meta: new Meta('fake', 'fake')
-        ),
+    CivicAnalysisAgent::fake([
+        $civicStructured,
+    ]);
+    EntityEnrichmentAgent::fake([
+        fn (): never => throw new RuntimeException('Entity enrichment call failed.'),
+    ]);
+    ExplainerAgent::fake([
+        fn (): never => throw new RuntimeException('Explainer call failed.'),
     ]);
 
     $payload = app(Enricher::class)->enrich($article->fresh());
@@ -210,23 +207,14 @@ it('merges enrichment results when the entity call succeeds', function () {
         'confidence' => 0.58,
     ];
 
-    Prism::fake([
-        new StructuredResponse(
-            steps: collect([]),
-            text: '',
-            structured: $civicStructured,
-            finishReason: FinishReason::Stop,
-            usage: new Usage(0, 0),
-            meta: new Meta('fake', 'fake')
-        ),
-        new StructuredResponse(
-            steps: collect([]),
-            text: '',
-            structured: $enrichmentStructured,
-            finishReason: FinishReason::Stop,
-            usage: new Usage(0, 0),
-            meta: new Meta('fake', 'fake')
-        ),
+    CivicAnalysisAgent::fake([
+        $civicStructured,
+    ]);
+    EntityEnrichmentAgent::fake([
+        $enrichmentStructured,
+    ]);
+    ExplainerAgent::fake([
+        ['explainer' => []],
     ]);
 
     $payload = app(Enricher::class)->enrich($article->fresh());
