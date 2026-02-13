@@ -7,6 +7,7 @@ use App\Models\IssueArea;
 use App\Services\Extraction\Agents\CivicAnalysisAgent;
 use App\Services\Extraction\Agents\EntityEnrichmentAgent;
 use App\Services\Extraction\Agents\ExplainerAgent;
+use App\Support\Utf8Sanitizer;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
 
@@ -63,7 +64,7 @@ class Enricher
 
         $article->loadMissing(['body', 'scraper.organization', 'city']);
 
-        $cleanedText = trim((string) ($article->body?->cleaned_text ?? ''));
+        $cleanedText = Utf8Sanitizer::sanitize(trim((string) ($article->body?->cleaned_text ?? '')));
 
         if ($cleanedText === '') {
             return $this->emptyPayload();
@@ -82,7 +83,7 @@ class Enricher
         }
 
         $evidencePack = (new EvidencePackBuilder)->build($cleanedText);
-        $packText = $evidencePack->packText;
+        $packText = Utf8Sanitizer::sanitize($evidencePack->packText);
 
         Log::debug('Evidence pack built.', [
             'original_length' => $evidencePack->originalLength,
@@ -294,9 +295,10 @@ class Enricher
      */
     private function civicPrompt(Article $article, string $packText, array $issueAreaSlugs): string
     {
-        $cityName = $article->city?->name ?? 'Unknown';
-        $title = $article->title ?? 'Untitled';
-        $organization = $article->scraper?->organization?->name ?? 'Unknown';
+        $cityName = Utf8Sanitizer::sanitize($article->city?->name ?? 'Unknown');
+        $title = Utf8Sanitizer::sanitize($article->title ?? 'Untitled');
+        $organization = Utf8Sanitizer::sanitize($article->scraper?->organization?->name ?? 'Unknown');
+        $packText = Utf8Sanitizer::sanitize($packText);
 
         return <<<PROMPT
 You are an information extraction system for a civic intelligence platform.
@@ -337,9 +339,10 @@ PROMPT;
 
     private function explainerPrompt(Article $article, string $packText): string
     {
-        $cityName = $article->city?->name ?? 'Unknown';
-        $title = $article->title ?? 'Untitled';
-        $organization = $article->scraper?->organization?->name ?? 'Unknown';
+        $cityName = Utf8Sanitizer::sanitize($article->city?->name ?? 'Unknown');
+        $title = Utf8Sanitizer::sanitize($article->title ?? 'Untitled');
+        $organization = Utf8Sanitizer::sanitize($article->scraper?->organization?->name ?? 'Unknown');
+        $packText = Utf8Sanitizer::sanitize($packText);
 
         return <<<PROMPT
 You are an explainer writer for a civic intelligence platform.
@@ -386,9 +389,10 @@ PROMPT;
             ? 'None. Return an empty issue_areas array.'
             : implode(', ', $issueAreaSlugs);
 
-        $cityName = $article->city?->name ?? 'Unknown';
-        $title = $article->title ?? 'Untitled';
-        $organization = $article->scraper?->organization?->name ?? 'Unknown';
+        $cityName = Utf8Sanitizer::sanitize($article->city?->name ?? 'Unknown');
+        $title = Utf8Sanitizer::sanitize($article->title ?? 'Untitled');
+        $organization = Utf8Sanitizer::sanitize($article->scraper?->organization?->name ?? 'Unknown');
+        $packText = Utf8Sanitizer::sanitize($packText);
 
         return <<<PROMPT
 You are an information extraction system for a civic intelligence platform.

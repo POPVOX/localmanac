@@ -4,6 +4,7 @@ namespace App\Services\Analysis;
 
 use App\Models\Article;
 use App\Services\Analysis\Agents\LlmScoringAgent;
+use App\Support\Utf8Sanitizer;
 use RuntimeException;
 
 class LlmScorer
@@ -31,7 +32,7 @@ class LlmScorer
 
         $article->loadMissing(['body', 'city', 'scraper.organization']);
 
-        $text = trim((string) ($article->body?->cleaned_text ?? ''));
+        $text = Utf8Sanitizer::sanitize(trim((string) ($article->body?->cleaned_text ?? '')));
 
         if ($text === '') {
             throw new RuntimeException('LLM scoring text is empty.');
@@ -80,9 +81,10 @@ class LlmScorer
 
     private function prompt(Article $article, string $text): string
     {
-        $city = $article->city?->name ?? 'Unknown';
-        $organization = $article->scraper?->organization?->name ?? 'Unknown';
-        $title = $article->title ?? 'Untitled';
+        $city = Utf8Sanitizer::sanitize($article->city?->name ?? 'Unknown');
+        $organization = Utf8Sanitizer::sanitize($article->scraper?->organization?->name ?? 'Unknown');
+        $title = Utf8Sanitizer::sanitize($article->title ?? 'Untitled');
+        $text = Utf8Sanitizer::sanitize($text);
 
         $dimensionList = implode(', ', ScoreDimensions::keys());
 
