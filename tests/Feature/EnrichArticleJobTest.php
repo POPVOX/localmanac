@@ -19,6 +19,7 @@ use App\Services\Articles\ArticleTextService;
 use App\Services\Extraction\ClaimWriter;
 use App\Services\Extraction\Enricher;
 use App\Services\Extraction\ProjectionWriter;
+use App\Services\Ingestion\PostgresSequenceSynchronizer;
 
 it('writes claims and projections when enrichment job runs', function () {
     config()->set('enrichment.enabled', true);
@@ -125,7 +126,8 @@ it('writes claims and projections when enrichment job runs', function () {
         app(ProcessTimelineProjector::class),
         app(ArticleExplainerProjector::class),
         app(CivicRelevanceCalculator::class),
-        app(ArticleTextService::class)
+        app(ArticleTextService::class),
+        app(PostgresSequenceSynchronizer::class)
     );
 
     expect(Claim::count())->toBe(3)

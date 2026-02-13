@@ -101,7 +101,7 @@
                         $lastRun = $scraper->latestRun;
                         $lastScraped = $lastRun?->finished_at ?? $lastRun?->started_at;
                         $latestStatus = $lastRun?->status;
-                        $isActiveRun = in_array($latestStatus, ['queued', 'running'], true);
+                        $isActiveRun = $lastRun?->isFreshActive() ?? false;
                     @endphp
                     <flux:table.row :key="$scraper->id">
                         <flux:table.cell variant="strong" sticky>#{{ $scraper->id }}</flux:table.cell>

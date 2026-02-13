@@ -3,6 +3,7 @@
 namespace App\Services\Ingestion;
 
 use App\Models\Scraper;
+use App\Models\ScraperRun;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
@@ -15,13 +16,14 @@ class ScraperScheduler
     public function dueScrapers(CarbonInterface $nowUtc): Collection
     {
         $immutableNow = $nowUtc instanceof CarbonImmutable ? $nowUtc : CarbonImmutable::instance($nowUtc);
+        $this->expireStaleRuns();
 
         $scrapers = Scraper::query()
             ->with(['city', 'latestSuccessfulRun'])
             ->where('is_enabled', true)
             ->whereIn('type', ['rss', 'html'])
             ->whereDoesntHave('runs', function ($query) {
-                $query->whereIn('status', ['queued', 'running']);
+                $query->freshActive();
             })
             ->get();
 
@@ -159,5 +161,17 @@ class ScraperScheduler
     private function startOfWeek(CarbonImmutable $date): CarbonImmutable
     {
         return $date->startOfWeek(CarbonImmutable::SUNDAY);
+    }
+
+    private function expireStaleRuns(): void
+    {
+        ScraperRun::query()
+            ->staleActive()
+            ->update([
+                'status' => 'failed',
+                'finished_at' => now(),
+                'error_message' => __('Run timed out before the worker started.'),
+                'updated_at' => now(),
+            ]);
     }
 }

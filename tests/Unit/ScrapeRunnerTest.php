@@ -6,7 +6,9 @@ use App\Models\Scraper;
 use App\Services\Ingestion\ArticleWriter;
 use App\Services\Ingestion\Deduplicator;
 use App\Services\Ingestion\Fetchers\RssFetcher;
+use App\Services\Ingestion\PostgresSequenceSynchronizer;
 use App\Services\Ingestion\ScrapeRunner;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery as M;
 
@@ -27,6 +29,16 @@ function makeScraper(City $city): Scraper
         'source_url' => 'https://example.com/feed',
         'config' => [],
     ]);
+}
+
+function makePartialScrapeRunner(PostgresSequenceSynchronizer $synchronizer): ScrapeRunner
+{
+    return M::mock(ScrapeRunner::class, [
+        M::mock(Deduplicator::class),
+        M::mock(ArticleWriter::class),
+        M::mock(RssFetcher::class),
+        $synchronizer,
+    ])->makePartial()->shouldAllowMockingProtectedMethods();
 }
 
 it('runs successfully and counts created items', function () {
@@ -127,4 +139,95 @@ it('updates when deduplicated article is returned', function () {
         ->and($run->items_created)->toBe(0)
         ->and($run->items_updated)->toBe(1)
         ->and($run->meta['skipped_items'])->toBe(0);
+});
+
+it('retries scraper run creation once after recoverable sequence drift is repaired', function () {
+    $city = City::create(['name' => 'Test City', 'slug' => 'test-city']);
+    $scraper = makeScraper($city);
+
+    $stored = new \App\Models\ScraperRun([
+        'scraper_id' => $scraper->id,
+        'city_id' => $city->id,
+        'status' => 'queued',
+        'items_found' => 0,
+        'items_created' => 0,
+        'items_updated' => 0,
+        'meta' => [],
+    ]);
+    $stored->id = 17;
+
+    $recoverableViolation = new UniqueConstraintViolationException(
+        'pgsql',
+        'insert into "scraper_runs"',
+        [],
+        new RuntimeException('duplicate key value violates unique constraint "scraper_runs_pkey"')
+    );
+
+    $synchronizer = M::mock(PostgresSequenceSynchronizer::class);
+    $synchronizer->shouldReceive('syncTables')
+        ->once()
+        ->with(['scraper_runs'])
+        ->andReturn(true);
+
+    $runner = makePartialScrapeRunner($synchronizer);
+    $runner->shouldReceive('persistRun')
+        ->once()
+        ->andThrow($recoverableViolation);
+    $runner->shouldReceive('persistRun')
+        ->once()
+        ->andReturn($stored);
+
+    $result = $runner->createRun($scraper);
+
+    expect($result)->toBe($stored)
+        ->and($result->id)->toBe(17);
+});
+
+it('does not retry scraper run creation on non-recoverable unique constraints', function () {
+    $city = City::create(['name' => 'Test City', 'slug' => 'test-city']);
+    $scraper = makeScraper($city);
+
+    $nonRecoverableViolation = new UniqueConstraintViolationException(
+        'pgsql',
+        'insert into "scraper_runs"',
+        [],
+        new RuntimeException('duplicate key value violates unique constraint "scraper_runs_scraper_id_created_at_unique"')
+    );
+
+    $synchronizer = M::mock(PostgresSequenceSynchronizer::class);
+    $synchronizer->shouldReceive('syncTables')->never();
+
+    $runner = makePartialScrapeRunner($synchronizer);
+    $runner->shouldReceive('persistRun')
+        ->once()
+        ->andThrow($nonRecoverableViolation);
+
+    expect(fn () => $runner->createRun($scraper))
+        ->toThrow(UniqueConstraintViolationException::class);
+});
+
+it('fails scraper run creation when sequence drift is detected but not repaired', function () {
+    $city = City::create(['name' => 'Test City', 'slug' => 'test-city']);
+    $scraper = makeScraper($city);
+
+    $recoverableViolation = new UniqueConstraintViolationException(
+        'pgsql',
+        'insert into "scraper_runs"',
+        [],
+        new RuntimeException('duplicate key value violates unique constraint "scraper_runs_pkey"')
+    );
+
+    $synchronizer = M::mock(PostgresSequenceSynchronizer::class);
+    $synchronizer->shouldReceive('syncTables')
+        ->once()
+        ->with(['scraper_runs'])
+        ->andReturn(false);
+
+    $runner = makePartialScrapeRunner($synchronizer);
+    $runner->shouldReceive('persistRun')
+        ->once()
+        ->andThrow($recoverableViolation);
+
+    expect(fn () => $runner->createRun($scraper))
+        ->toThrow(UniqueConstraintViolationException::class);
 });

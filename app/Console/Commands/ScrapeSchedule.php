@@ -24,6 +24,8 @@ class ScrapeSchedule extends Command
         $skipped = 0;
 
         foreach ($dueScrapers as $scraper) {
+            $run = null;
+
             try {
                 $run = $runner->createRun($scraper);
 
@@ -31,6 +33,14 @@ class ScrapeSchedule extends Command
 
                 $queued++;
             } catch (Throwable $exception) {
+                if ($run) {
+                    $run->update([
+                        'status' => 'failed',
+                        'finished_at' => now(),
+                        'error_message' => __('Failed to dispatch run job: :message', ['message' => $exception->getMessage()]),
+                    ]);
+                }
+
                 report($exception);
                 $skipped++;
             }

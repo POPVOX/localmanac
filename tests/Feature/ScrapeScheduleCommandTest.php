@@ -107,3 +107,70 @@ it('queues only due scrapers and avoids duplicate runs', function () {
 
     CarbonImmutable::setTestNow();
 });
+
+it('expires stale queued runs and still schedules due scrapers', function () {
+    Queue::fake();
+
+    $nowUtc = CarbonImmutable::parse('2025-01-02 16:00:00', 'UTC');
+    CarbonImmutable::setTestNow($nowUtc);
+
+    $city = City::create([
+        'name' => 'Scheduler City',
+        'slug' => 'scheduler-city-2',
+        'timezone' => 'UTC',
+    ]);
+
+    $scraper = Scraper::create([
+        'city_id' => $city->id,
+        'name' => 'Due Scraper',
+        'slug' => 'due-scraper-with-stale-queue',
+        'type' => 'rss',
+        'source_url' => 'https://example.com/due',
+        'frequency' => 'hourly',
+        'is_enabled' => true,
+        'config' => [],
+    ]);
+
+    ScraperRun::create([
+        'scraper_id' => $scraper->id,
+        'city_id' => $city->id,
+        'status' => 'success',
+        'finished_at' => $nowUtc->subMinutes(90),
+        'items_found' => 0,
+        'items_created' => 0,
+        'items_updated' => 0,
+    ]);
+
+    $staleQueuedRun = ScraperRun::create([
+        'scraper_id' => $scraper->id,
+        'city_id' => $city->id,
+        'status' => 'queued',
+        'items_found' => 0,
+        'items_created' => 0,
+        'items_updated' => 0,
+    ]);
+
+    $staleQueuedRun->forceFill([
+        'created_at' => $nowUtc->subHours(2),
+        'updated_at' => $nowUtc->subHours(2),
+    ])->save();
+
+    $this->artisan('scrape:schedule')->assertExitCode(0);
+
+    $staleQueuedRun->refresh();
+
+    $newRun = ScraperRun::query()
+        ->where('scraper_id', $scraper->id)
+        ->where('status', 'queued')
+        ->latest('id')
+        ->first();
+
+    expect($staleQueuedRun->status)->toBe('failed')
+        ->and($newRun)->not->toBeNull()
+        ->and($newRun?->id)->not->toBe($staleQueuedRun->id);
+
+    Queue::assertPushed(RunScraperRun::class, fn (RunScraperRun $job): bool => $job->runId === $newRun?->id
+        && $job->queue === 'analysis');
+
+    CarbonImmutable::setTestNow();
+});

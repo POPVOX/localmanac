@@ -12,11 +12,14 @@ use App\Services\Articles\ArticleTextService;
 use App\Services\Extraction\ClaimWriter;
 use App\Services\Extraction\Enricher;
 use App\Services\Extraction\ProjectionWriter;
+use App\Services\Ingestion\PostgresSequenceSynchronizer;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 
 class EnrichArticle implements ShouldQueue
 {
@@ -45,7 +48,8 @@ class EnrichArticle implements ShouldQueue
         ProcessTimelineProjector $processTimelineProjector,
         ArticleExplainerProjector $articleExplainerProjector,
         CivicRelevanceCalculator $calculator,
-        ArticleTextService $articleTextService
+        ArticleTextService $articleTextService,
+        PostgresSequenceSynchronizer $sequenceSynchronizer
     ): void {
         $article = Article::query()
             ->with(['body', 'city', 'scraper.organization'])
@@ -59,6 +63,58 @@ class EnrichArticle implements ShouldQueue
             return;
         }
 
+        try {
+            $this->processArticle(
+                $article,
+                $enricher,
+                $claimWriter,
+                $projectionWriter,
+                $projector,
+                $processTimelineProjector,
+                $articleExplainerProjector,
+                $calculator,
+                $articleTextService
+            );
+        } catch (UniqueConstraintViolationException $exception) {
+            if (! $this->isRecoverablePrimaryKeyViolation($exception)) {
+                throw $exception;
+            }
+
+            $recovered = $this->resolveSequenceDrift($sequenceSynchronizer);
+
+            if (! $recovered) {
+                throw $exception;
+            }
+
+            Log::warning('Recovered from Postgres sequence drift while enriching article.', [
+                'article_id' => $article->id,
+            ]);
+
+            $this->processArticle(
+                $article,
+                $enricher,
+                $claimWriter,
+                $projectionWriter,
+                $projector,
+                $processTimelineProjector,
+                $articleExplainerProjector,
+                $calculator,
+                $articleTextService
+            );
+        }
+    }
+
+    protected function processArticle(
+        Article $article,
+        Enricher $enricher,
+        ClaimWriter $claimWriter,
+        ProjectionWriter $projectionWriter,
+        CivicActionProjector $projector,
+        ProcessTimelineProjector $processTimelineProjector,
+        ArticleExplainerProjector $articleExplainerProjector,
+        CivicRelevanceCalculator $calculator,
+        ArticleTextService $articleTextService
+    ): void {
         $payload = $enricher->enrich($article);
         $analysis = is_array($payload['analysis'] ?? null) ? $payload['analysis'] : [];
         $enrichment = is_array($payload['enrichment'] ?? null) ? $payload['enrichment'] : [];
@@ -100,5 +156,55 @@ class EnrichArticle implements ShouldQueue
         $processTimelineProjector->projectForArticle($article, $payload);
         $articleExplainerProjector->projectForArticle($article, $payload);
         $articleTextService->refresh($article);
+    }
+
+    private function isRecoverablePrimaryKeyViolation(UniqueConstraintViolationException $exception): bool
+    {
+        $message = strtolower($exception->getMessage());
+
+        if (! str_contains($message, 'duplicate key value violates unique constraint')) {
+            return false;
+        }
+
+        foreach ($this->recoverablePrimaryKeys() as $primaryKey) {
+            if (str_contains($message, "\"{$primaryKey}\"")) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function resolveSequenceDrift(PostgresSequenceSynchronizer $sequenceSynchronizer): bool
+    {
+        return $sequenceSynchronizer->syncTables([
+            'article_analyses',
+            'claims',
+            'keywords',
+            'article_keywords',
+            'article_entities',
+            'article_issue_areas',
+            'civic_actions',
+            'process_timeline_items',
+            'article_explainers',
+        ]);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function recoverablePrimaryKeys(): array
+    {
+        return [
+            'article_analyses_pkey',
+            'claims_pkey',
+            'keywords_pkey',
+            'article_keywords_pkey',
+            'article_entities_pkey',
+            'article_issue_areas_pkey',
+            'civic_actions_pkey',
+            'process_timeline_items_pkey',
+            'article_explainers_pkey',
+        ];
     }
 }

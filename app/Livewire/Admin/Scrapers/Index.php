@@ -110,8 +110,11 @@ class Index extends Component
 
     public function queueRun(int $scraperId): void
     {
+        $run = null;
+
         try {
             $scraper = Scraper::findOrFail($scraperId);
+            $this->expireStaleRuns($scraper->id);
 
             if (! $scraper->is_enabled || ! in_array($scraper->type, ['rss', 'html'], true)) {
                 $this->dispatchToast(__('Scraper disabled'), __('Enable it before queuing a run.'), 'danger');
@@ -121,7 +124,7 @@ class Index extends Component
 
             $hasActiveRun = ScraperRun::query()
                 ->where('scraper_id', $scraper->id)
-                ->whereIn('status', ['queued', 'running'])
+                ->freshActive()
                 ->exists();
 
             if ($hasActiveRun) {
@@ -139,6 +142,14 @@ class Index extends Component
             $this->dispatchToast(__('Scraper not found'), __('Refresh the page and try again.'), 'danger');
             report($exception);
         } catch (Throwable $exception) {
+            if ($run) {
+                $run->update([
+                    'status' => 'failed',
+                    'finished_at' => now(),
+                    'error_message' => __('Failed to dispatch run job: :message', ['message' => $exception->getMessage()]),
+                ]);
+            }
+
             report($exception);
 
             $this->dispatchToast(__('Queue failed'), __('We could not queue this run.'), 'danger');
@@ -147,6 +158,8 @@ class Index extends Component
 
     public function render(): View
     {
+        $this->expireStaleRuns();
+
         $search = trim($this->search);
 
         $scrapers = Scraper::query()
@@ -205,5 +218,21 @@ class Index extends Component
     private function dispatchToast(string $heading, string $message, string $variant = 'success'): void
     {
         $this->dispatch('toast', heading: $heading, message: $message, variant: $variant);
+    }
+
+    private function expireStaleRuns(?int $scraperId = null): void
+    {
+        $query = ScraperRun::query()->staleActive();
+
+        if ($scraperId !== null) {
+            $query->where('scraper_id', $scraperId);
+        }
+
+        $query->update([
+            'status' => 'failed',
+            'finished_at' => now(),
+            'error_message' => __('Run timed out before the worker started.'),
+            'updated_at' => now(),
+        ]);
     }
 }

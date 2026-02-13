@@ -2,7 +2,7 @@
     $latestRun = $scraper->latestRun;
     $latestStatus = $latestRun?->status;
     $lastScraped = $latestRun?->finished_at ?? $latestRun?->started_at;
-    $isActiveRun = in_array($latestStatus, ['queued', 'running'], true);
+    $isActiveRun = $latestRun?->isFreshActive() ?? false;
     $tz = $scraper->city?->timezone ?? config('app.timezone', 'UTC');
     $statusColor = match ($latestStatus) {
         'success' => 'green',
