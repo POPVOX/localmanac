@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\Ingestion\Fetchers\JsonProfiles\VisitWichitaTokenResolver;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 uses(TestCase::class);
@@ -13,6 +14,10 @@ it('extracts a token from a Visit Wichita request URL', function () {
 });
 
 it('returns a clear error when the resolver script is missing', function () {
+    Http::fake([
+        'https://www.visitwichita.com/plugins/core/get_simple_token/' => Http::response('error', 500),
+    ]);
+
     config()->set('services.visit_wichita.token_resolver_script', base_path('scripts/chat/not-real-token-script.mjs'));
 
     $resolver = new VisitWichitaTokenResolver;
@@ -33,12 +38,16 @@ it('reports timeout errors from the resolver process', function () {
         $scriptPath,
         <<<'PHP'
 <?php
-sleep(2);
+sleep(10);
 echo json_encode(['token' => 'never-returned']);
 PHP
     );
 
     try {
+        Http::fake([
+            'https://www.visitwichita.com/plugins/core/get_simple_token/' => Http::response('error', 500),
+        ]);
+
         config()->set('services.visit_wichita.token_resolver_script', $scriptPath);
         config()->set('services.visit_wichita.token_resolver_command', PHP_BINARY);
         config()->set('services.visit_wichita.token_resolver_timeout', 100);
@@ -69,6 +78,10 @@ PHP
     );
 
     try {
+        Http::fake([
+            'https://www.visitwichita.com/plugins/core/get_simple_token/' => Http::response('error', 500),
+        ]);
+
         config()->set('services.visit_wichita.token_resolver_script', $scriptPath);
         config()->set('services.visit_wichita.token_resolver_command', 'command-that-does-not-exist');
         config()->set('services.visit_wichita.token_resolver_timeout', 5000);
@@ -81,4 +94,18 @@ PHP
     } finally {
         @unlink($scriptPath);
     }
+});
+
+it('resolves token from direct Visit Wichita token endpoint', function () {
+    Http::fake([
+        'https://www.visitwichita.com/plugins/core/get_simple_token/' => Http::response('ABCDEF1234567890ABCDEF1234567890', 200),
+    ]);
+
+    config()->set('services.visit_wichita.token_resolver_script', base_path('scripts/chat/not-real-token-script.mjs'));
+
+    $resolver = new VisitWichitaTokenResolver;
+    $result = $resolver->resolve('https://www.visitwichita.com/events/?view=list&sort=date');
+
+    expect($result['token'])->toBe('abcdef1234567890abcdef1234567890')
+        ->and($result['error'])->toBeNull();
 });

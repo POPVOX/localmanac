@@ -37,6 +37,7 @@ return [
 
     'visit_wichita' => [
         'token_source_url' => env('VISIT_WICHITA_TOKEN_SOURCE_URL', 'https://www.visitwichita.com/events/?view=list&sort=date'),
+        'token_resolver_endpoint' => env('VISIT_WICHITA_TOKEN_RESOLVER_ENDPOINT', '/plugins/core/get_simple_token/'),
         'token_resolver_script' => env('VISIT_WICHITA_TOKEN_RESOLVER_SCRIPT', base_path('scripts/chat/resolve-visit-wichita-token.mjs')),
         'token_resolver_timeout' => (int) env('VISIT_WICHITA_TOKEN_RESOLVER_TIMEOUT', 30000),
         'token_resolver_command' => env('VISIT_WICHITA_TOKEN_RESOLVER_COMMAND', 'node'),

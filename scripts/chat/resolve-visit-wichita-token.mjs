@@ -4,6 +4,7 @@ const tokenSourceUrl = process.argv[2] ?? '';
 const timeout = Number.parseInt(process.env.VISIT_WICHITA_TOKEN_RESOLVER_TIMEOUT ?? '30000', 10);
 const endpointPath = process.env.VISIT_WICHITA_TOKEN_ENDPOINT ?? '/includes/rest_v2/plugins_events_events_by_date/find/';
 const userAgent = process.env.PLAYWRIGHT_USER_AGENT ?? 'LocalmanacBot/1.0';
+const tokenEndpointPath = process.env.VISIT_WICHITA_TOKEN_ENDPOINT_FALLBACK ?? '/plugins/core/get_simple_token/';
 
 const fail = (message) => {
   process.stderr.write(JSON.stringify({ error: message }));
@@ -36,6 +37,21 @@ const run = async () => {
     page.setDefaultNavigationTimeout(timeout);
     page.setDefaultTimeout(timeout);
 
+    await page.route('**/*', (route) => {
+      const url = route.request().url();
+
+      if (
+        url.includes(endpointPath)
+        || url.includes(tokenEndpointPath)
+        || url.includes('visitwichita.com')
+      ) {
+        route.continue();
+        return;
+      }
+
+      route.abort().catch(() => {});
+    });
+
     let requestUrl = null;
     let token = null;
 
@@ -54,7 +70,7 @@ const run = async () => {
       }
     });
 
-    await page.goto(tokenSourceUrl, { waitUntil: 'domcontentloaded', timeout });
+    await page.goto(tokenSourceUrl, { waitUntil: 'commit', timeout });
 
     const start = Date.now();
 
