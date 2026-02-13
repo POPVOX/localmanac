@@ -11,3 +11,7 @@ Artisan::command('inspire', function () {
 Schedule::command('scrape:schedule')
     ->everyMinute()
     ->withoutOverlapping();
+
+Schedule::command('calendar:schedule')
+    ->everyMinute()
+    ->withoutOverlapping();
