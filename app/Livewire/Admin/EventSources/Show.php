@@ -6,6 +6,7 @@ use App\Jobs\RunEventSourceIngestion;
 use App\Models\EventSource;
 use App\Services\Ingestion\EventIngestionRunner;
 use Illuminate\Contracts\View\View;
+use Illuminate\Support\Arr;
 use Livewire\Component;
 use Throwable;
 
@@ -18,7 +19,7 @@ class Show extends Component
     public function mount(EventSource $source): void
     {
         $this->source = $source->load(['city', 'latestRun']);
-        $this->configPreview = $this->prettyPrintConfig($source->config ?? []);
+        $this->configPreview = $this->prettyPrintConfig($this->maskedConfig($source->config ?? []));
     }
 
     public function toggleActive(): void
@@ -104,9 +105,32 @@ class Show extends Component
         return json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '{}';
     }
 
+    /**
+     * @param  array<string, mixed>  $config
+     * @return array<string, mixed>
+     */
+    private function maskedConfig(array $config): array
+    {
+        $token = trim((string) Arr::get($config, 'auth.token'));
+
+        if ($token !== '') {
+            data_set($config, 'auth.token', $this->maskToken($token));
+        }
+
+        return $config;
+    }
+
+    private function maskToken(string $token): string
+    {
+        $suffix = substr($token, -4);
+
+        return "********...{$suffix}";
+    }
+
     private function refreshSource(): void
     {
         $this->source->refresh()->load(['city', 'latestRun']);
+        $this->configPreview = $this->prettyPrintConfig($this->maskedConfig($this->source->config ?? []));
     }
 
     private function dispatchToast(string $heading, string $message, string $variant = 'success'): void

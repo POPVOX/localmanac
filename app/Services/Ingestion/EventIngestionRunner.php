@@ -8,6 +8,8 @@ use App\Services\Ingestion\Fetchers\HtmlCalendarFetcher;
 use App\Services\Ingestion\Fetchers\IcsFetcher;
 use App\Services\Ingestion\Fetchers\JsonApiFetcher;
 use App\Services\Ingestion\Fetchers\RssEventsFetcher;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Throwable;
 
@@ -19,6 +21,7 @@ class EventIngestionRunner
         private readonly RssEventsFetcher $rssFetcher,
         private readonly JsonApiFetcher $jsonFetcher,
         private readonly HtmlCalendarFetcher $htmlFetcher,
+        private readonly ?PostgresSequenceSynchronizer $sequenceSynchronizer = null,
     ) {}
 
     public function run(EventSource $source): EventIngestionRun
@@ -32,12 +35,25 @@ class EventIngestionRunner
     {
         $this->assertRunnable($source);
 
-        return EventIngestionRun::create([
-            'event_source_id' => $source->id,
-            'status' => 'queued',
-            'items_found' => 0,
-            'items_written' => 0,
-        ]);
+        try {
+            return $this->persistRun($source);
+        } catch (UniqueConstraintViolationException $exception) {
+            if (! $this->isRecoverableRunPrimaryKeyViolation($exception)) {
+                throw $exception;
+            }
+
+            $recovered = $this->resolveRunSequenceDrift();
+
+            if (! $recovered) {
+                throw $exception;
+            }
+
+            Log::warning('Recovered from Postgres sequence drift while creating an ingestion run.', [
+                'source_id' => $source->id,
+            ]);
+
+            return $this->persistRun($source);
+        }
     }
 
     public function runExisting(EventIngestionRun $run): EventIngestionRun
@@ -124,5 +140,33 @@ class EventIngestionRunner
         if (! in_array($source->source_type, ['ics', 'rss', 'json', 'json_api', 'html'], true)) {
             throw new InvalidArgumentException('Unsupported event source type');
         }
+    }
+
+    protected function persistRun(EventSource $source): EventIngestionRun
+    {
+        return EventIngestionRun::create([
+            'event_source_id' => $source->id,
+            'status' => 'queued',
+            'items_found' => 0,
+            'items_written' => 0,
+        ]);
+    }
+
+    private function isRecoverableRunPrimaryKeyViolation(UniqueConstraintViolationException $exception): bool
+    {
+        $message = strtolower($exception->getMessage());
+
+        if (! str_contains($message, 'duplicate key value violates unique constraint')) {
+            return false;
+        }
+
+        return str_contains($message, '"event_ingestion_runs_pkey"');
+    }
+
+    private function resolveRunSequenceDrift(): bool
+    {
+        $synchronizer = $this->sequenceSynchronizer ?? new PostgresSequenceSynchronizer;
+
+        return $synchronizer->syncTables(['event_ingestion_runs']);
     }
 }

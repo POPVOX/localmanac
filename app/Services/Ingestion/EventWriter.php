@@ -5,12 +5,17 @@ namespace App\Services\Ingestion;
 use App\Models\Event;
 use App\Models\EventSource;
 use App\Models\EventSourceItem;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
 class EventWriter
 {
-    public function __construct(private readonly EventNormalizer $normalizer) {}
+    public function __construct(
+        private readonly EventNormalizer $normalizer,
+        private readonly ?PostgresSequenceSynchronizer $sequenceSynchronizer = null,
+    ) {}
 
     public function write(EventSource $source, EventDTO $event): Event
     {
@@ -44,6 +49,38 @@ class EventWriter
             $source->source_url
         );
 
+        try {
+            return $this->persistEvent($source, $event, $cityId, $title, $sourceHash, $eventUrl, $sourceUrl, $locationName, $locationAddress);
+        } catch (UniqueConstraintViolationException $exception) {
+            if (! $this->isRecoverablePrimaryKeyViolation($exception)) {
+                throw $exception;
+            }
+
+            $recovered = $this->resolveSequenceDrift();
+
+            if (! $recovered) {
+                throw $exception;
+            }
+
+            Log::warning('Recovered from Postgres sequence drift while writing event data.', [
+                'source_id' => $source->id,
+            ]);
+
+            return $this->persistEvent($source, $event, $cityId, $title, $sourceHash, $eventUrl, $sourceUrl, $locationName, $locationAddress);
+        }
+    }
+
+    protected function persistEvent(
+        EventSource $source,
+        EventDTO $event,
+        int $cityId,
+        string $title,
+        string $sourceHash,
+        ?string $eventUrl,
+        ?string $sourceUrl,
+        ?string $locationName,
+        ?string $locationAddress,
+    ): Event {
         return DB::transaction(function () use ($source, $event, $cityId, $title, $sourceHash, $eventUrl, $sourceUrl, $locationName, $locationAddress) {
             $model = Event::updateOrCreate(
                 ['source_hash' => $sourceHash],
@@ -75,6 +112,25 @@ class EventWriter
 
             return $model;
         });
+    }
+
+    private function isRecoverablePrimaryKeyViolation(UniqueConstraintViolationException $exception): bool
+    {
+        $message = strtolower($exception->getMessage());
+
+        if (! str_contains($message, 'duplicate key value violates unique constraint')) {
+            return false;
+        }
+
+        return str_contains($message, '"events_pkey"')
+            || str_contains($message, '"event_source_items_pkey"');
+    }
+
+    private function resolveSequenceDrift(): bool
+    {
+        $synchronizer = $this->sequenceSynchronizer ?? new PostgresSequenceSynchronizer;
+
+        return $synchronizer->syncTables(['events', 'event_source_items']);
     }
 
     private function resolveSourceHash(

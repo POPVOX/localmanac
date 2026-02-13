@@ -138,7 +138,7 @@
 
         <flux:card padding="xl" variant="subtle">
             <flux:heading size="lg">{{ __('Config') }}</flux:heading>
-            <flux:text variant="subtle" class="mb-3">{{ __('Current JSON config (read only).') }}</flux:text>
+            <flux:text variant="subtle" class="mb-3">{{ __('Current JSON config (read only). Sensitive auth fields are masked.') }}</flux:text>
             <div class="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs font-mono leading-relaxed dark:border-zinc-700 dark:bg-zinc-800">
                 <pre class="whitespace-pre-wrap break-words">{{ $configPreview }}</pre>
             </div>

@@ -7,6 +7,7 @@ use App\Services\Ingestion\EventNormalizer;
 use App\Services\Ingestion\Fetchers\HtmlCalendarFetcher;
 use App\Services\Ingestion\Fetchers\IcsFetcher;
 use App\Services\Ingestion\Fetchers\JsonApiFetcher;
+use App\Services\Ingestion\Fetchers\JsonProfiles\VisitWichitaTokenResolver;
 use App\Services\Ingestion\Fetchers\RssEventsFetcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
@@ -190,6 +191,173 @@ it('parses Visit Wichita simpleview json into event dtos', function () {
         ->and($events[1]->eventUrl)->toBe('https://www.visitwichita.com/event/downtown-art-walk/')
         ->and($events[1]->startsAt->format('Y-m-d H:i'))->toBe('2026-02-10 00:00')
         ->and($events[1]->allDay)->toBeTrue();
+});
+
+it('refreshes Visit Wichita token and retries when credentials are stale', function () {
+    $payload = json_decode(
+        file_get_contents(base_path('tests/Fixtures/visit_wichita_simpleview.json')),
+        true,
+        512,
+        JSON_THROW_ON_ERROR
+    );
+
+    Http::fake(function (Request $request) use ($payload) {
+        $query = [];
+        parse_str(parse_url($request->url(), PHP_URL_QUERY) ?? '', $query);
+
+        if (($query['token'] ?? '') === 'stale-token') {
+            return Http::response('Invalid credentials', 403);
+        }
+
+        expect($query['token'] ?? null)->toBe('fresh-token');
+
+        return Http::response($payload, 200);
+    });
+
+    $resolver = \Mockery::mock(VisitWichitaTokenResolver::class);
+    $resolver->shouldReceive('resolve')
+        ->once()
+        ->with('https://www.visitwichita.com/events/?view=list&sort=date')
+        ->andReturn([
+            'token' => 'fresh-token',
+            'error' => null,
+            'request_url' => 'https://www.visitwichita.com/includes/rest_v2/plugins_events_events_by_date/find/?token=fresh-token',
+        ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'json_api',
+        'source_url' => 'https://www.visitwichita.com/includes/rest_v2/plugins_events_events_by_date/find/',
+        'config' => [
+            'profile' => 'visit_wichita_simpleview',
+            'json' => [
+                'root_path' => 'docs.docs',
+            ],
+            'auth' => [
+                'token' => 'stale-token',
+            ],
+        ],
+    ]);
+
+    $fetcher = new JsonApiFetcher(new CalendarDateParser, new EventNormalizer, null, $resolver);
+    $events = $fetcher->fetch($source);
+
+    expect($events)->toHaveCount(2)
+        ->and($source->refresh()->config['auth']['token'] ?? null)->toBe('fresh-token');
+});
+
+it('resolves and persists a Visit Wichita token when config is missing auth token', function () {
+    $payload = json_decode(
+        file_get_contents(base_path('tests/Fixtures/visit_wichita_simpleview.json')),
+        true,
+        512,
+        JSON_THROW_ON_ERROR
+    );
+
+    Http::fake(function (Request $request) use ($payload) {
+        $query = [];
+        parse_str(parse_url($request->url(), PHP_URL_QUERY) ?? '', $query);
+
+        expect($query['token'] ?? null)->toBe('fresh-token');
+
+        return Http::response($payload, 200);
+    });
+
+    $resolver = \Mockery::mock(VisitWichitaTokenResolver::class);
+    $resolver->shouldReceive('resolve')
+        ->once()
+        ->with('https://www.visitwichita.com/events/?view=list&sort=date')
+        ->andReturn([
+            'token' => 'fresh-token',
+            'error' => null,
+            'request_url' => 'https://www.visitwichita.com/includes/rest_v2/plugins_events_events_by_date/find/?token=fresh-token',
+        ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'json_api',
+        'source_url' => 'https://www.visitwichita.com/includes/rest_v2/plugins_events_events_by_date/find/',
+        'config' => [
+            'profile' => 'visit_wichita_simpleview',
+            'json' => [
+                'root_path' => 'docs.docs',
+            ],
+        ],
+    ]);
+
+    $fetcher = new JsonApiFetcher(new CalendarDateParser, new EventNormalizer, null, $resolver);
+    $events = $fetcher->fetch($source);
+
+    expect($events)->toHaveCount(2)
+        ->and($source->refresh()->config['auth']['token'] ?? null)->toBe('fresh-token');
+});
+
+it('fails with actionable message when Visit Wichita token refresh cannot resolve a token', function () {
+    Http::fake([
+        'https://www.visitwichita.com/includes/rest_v2/plugins_events_events_by_date/find/*' => Http::response('Invalid credentials', 403),
+    ]);
+
+    $resolver = \Mockery::mock(VisitWichitaTokenResolver::class);
+    $resolver->shouldReceive('resolve')
+        ->once()
+        ->andReturn([
+            'token' => null,
+            'error' => 'Playwright is unavailable in worker runtime.',
+            'request_url' => null,
+        ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'json_api',
+        'source_url' => 'https://www.visitwichita.com/includes/rest_v2/plugins_events_events_by_date/find/',
+        'config' => [
+            'profile' => 'visit_wichita_simpleview',
+            'json' => [
+                'root_path' => 'docs.docs',
+            ],
+            'auth' => [
+                'token' => 'stale-token',
+            ],
+        ],
+    ]);
+
+    $fetcher = new JsonApiFetcher(new CalendarDateParser, new EventNormalizer, null, $resolver);
+
+    expect(fn () => $fetcher->fetch($source))
+        ->toThrow(InvalidArgumentException::class, 'Visit Wichita token refresh failed: Playwright is unavailable in worker runtime.');
+});
+
+it('does not attempt Visit Wichita token refresh for non-auth failures', function () {
+    Http::fake([
+        'https://www.visitwichita.com/includes/rest_v2/plugins_events_events_by_date/find/*' => Http::response('Upstream outage', 500),
+    ]);
+
+    $resolver = \Mockery::mock(VisitWichitaTokenResolver::class);
+    $resolver->shouldReceive('resolve')->never();
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'json_api',
+        'source_url' => 'https://www.visitwichita.com/includes/rest_v2/plugins_events_events_by_date/find/',
+        'config' => [
+            'profile' => 'visit_wichita_simpleview',
+            'json' => [
+                'root_path' => 'docs.docs',
+            ],
+            'auth' => [
+                'token' => 'stale-token',
+            ],
+        ],
+    ]);
+
+    $fetcher = new JsonApiFetcher(new CalendarDateParser, new EventNormalizer, null, $resolver);
+
+    expect(fn () => $fetcher->fetch($source))
+        ->toThrow(InvalidArgumentException::class, 'Failed to fetch JSON feed (status 500): Upstream outage');
 });
 
 it('parses Wichita Public Library libnet json into event dtos', function () {

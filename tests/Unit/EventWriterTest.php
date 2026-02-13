@@ -6,6 +6,8 @@ use App\Models\EventSourceItem;
 use App\Services\Ingestion\EventDTO;
 use App\Services\Ingestion\EventNormalizer;
 use App\Services\Ingestion\EventWriter;
+use App\Services\Ingestion\PostgresSequenceSynchronizer;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
@@ -74,4 +76,103 @@ it('sanitizes location fields before saving', function () {
 
     expect($saved->location_name)->toBe('Westlink Church of Christ, 10025 W. Central, Wichita, KS 67212')
         ->and($saved->location_address)->toBe('10025 W. Central, Wichita, KS 67212');
+});
+
+it('retries event writes once after recoverable sequence drift is repaired', function () {
+    $source = EventSource::factory()->create([
+        'source_type' => 'ics',
+        'source_url' => 'https://example.com/calendar.ics',
+    ]);
+
+    $dto = new EventDTO(
+        title: 'Recovered Event',
+        startsAt: Carbon::parse('2026-01-15 10:00', 'America/Chicago'),
+        endsAt: null,
+        allDay: false,
+        locationName: 'City Hall',
+        locationAddress: '123 Main St',
+        description: null,
+        eventUrl: 'https://example.com/recovered-event',
+        externalId: 'recovered-1',
+        sourceUrl: 'https://example.com/recovered-event',
+        rawPayload: [],
+    );
+
+    $stored = new Event([
+        'city_id' => 1,
+        'title' => 'Recovered Event',
+        'source_hash' => sha1('recovered-event'),
+    ]);
+    $stored->id = 123;
+
+    $recoverableViolation = new UniqueConstraintViolationException(
+        'pgsql',
+        'insert into "events"',
+        [],
+        new \RuntimeException('duplicate key value violates unique constraint "events_pkey"')
+    );
+
+    $synchronizer = \Mockery::mock(PostgresSequenceSynchronizer::class);
+    $synchronizer->shouldReceive('syncTables')
+        ->once()
+        ->with(['events', 'event_source_items'])
+        ->andReturn(true);
+
+    $writer = \Mockery::mock(EventWriter::class, [new EventNormalizer, $synchronizer])
+        ->makePartial()
+        ->shouldAllowMockingProtectedMethods();
+
+    $writer->shouldReceive('persistEvent')
+        ->once()
+        ->andThrow($recoverableViolation);
+    $writer->shouldReceive('persistEvent')
+        ->once()
+        ->andReturn($stored);
+
+    $result = $writer->write($source, $dto);
+
+    expect($result)->toBe($stored)
+        ->and($result->id)->toBe(123);
+});
+
+it('does not retry when unique constraint errors are not recoverable sequence drift', function () {
+    $source = EventSource::factory()->create([
+        'source_type' => 'ics',
+        'source_url' => 'https://example.com/calendar.ics',
+    ]);
+
+    $dto = new EventDTO(
+        title: 'Non Recoverable',
+        startsAt: Carbon::parse('2026-01-15 10:00', 'America/Chicago'),
+        endsAt: null,
+        allDay: false,
+        locationName: null,
+        locationAddress: null,
+        description: null,
+        eventUrl: null,
+        externalId: null,
+        sourceUrl: null,
+        rawPayload: [],
+    );
+
+    $nonRecoverableViolation = new UniqueConstraintViolationException(
+        'pgsql',
+        'insert into "events"',
+        [],
+        new \RuntimeException('duplicate key value violates unique constraint "events_source_hash_unique"')
+    );
+
+    $synchronizer = \Mockery::mock(PostgresSequenceSynchronizer::class);
+    $synchronizer->shouldReceive('syncTables')->never();
+
+    $writer = \Mockery::mock(EventWriter::class, [new EventNormalizer, $synchronizer])
+        ->makePartial()
+        ->shouldAllowMockingProtectedMethods();
+
+    $writer->shouldReceive('persistEvent')
+        ->once()
+        ->andThrow($nonRecoverableViolation);
+
+    expect(fn () => $writer->write($source, $dto))
+        ->toThrow(UniqueConstraintViolationException::class);
 });

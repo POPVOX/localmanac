@@ -3,7 +3,10 @@
 namespace App\Services\Ingestion\Fetchers\JsonProfiles;
 
 use App\Models\EventSource;
+use App\Services\Ingestion\CalendarDateParser;
 use App\Services\Ingestion\EventDTO;
+use App\Services\Ingestion\EventNormalizer;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -13,6 +16,14 @@ use Throwable;
 
 class VisitWichitaSimpleviewProfile extends AbstractJsonProfile
 {
+    public function __construct(
+        CalendarDateParser $dateParser,
+        EventNormalizer $normalizer,
+        private readonly ?VisitWichitaTokenResolver $tokenResolver = null,
+    ) {
+        parent::__construct($dateParser, $normalizer);
+    }
+
     public function supports(?string $profileName): bool
     {
         return $profileName === 'visit_wichita_simpleview';
@@ -24,14 +35,37 @@ class VisitWichitaSimpleviewProfile extends AbstractJsonProfile
      */
     public function fetchPayloads(EventSource $source, array $config, string $timezone): array
     {
-        $sourceConfig = $source->config ?? [];
-        [$requestUrl, $query] = $this->buildVisitWichitaRequest($source->source_url ?? '', $sourceConfig, $timezone);
+        $sourceConfig = is_array($source->config) ? $source->config : [];
+        $request = $this->buildVisitWichitaRequest($source->source_url ?? '', $sourceConfig, $timezone);
+        $requestUrl = $request['request_url'];
+        $jsonPayload = $request['json_payload'];
+        $storedToken = $request['token'];
 
-        $response = Http::timeout(15)->retry(2, 250)->withOptions(['query' => $query])->get($requestUrl);
+        if ($storedToken !== '') {
+            $response = $this->requestVisitWichitaPayload($requestUrl, $jsonPayload, $storedToken);
+
+            if ($response->successful()) {
+                return [[
+                    'request_url' => $requestUrl,
+                    'payload' => $response->json(),
+                ]];
+            }
+
+            if (! $this->isInvalidCredentialResponse($response)) {
+                throw new InvalidArgumentException($this->formatFailedFetchMessage($response));
+            }
+        }
+
+        $resolvedToken = $this->resolveVisitWichitaToken($sourceConfig);
+        $response = $this->requestVisitWichitaPayload($requestUrl, $jsonPayload, $resolvedToken);
 
         if (! $response->successful()) {
-            throw new InvalidArgumentException('Failed to fetch JSON feed');
+            throw new InvalidArgumentException(
+                'Visit Wichita token refresh retry failed. '.$this->formatFailedFetchMessage($response)
+            );
         }
+
+        $this->persistResolvedToken($source, $sourceConfig, $resolvedToken);
 
         return [[
             'request_url' => $requestUrl,
@@ -138,17 +172,17 @@ class VisitWichitaSimpleviewProfile extends AbstractJsonProfile
 
     /**
      * @param  array<string, mixed>  $sourceConfig
-     * @return array{0: string, 1: array<string, string>}
+     * @return array{request_url: string, json_payload: string, token: string}
      */
     private function buildVisitWichitaRequest(string $sourceUrl, array $sourceConfig, string $timezone): array
     {
+        $existingQuery = $this->extractQueryParams($sourceUrl);
         $token = $this->stringValue(Arr::get($sourceConfig, 'auth.token'));
 
-        if ($token === '') {
-            throw new InvalidArgumentException('Visit Wichita token missing in config (auth.token)');
+        if ($token === '' && isset($existingQuery['token'])) {
+            $token = $this->stringValue($existingQuery['token']);
         }
 
-        $existingQuery = $this->extractQueryParams($sourceUrl);
         $jsonPayload = $this->normalizeVisitWichitaJsonPayload(
             $existingQuery['json']
                 ?? Arr::get($sourceConfig, 'json.query')
@@ -157,17 +191,102 @@ class VisitWichitaSimpleviewProfile extends AbstractJsonProfile
             $timezone
         );
         $baseUrl = $this->stripQueryFromUrl($sourceUrl);
-        $requestQuery = [
-            'json' => $jsonPayload,
-            'token' => $token,
-        ];
 
         Log::debug('Visit Wichita Simpleview request prepared.', [
             'url' => $baseUrl,
-            'token_present' => true,
+            'token_present' => $token !== '',
         ]);
 
-        return [$baseUrl, $requestQuery];
+        return [
+            'request_url' => $baseUrl,
+            'json_payload' => $jsonPayload,
+            'token' => $token,
+        ];
+    }
+
+    private function requestVisitWichitaPayload(string $requestUrl, string $jsonPayload, string $token): Response
+    {
+        return Http::timeout(15)
+            ->retry(2, 250, throw: false)
+            ->withOptions([
+                'query' => [
+                    'json' => $jsonPayload,
+                    'token' => $token,
+                ],
+            ])
+            ->get($requestUrl);
+    }
+
+    private function isInvalidCredentialResponse(Response $response): bool
+    {
+        if ($response->status() !== 403) {
+            return false;
+        }
+
+        return str_contains(strtolower($response->body()), 'invalid credentials');
+    }
+
+    /**
+     * @param  array<string, mixed>  $sourceConfig
+     */
+    private function resolveVisitWichitaToken(array $sourceConfig): string
+    {
+        $tokenSourceUrl = $this->stringValue(Arr::get($sourceConfig, 'auth.token_source_url'));
+
+        if ($tokenSourceUrl === '') {
+            $tokenSourceUrl = (string) config(
+                'services.visit_wichita.token_source_url',
+                'https://www.visitwichita.com/events/?view=list&sort=date'
+            );
+        }
+
+        $resolver = $this->tokenResolver ?? new VisitWichitaTokenResolver;
+        $resolution = $resolver->resolve($tokenSourceUrl);
+        $token = $this->stringValue($resolution['token'] ?? '');
+
+        if ($token !== '') {
+            return $token;
+        }
+
+        $message = $this->stringValue($resolution['error'] ?? '');
+
+        if ($message === '') {
+            $message = 'Unable to resolve a token from the Visit Wichita source page.';
+        }
+
+        throw new InvalidArgumentException('Visit Wichita token refresh failed: '.$message);
+    }
+
+    /**
+     * @param  array<string, mixed>  $sourceConfig
+     */
+    private function persistResolvedToken(EventSource $source, array $sourceConfig, string $token): void
+    {
+        $storedToken = $this->stringValue(Arr::get($sourceConfig, 'auth.token'));
+
+        if ($storedToken === $token) {
+            return;
+        }
+
+        data_set($sourceConfig, 'auth.token', $token);
+
+        $source->forceFill([
+            'config' => $sourceConfig,
+        ])->save();
+    }
+
+    private function formatFailedFetchMessage(Response $response): string
+    {
+        $status = $response->status();
+        $body = trim(preg_replace('/\s+/', ' ', $response->body()) ?? '');
+
+        if ($body === '') {
+            return "Failed to fetch JSON feed (status {$status}).";
+        }
+
+        $snippet = substr($body, 0, 280);
+
+        return "Failed to fetch JSON feed (status {$status}): {$snippet}";
     }
 
     /**

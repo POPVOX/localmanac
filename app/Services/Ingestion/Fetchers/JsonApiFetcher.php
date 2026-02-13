@@ -10,6 +10,7 @@ use App\Services\Ingestion\Fetchers\JsonProfiles\Century2CalendarProfile;
 use App\Services\Ingestion\Fetchers\JsonProfiles\GenericJsonProfile;
 use App\Services\Ingestion\Fetchers\JsonProfiles\JsonProfileRegistry;
 use App\Services\Ingestion\Fetchers\JsonProfiles\VisitWichitaSimpleviewProfile;
+use App\Services\Ingestion\Fetchers\JsonProfiles\VisitWichitaTokenResolver;
 use App\Services\Ingestion\Fetchers\JsonProfiles\WichitaLibnetLibcalProfile;
 use Illuminate\Support\Arr;
 use InvalidArgumentException;
@@ -20,6 +21,7 @@ class JsonApiFetcher implements EventSourceFetcher
         private readonly CalendarDateParser $dateParser,
         private readonly EventNormalizer $normalizer,
         private readonly ?JsonProfileRegistry $profileRegistry = null,
+        private readonly ?VisitWichitaTokenResolver $visitWichitaTokenResolver = null,
     ) {}
 
     /**
@@ -60,9 +62,11 @@ class JsonApiFetcher implements EventSourceFetcher
 
     private function buildProfileRegistry(): JsonProfileRegistry
     {
+        $visitWichitaTokenResolver = $this->visitWichitaTokenResolver ?? new VisitWichitaTokenResolver;
+
         return new JsonProfileRegistry(
             [
-                new VisitWichitaSimpleviewProfile($this->dateParser, $this->normalizer),
+                new VisitWichitaSimpleviewProfile($this->dateParser, $this->normalizer, $visitWichitaTokenResolver),
                 new WichitaLibnetLibcalProfile($this->dateParser, $this->normalizer),
                 new Century2CalendarProfile($this->dateParser, $this->normalizer),
             ],
