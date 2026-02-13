@@ -22,7 +22,8 @@ test('verified users can visit the dashboard', function () {
 
     $response = $this->get(route('dashboard'));
     $response->assertOk()
-        ->assertSee('data-testid="assistant-typing-indicator"', false);
+        ->assertSee('data-testid="assistant-typing-indicator"', false)
+        ->assertDontSee('data-testid="new-conversation-button"', false);
 });
 
 test('verified users can visit the scrapers admin page', function () {

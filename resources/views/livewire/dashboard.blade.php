@@ -1,5 +1,9 @@
 <div class="space-y-8">
     <flux:card padding="xl" class="space-y-6 rounded-2xl border border-zinc-200 bg-gradient-to-br from-white via-white to-emerald-50/30 shadow-sm">
+        @php
+            $hasConversation = $conversationId || count($messages) > 0;
+        @endphp
+
         <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div class="space-y-2">
                 <flux:heading size="lg" level="1">
@@ -9,23 +13,13 @@
                     {{ __('Get answers on local services, meetings, and community updates.') }}
                 </flux:subheading>
             </div>
-            <div class="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-700">
-                {{ __('Powered by verified sources') }}
+
+            <div class="flex flex-wrap items-center justify-end gap-2">
+                <div class="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-700">
+                    {{ __('Powered by verified sources') }}
+                </div>
             </div>
         </div>
-
-        @if ($conversationId || count($messages) > 0)
-            <div class="flex justify-end">
-                <flux:button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    wire:click="startNewConversation"
-                >
-                    {{ __('New conversation') }}
-                </flux:button>
-            </div>
-        @endif
 
         <div
             x-data="{
@@ -148,6 +142,19 @@
                         class="border-zinc-200 bg-white shadow-sm [&_textarea]:px-5 [&_textarea]:py-4 [&_textarea]:text-base"
                     >
                         <x-slot name="actionsTrailing" class="flex items-center justify-end gap-2">
+                            @if ($hasConversation)
+                                <button
+                                    type="button"
+                                    wire:click="startNewConversation"
+                                    data-testid="new-conversation-button"
+                                    class="inline-grid h-10 w-10 place-items-center rounded-full border border-zinc-200 bg-white text-zinc-500 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-700"
+                                    aria-label="{{ __('Start a new conversation') }}"
+                                    title="{{ __('Start a new conversation') }}"
+                                >
+                                    <flux:icon icon="arrow-path-rounded-square" class="size-4" />
+                                </button>
+                            @endif
+
                             <flux:button
                                 type="submit"
                                 size="sm"
@@ -188,6 +195,10 @@
 
     <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <flux:card padding="lg" class="text-center rounded-2xl border border-zinc-200 bg-white shadow-sm">
+            <flux:heading size="xl" class="text-purple-600">{{ $stats['locationLabel'] }}</flux:heading>
+            <flux:subheading>{{ __('Your Location') }}</flux:subheading>
+        </flux:card>
+        <flux:card padding="lg" class="text-center rounded-2xl border border-zinc-200 bg-white shadow-sm">
             <flux:heading size="xl">{{ $stats['totalArticles'] }}</flux:heading>
             <flux:subheading>{{ __('Total Articles') }}</flux:subheading>
         </flux:card>
@@ -198,10 +209,6 @@
         <flux:card padding="lg" class="text-center rounded-2xl border border-zinc-200 bg-white shadow-sm">
             <flux:heading size="xl" class="text-blue-600">{{ $stats['categoryCount'] }}</flux:heading>
             <flux:subheading>{{ __('Categories') }}</flux:subheading>
-        </flux:card>
-        <flux:card padding="lg" class="text-center rounded-2xl border border-zinc-200 bg-white shadow-sm">
-            <flux:heading size="xl" class="text-purple-600">{{ $stats['locationLabel'] }}</flux:heading>
-            <flux:subheading>{{ __('Your Location') }}</flux:subheading>
         </flux:card>
     </div>
 

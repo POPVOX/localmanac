@@ -79,6 +79,7 @@ return [
         'enabled' => (bool) env('CHAT_EVENTS_ENABLED', true),
         'intent_mode' => env('CHAT_EVENTS_INTENT_MODE', 'intent'),
         'max_results' => (int) env('CHAT_EVENTS_MAX_RESULTS', 8),
+        'response_max_highlights' => (int) env('CHAT_EVENTS_RESPONSE_MAX_HIGHLIGHTS', 5),
         'no_results_suggest_alternatives' => (bool) env('CHAT_EVENTS_NO_RESULTS_SUGGEST', true),
         'web_fallback' => [
             'enabled' => (bool) env('CHAT_EVENTS_WEB_FALLBACK_ENABLED', true),

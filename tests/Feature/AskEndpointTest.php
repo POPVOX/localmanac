@@ -552,8 +552,53 @@ it('falls back to deterministic local event summary when llm returns no-answer b
         ]);
 
     $response->assertOk()
-        ->assertSeeText('Here are events in Wichita for this week')
+        ->assertSeeText('Top events in Wichita for this week')
         ->assertJsonPath('citations.0.source_url', 'https://events.wichita.gov/night-market');
 
     expect((string) $response->json('answer'))->not->toContain('I could not find any events in Wichita');
+});
+
+it('caps response citations to link limit', function () {
+    Cache::flush();
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.retrieval_mode', 'local_only');
+    config()->set('chat.tools.web_search.enabled', false);
+    config()->set('chat.link_limit', 3);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'City Services',
+        'source_url' => 'https://www.wichita.gov',
+        'is_active' => true,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'Here are the latest service updates.',
+            'citations' => [
+                ['title' => 'One', 'source_url' => 'https://example.com/1', 'type' => 'html'],
+                ['title' => 'Two', 'source_url' => 'https://example.com/2', 'type' => 'html'],
+                ['title' => 'Three', 'source_url' => 'https://example.com/3', 'type' => 'html'],
+                ['title' => 'Four', 'source_url' => 'https://example.com/4', 'type' => 'html'],
+                ['title' => 'Five', 'source_url' => 'https://example.com/5', 'type' => 'html'],
+            ],
+            'source_mode' => 'local',
+            'confidence' => 0.85,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()
+        ->postJson('/ask', [
+            'question' => 'What are this week\'s city updates?',
+            'city_id' => $city->id,
+        ]);
+
+    $response->assertOk();
+
+    expect($response->json('citations'))->toHaveCount(3);
 });

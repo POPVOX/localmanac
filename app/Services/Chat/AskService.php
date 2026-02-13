@@ -202,6 +202,7 @@ class AskService
             })
             ->filter(fn (array $item): bool => $item['source_url'] !== '')
             ->unique('source_url')
+            ->take((int) config('chat.link_limit', 6))
             ->values()
             ->all();
     }
