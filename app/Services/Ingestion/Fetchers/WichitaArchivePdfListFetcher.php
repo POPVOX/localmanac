@@ -66,8 +66,14 @@ class WichitaArchivePdfListFetcher
             'skipped_max_links' => 0,
         ];
 
-        foreach ($crawler->filter('a') as $node) {
-            $anchor = new Crawler($node, $sourceUrl);
+        foreach ($crawler->filter('table[summary="Archive Details"]') as $tableNode) {
+            $table = new Crawler($tableNode, $sourceUrl);
+
+            if ($table->filter('a')->count() === 0) {
+                continue;
+            }
+
+            $anchor = $table->filter('a')->first();
             $href = $anchor->attr('href') ?? '';
 
             if (! Str::contains($href, $hrefContains)) {
@@ -85,7 +91,15 @@ class WichitaArchivePdfListFetcher
             }
 
             $stats['considered']++;
-            $title = $this->normalizeWhitespace($anchor->text(''));
+            $listingTitle = $this->normalizeWhitespace($anchor->text(''));
+            $subtitle = $this->extractSubtitle($table);
+            $icon = '';
+
+            if ($table->filter('img')->count() > 0) {
+                $icon = $this->normalizeWhitespace((string) ($table->filter('img')->first()->attr('src') ?? ''));
+            }
+            $documentType = $this->inferDocumentType($icon, $listingTitle, $href);
+            $title = $this->preferredTitle($listingTitle, $subtitle);
 
             if ($title === '' || mb_strlen($title) < 3) {
                 $stats['skipped_empty_title']++;
@@ -112,14 +126,18 @@ class WichitaArchivePdfListFetcher
                 'scraper_id' => $scraper->id,
                 'title' => $title,
                 'published_at' => null,
-                'content_type' => 'pdf',
+                'content_type' => $documentType,
                 'canonical_url' => $resolved,
-                'summary' => null,
+                'summary' => $subtitle !== '' ? $subtitle : null,
                 'meta' => [
                     'source' => 'archive_center',
+                    'listing_title' => $listingTitle,
+                    'listing_subtitle' => $subtitle !== '' ? $subtitle : null,
+                    'icon' => $icon !== '' ? $icon : null,
+                    'inferred_document_type' => $documentType,
                 ],
                 'source' => [
-                    'source_type' => 'pdf',
+                    'source_type' => $documentType,
                     'source_url' => $resolved,
                     'source_uid' => $this->extractArchiveId($resolved),
                     'organization_id' => $organizationId,
@@ -196,6 +214,65 @@ class WichitaArchivePdfListFetcher
     private function normalizeWhitespace(string $value): string
     {
         return trim(preg_replace('/\s+/', ' ', $value) ?? '');
+    }
+
+    private function extractSubtitle(Crawler $table): string
+    {
+        if ($table->filter('span[style*="italic"]')->count() === 0) {
+            return '';
+        }
+
+        return $this->normalizeWhitespace($table->filter('span[style*="italic"]')->first()->text(''));
+    }
+
+    private function inferDocumentType(string $icon, string $listingTitle, string $href): string
+    {
+        $icon = mb_strtolower($icon);
+        $titleAndHref = mb_strtolower($listingTitle.' '.$href);
+
+        if (str_contains($icon, 'iconword') || preg_match('/\.(docx?|rtf)\b/', $titleAndHref) === 1) {
+            return 'docx';
+        }
+
+        if (str_contains($icon, 'iconpdf') || preg_match('/\.pdf\b/', $titleAndHref) === 1) {
+            return 'pdf';
+        }
+
+        return 'document';
+    }
+
+    private function preferredTitle(string $listingTitle, string $subtitle): string
+    {
+        if ($subtitle !== '' && $this->looksLikeCodeOrAddress($listingTitle)) {
+            return $subtitle;
+        }
+
+        return $listingTitle;
+    }
+
+    private function looksLikeCodeOrAddress(string $value): bool
+    {
+        if ($value === '') {
+            return true;
+        }
+
+        if (preg_match('/\blegalnotice\b/i', $value) === 1) {
+            return true;
+        }
+
+        if (preg_match('/\.(pdf|docx?|txt)$/i', $value) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^\d+\s+[nsew]\b/i', $value) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^[A-Z0-9._-]{10,}$/', str_replace(' ', '', $value)) === 1) {
+            return true;
+        }
+
+        return false;
     }
 
     private function httpClient()

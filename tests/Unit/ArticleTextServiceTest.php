@@ -103,3 +103,101 @@ it('prefers the LLM headline when available', function () {
     expect($article->title)
         ->toBe('Sealed proposals sought for Whispering Creek Addition project');
 });
+
+it('preserves short meaningful titles', function () {
+    $city = City::create([
+        'name' => 'Calendar City',
+        'slug' => 'calendar-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Bid Opening',
+        'summary' => 'Event date: February 27, 2026. Event Time: 10:00 AM - 10:30 AM.',
+        'status' => 'published',
+        'content_type' => 'news',
+    ]);
+
+    $service = new ArticleTextService;
+    $service->refresh($article->fresh());
+
+    $article->refresh();
+
+    expect($article->title)->toBe('Bid Opening');
+});
+
+it('derives legal notice titles from project lines in extracted text', function () {
+    $city = City::create([
+        'name' => 'Legal City',
+        'slug' => 'legal-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => '458-2022-085515_LegalNotice (PDF)',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => implode("\n", [
+            'PROJ # 458-2022-085515',
+            'Published on the City\'s Website on Friday, January 30, 2026',
+            'SEALED PROPOSALS',
+            'Notice is hereby given that bids will be received up to 10:00 a.m.',
+            'for the following project:',
+            'SWS #774 Repairs 13th St N & I-135 and 13th St N & Pennsylvania',
+            'All bids received will thereafter be publicly opened.',
+        ]),
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $service = new ArticleTextService;
+    $service->refresh($article->fresh());
+
+    $article->refresh();
+
+    expect($article->title)
+        ->toBe('SWS #774 Repairs 13th St N & I-135 and 13th St N & Pennsylvania')
+        ->and($article->summary)->not->toBeNull();
+});
+
+it('does not keep city website publication boilerplate as title', function () {
+    $city = City::create([
+        'name' => 'Boilerplate City',
+        'slug' => 'boilerplate-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'PROJ # R0003 Published on the City\'s Website on Friday',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => implode("\n", [
+            'PROJ # R0003',
+            'Published on the City\'s Website on Friday, February 13, 2026',
+            'SEALED PROPOSALS',
+            'for the following project:',
+            'L.W. Clapp Memorial Park Cross-Country Course Improvements',
+        ]),
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $service = new ArticleTextService;
+    $service->refresh($article->fresh());
+
+    $article->refresh();
+
+    expect($article->title)
+        ->toBe('L.W. Clapp Memorial Park Cross-Country Course Improvements')
+        ->and($article->title)->not->toContain('Published on the City');
+});

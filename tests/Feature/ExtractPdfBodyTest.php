@@ -60,6 +60,68 @@ function makeTestableExtractPdfBody(
     };
 }
 
+/**
+ * @param  array<int, string>  $paragraphs
+ */
+function makeDocxBinary(array $paragraphs): string
+{
+    $tmpPath = tempnam(sys_get_temp_dir(), 'docx_test_');
+
+    if ($tmpPath === false) {
+        throw new RuntimeException('Unable to create DOCX temp file');
+    }
+
+    $zip = new ZipArchive;
+
+    $opened = $zip->open($tmpPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+
+    if ($opened !== true) {
+        throw new RuntimeException('Unable to create DOCX archive');
+    }
+
+    $contentTypesXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+    <Default Extension="xml" ContentType="application/xml"/>
+    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>
+XML;
+
+    $relsXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>
+XML;
+
+    $paragraphXml = '';
+
+    foreach ($paragraphs as $paragraph) {
+        $escaped = htmlspecialchars($paragraph, ENT_QUOTES | ENT_XML1, 'UTF-8');
+        $paragraphXml .= '<w:p><w:r><w:t xml:space="preserve">'.$escaped.'</w:t></w:r></w:p>';
+    }
+
+    $documentXml = '<?xml version="1.0" encoding="UTF-8"?>'
+        .'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        .'<w:body>'.$paragraphXml.'</w:body>'
+        .'</w:document>';
+
+    $zip->addFromString('[Content_Types].xml', $contentTypesXml);
+    $zip->addFromString('_rels/.rels', $relsXml);
+    $zip->addFromString('word/document.xml', $documentXml);
+    $zip->close();
+
+    $binary = file_get_contents($tmpPath);
+    @unlink($tmpPath);
+
+    if (! is_string($binary)) {
+        throw new RuntimeException('Unable to read DOCX binary');
+    }
+
+    return $binary;
+}
+
 it('marks empty extraction when pdftotext returns no text', function () {
     Http::fake([
         'https://example.com/file.pdf' => Http::response('PDFDATA', 200, [
@@ -155,6 +217,114 @@ it('marks failure when response is not a pdf', function () {
         ->and($body?->cleaned_text)->toBeNull()
         ->and($body?->extraction_meta['content_type'])->toBe('text/html')
         ->and($body?->extraction_meta['http_status'])->toBe(200);
+});
+
+it('extracts docx responses and refreshes article text', function () {
+    $docxBinary = makeDocxBinary([
+        'Abatement of the property located at 323 N Ash',
+        'Remove all scattered trash and debris from the property.',
+    ]);
+
+    Http::fake([
+        'https://example.com/file.docx' => Http::response($docxBinary, 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'Content-Disposition' => 'inline;filename=NNE2025-04890 323 N ASH.docx',
+        ]),
+    ]);
+
+    config(['scout.driver' => 'fake']);
+
+    $engine = new class extends Engine
+    {
+        public int $updateCalls = 0;
+
+        public function update(mixed $models): void
+        {
+            $this->updateCalls++;
+        }
+
+        public function delete(mixed $models): void {}
+
+        public function search(Builder $builder): array
+        {
+            return ['results' => [], 'total' => 0];
+        }
+
+        public function paginate(Builder $builder, mixed $perPage, mixed $page): array
+        {
+            return ['results' => [], 'total' => 0];
+        }
+
+        public function mapIds(mixed $results): Collection
+        {
+            return collect();
+        }
+
+        public function map(Builder $builder, mixed $results, mixed $model): EloquentCollection
+        {
+            return $model->newCollection();
+        }
+
+        public function lazyMap(Builder $builder, mixed $results, mixed $model): LazyCollection
+        {
+            return $this->map($builder, $results, $model)->lazy();
+        }
+
+        public function getTotalCount(mixed $results): int
+        {
+            return $results['total'] ?? 0;
+        }
+
+        public function flush(mixed $model): void {}
+
+        public function createIndex(mixed $name, array $options = []): mixed
+        {
+            return null;
+        }
+
+        public function deleteIndex(mixed $name): mixed
+        {
+            return null;
+        }
+    };
+
+    $engineManager = app(EngineManager::class);
+    $engineManager->forgetDrivers();
+    $engineManager->extend('fake', fn () => $engine);
+
+    $city = City::create(['name' => 'Docx City', 'slug' => 'docx-city']);
+
+    $scraper = Scraper::create([
+        'city_id' => $city->id,
+        'name' => 'DOCX',
+        'slug' => 'docx',
+        'type' => 'html',
+        'source_url' => 'https://example.com',
+        'config' => [],
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => '323 N Ash',
+        'status' => 'published',
+        'content_type' => 'docx',
+        'scraper_id' => $scraper->id,
+    ]);
+
+    $job = new ExtractPdfBody($article->id, 'https://example.com/file.docx');
+    $job->handle();
+
+    $body = ArticleBody::first();
+    $article->refresh();
+
+    expect($body)->not->toBeNull()
+        ->and($body?->extraction_status)->toBe('success')
+        ->and($body?->cleaned_text)->toContain('Abatement of the property located at 323 N Ash')
+        ->and($body?->extraction_meta['detected_type'])->toBe('docx')
+        ->and($body?->extraction_meta['method'])->toBe('docx_xml')
+        ->and($article->title)->toBe('Abatement of the property located at 323 N Ash')
+        ->and($article->summary)->toContain('Abatement of the property located at 323 N Ash')
+        ->and($engine->updateCalls)->toBeGreaterThanOrEqual(1);
 });
 
 it('uses ocr fallback when enabled', function () {

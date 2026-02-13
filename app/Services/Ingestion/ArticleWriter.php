@@ -15,7 +15,7 @@ class ArticleWriter
     public function write(array $item, ?Article $existing = null): Article
     {
         $cityId = $item['city_id'] ?? null;
-        $title = $item['title'] ?? null;
+        $title = $this->stringValue($item['title'] ?? null);
         $source = $item['source'] ?? [];
         $sourceUrl = $source['source_url'] ?? null;
 
@@ -26,12 +26,28 @@ class ArticleWriter
         return DB::transaction(function () use ($item, $existing, $cityId, $title, $source, $sourceUrl) {
             $article = $existing ?? new Article;
             $shouldReindex = false;
+            $shouldAnalyze = false;
+            $shouldRefreshFromExistingBody = false;
+
+            $incomingSummary = $this->stringValue($item['summary'] ?? null);
+            $existingSummary = $this->stringValue($article->summary);
+            $incomingTitle = $this->stringValue($title);
+            $existingTitle = $this->stringValue($article->title);
+
+            $summaryToPersist = $incomingSummary ?? $existingSummary;
+            $titleToPersist = $incomingTitle ?? $existingTitle;
+
+            if ($existingTitle !== null && $incomingTitle !== null) {
+                if (! $this->isWeakTitle($existingTitle) && $this->isWeakTitle($incomingTitle)) {
+                    $titleToPersist = $existingTitle;
+                }
+            }
 
             $article->fill([
                 'city_id' => $cityId,
                 'scraper_id' => $item['scraper_id'] ?? null,
-                'title' => $title,
-                'summary' => $item['summary'] ?? null, // may be filled below from cleaned_text
+                'title' => $titleToPersist,
+                'summary' => $summaryToPersist, // may be filled below from cleaned_text
                 'published_at' => $item['published_at'] ?? null,
                 'content_type' => $item['content_type'] ?? 'unknown',
                 'status' => $item['status'] ?? 'published',
@@ -42,7 +58,6 @@ class ArticleWriter
             $article->save();
 
             $articleBody = $item['body'] ?? null;
-            $shouldAnalyze = false;
 
             if (is_array($articleBody) && $articleBody !== []) {
                 $cleanedText = $articleBody['cleaned_text'] ?? null;
@@ -68,6 +83,10 @@ class ArticleWriter
 
                 $shouldReindex = true;
                 $shouldAnalyze = is_string($cleanedText) && trim($cleanedText) !== '';
+            } else {
+                $article->loadMissing('body');
+                $storedCleanedText = $this->stringValue($article->body?->cleaned_text);
+                $shouldRefreshFromExistingBody = $existing !== null && $storedCleanedText !== null;
             }
 
             ArticleSource::updateOrCreate(
@@ -84,6 +103,14 @@ class ArticleWriter
                 ]
             );
 
+            if ($shouldRefreshFromExistingBody) {
+                $refreshed = app(ArticleTextService::class)->refresh($article);
+
+                if ($refreshed) {
+                    $shouldReindex = true;
+                }
+            }
+
             if ($shouldReindex || $shouldAnalyze) {
                 DB::afterCommit(function () use ($article, $shouldReindex, $shouldAnalyze) {
                     if ($shouldReindex) {
@@ -99,5 +126,45 @@ class ArticleWriter
 
             return $article;
         });
+    }
+
+    private function isWeakTitle(string $title): bool
+    {
+        if (preg_match('/^event date:/i', $title) === 1) {
+            return true;
+        }
+
+        if (preg_match('/published on the city\'?s website/i', $title) === 1) {
+            return true;
+        }
+
+        if (preg_match('/legalnotice/i', $title) === 1) {
+            return true;
+        }
+
+        if (preg_match('/(\.(pdf|docx?|txt)|\((pdf|docx?|txt)\))$/i', $title) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^[A-Z0-9._-]{10,}$/', str_replace(' ', '', $title)) === 1) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function stringValue(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        return $value;
     }
 }

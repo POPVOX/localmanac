@@ -8,7 +8,9 @@ use App\Models\Scraper;
 use App\Models\ScraperRun;
 use App\Services\Ingestion\Fetchers\RssFetcher;
 use App\Services\Ingestion\Fetchers\WichitaArchivePdfListFetcher;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Throwable;
@@ -19,6 +21,7 @@ class ScrapeRunner
         private readonly Deduplicator $deduplicator,
         private readonly ArticleWriter $writer,
         private readonly RssFetcher $rssFetcher,
+        private readonly ?PostgresSequenceSynchronizer $sequenceSynchronizer = null,
     ) {}
 
     public function run(Scraper $scraper): ScraperRun
@@ -32,15 +35,25 @@ class ScrapeRunner
     {
         $this->assertRunnable($scraper);
 
-        return ScraperRun::create([
-            'scraper_id' => $scraper->id,
-            'city_id' => $scraper->city_id,
-            'status' => 'queued',
-            'items_found' => 0,
-            'items_created' => 0,
-            'items_updated' => 0,
-            'meta' => [],
-        ]);
+        try {
+            return $this->persistRun($scraper);
+        } catch (UniqueConstraintViolationException $exception) {
+            if (! $this->isRecoverableRunPrimaryKeyViolation($exception)) {
+                throw $exception;
+            }
+
+            $recovered = $this->resolveRunSequenceDrift();
+
+            if (! $recovered) {
+                throw $exception;
+            }
+
+            Log::warning('Recovered from Postgres sequence drift while creating a scraper run.', [
+                'scraper_id' => $scraper->id,
+            ]);
+
+            return $this->persistRun($scraper);
+        }
     }
 
     public function runExisting(ScraperRun $run): ScraperRun
@@ -89,7 +102,7 @@ class ScrapeRunner
                 $article = $this->writer->write($item, $existing);
                 $article->loadMissing('body');
 
-                $this->dispatchPdfExtractionIfNeeded($article, $item);
+                $this->dispatchDocumentExtractionIfNeeded($article, $item);
 
                 if ($existing) {
                     $updated++;
@@ -189,25 +202,94 @@ class ScrapeRunner
         }
     }
 
-    private function dispatchPdfExtractionIfNeeded(Article $article, array $item): void
+    private function dispatchDocumentExtractionIfNeeded(Article $article, array $item): void
     {
-        if (($item['content_type'] ?? null) !== 'pdf') {
+        if (! $this->isDocumentItem($item)) {
             return;
         }
 
         $body = $article->body;
 
-        if ($body && $body->extracted_at !== null) {
+        if ($body && $body->extracted_at !== null && ! $this->shouldRetryFailedDocumentExtraction($body->extraction_status, $body->extraction_error)) {
             return;
         }
 
         $source = $item['source'] ?? [];
-        $pdfUrl = $source['source_url'] ?? ($item['canonical_url'] ?? null);
+        $documentUrl = $source['source_url'] ?? ($item['canonical_url'] ?? null);
 
-        if (! $pdfUrl) {
+        if (! $documentUrl) {
             return;
         }
 
-        ExtractPdfBody::dispatch($article->id, $pdfUrl);
+        ExtractPdfBody::dispatch($article->id, $documentUrl);
+    }
+
+    private function isDocumentItem(array $item): bool
+    {
+        $source = is_array($item['source'] ?? null) ? $item['source'] : [];
+        $contentType = mb_strtolower((string) ($item['content_type'] ?? ''));
+        $sourceType = mb_strtolower((string) ($source['source_type'] ?? ''));
+        $url = (string) ($source['source_url'] ?? ($item['canonical_url'] ?? ''));
+        $url = mb_strtolower($url);
+
+        $documentTypes = ['pdf', 'doc', 'docx', 'document'];
+
+        if (in_array($contentType, $documentTypes, true)) {
+            return true;
+        }
+
+        if (in_array($sourceType, $documentTypes, true)) {
+            return true;
+        }
+
+        if (preg_match('/\.(pdf|docx?)($|\?)/', $url) === 1) {
+            return true;
+        }
+
+        return str_contains($url, 'archive.aspx?adid=');
+    }
+
+    private function shouldRetryFailedDocumentExtraction(?string $status, ?string $error): bool
+    {
+        if ($status !== 'failed') {
+            return false;
+        }
+
+        if ($error === null) {
+            return false;
+        }
+
+        return $error === 'Non-PDF response detected';
+    }
+
+    protected function persistRun(Scraper $scraper): ScraperRun
+    {
+        return ScraperRun::create([
+            'scraper_id' => $scraper->id,
+            'city_id' => $scraper->city_id,
+            'status' => 'queued',
+            'items_found' => 0,
+            'items_created' => 0,
+            'items_updated' => 0,
+            'meta' => [],
+        ]);
+    }
+
+    private function isRecoverableRunPrimaryKeyViolation(UniqueConstraintViolationException $exception): bool
+    {
+        $message = strtolower($exception->getMessage());
+
+        if (! str_contains($message, 'duplicate key value violates unique constraint')) {
+            return false;
+        }
+
+        return str_contains($message, '"scraper_runs_pkey"');
+    }
+
+    private function resolveRunSequenceDrift(): bool
+    {
+        $synchronizer = $this->sequenceSynchronizer ?? new PostgresSequenceSynchronizer;
+
+        return $synchronizer->syncTables(['scraper_runs']);
     }
 }

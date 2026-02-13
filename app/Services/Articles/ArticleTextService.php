@@ -36,8 +36,13 @@ class ArticleTextService
                 $title = $headline;
             } else {
                 $titleSource = $this->stringValue($summary)
-                    ?? $this->stringValue($whatsHappening)
-                    ?? $cleanedText;
+                    ?? $this->stringValue($whatsHappening);
+
+                if ($titleSource === null || $this->isWeakTitleSource($titleSource)) {
+                    $titleSource = $this->stringValue($whatsHappening)
+                        ?? $cleanedText
+                        ?? $titleSource;
+                }
 
                 $derivedTitle = $this->titleFromText($titleSource);
 
@@ -133,6 +138,12 @@ class ArticleTextService
             return null;
         }
 
+        $documentHeadline = $this->extractDocumentHeadline($text);
+
+        if ($documentHeadline !== null) {
+            return $documentHeadline;
+        }
+
         $text = $this->normalizeWhitespace($text);
 
         if ($text === '') {
@@ -152,7 +163,7 @@ class ArticleTextService
             return null;
         }
 
-        if (mb_strlen($sentence) < 12) {
+        if (mb_strlen($sentence) < 6) {
             return null;
         }
 
@@ -179,7 +190,7 @@ class ArticleTextService
         $title = $this->normalizeWhitespace($title);
         $length = mb_strlen($title);
 
-        if ($length < 12) {
+        if ($length < 4) {
             return true;
         }
 
@@ -187,11 +198,11 @@ class ArticleTextService
         $letters = preg_match_all('/[A-Za-z]/', $title) ?: 0;
         $total = $digits + $letters;
 
-        if ($letters < 6) {
+        if ($letters < 3) {
             return true;
         }
 
-        if ($total > 0 && ($digits / $total) > 0.45) {
+        if ($total > 0 && ($digits / $total) > 0.60) {
             return true;
         }
 
@@ -203,11 +214,27 @@ class ArticleTextService
             return true;
         }
 
+        if (preg_match('/^event date:/i', $title)) {
+            return true;
+        }
+
+        if (preg_match('/^\d+\s+[nsew]\b/i', $title)) {
+            return true;
+        }
+
+        if (preg_match('/published on the city\'?s website/i', $title)) {
+            return true;
+        }
+
         if (preg_match('/\.(pdf|docx?|txt)$/i', $title)) {
             return true;
         }
 
         if (preg_match('/\blegalnotice\b/i', $title)) {
+            return true;
+        }
+
+        if (preg_match('/^[A-Z0-9._-]{10,}$/', str_replace(' ', '', $title))) {
             return true;
         }
 
@@ -220,9 +247,12 @@ class ArticleTextService
         $normalized = str_replace('_', ' ', $normalized);
         $normalized = preg_replace('/\s+/', ' ', $normalized) ?? $normalized;
         $normalized = preg_replace('/\s*\((pdf|docx?|txt)\)\s*$/i', '', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\s*\((pdf|docx?|txt)\)\.\d+\s*$/i', '', $normalized) ?? $normalized;
         $normalized = preg_replace('/\.(pdf|docx?|txt)$/i', '', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\.(pdf|docx?|txt)\.\d+$/i', '', $normalized) ?? $normalized;
         $normalized = preg_replace('/\s+-\s*pdf$/i', '', $normalized) ?? $normalized;
         $normalized = preg_replace('/\s+pdf$/i', '', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\s+\.\d+$/', '', $normalized) ?? $normalized;
 
         return trim($normalized);
     }
@@ -318,6 +348,162 @@ class ArticleTextService
         }
 
         return trim(substr($text, 0, $position));
+    }
+
+    private function isWeakTitleSource(string $source): bool
+    {
+        return preg_match('/(^event date:|published on the city\'?s website|_legalnotice|\.pdf\b)/i', $source) === 1;
+    }
+
+    private function extractDocumentHeadline(string $text): ?string
+    {
+        $lines = $this->linesFromText($text);
+
+        if ($lines === []) {
+            return null;
+        }
+
+        $projectHeadline = $this->headlineFromProjectSection($lines);
+
+        if ($projectHeadline !== null) {
+            return $projectHeadline;
+        }
+
+        foreach ($lines as $line) {
+            if ($this->isBoilerplateLine($line)) {
+                continue;
+            }
+
+            if (preg_match('/^abatement of the property\b/i', $line) === 1) {
+                $line = $this->trimAfterPhrase($line, ' remove ');
+
+                return $this->headlineFromSentence($line);
+            }
+
+            if (preg_match('/^notice of public hearing\b/i', $line) === 1) {
+                return $this->headlineFromSentence($line);
+            }
+        }
+
+        foreach ($lines as $line) {
+            if ($this->isBoilerplateLine($line) || $this->isCodeOnlyLine($line)) {
+                continue;
+            }
+
+            if (mb_strlen($line) < 10) {
+                continue;
+            }
+
+            return $this->headlineFromSentence($line);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<int, string>  $lines
+     */
+    private function headlineFromProjectSection(array $lines): ?string
+    {
+        foreach ($lines as $index => $line) {
+            $projectMarker = stripos($line, 'for the following project:');
+
+            if ($projectMarker === false) {
+                continue;
+            }
+
+            $inlineProject = trim(substr($line, $projectMarker + mb_strlen('for the following project:')));
+
+            if ($inlineProject !== '' && ! $this->isCodeOnlyLine($inlineProject)) {
+                $inlineHeadline = $this->headlineFromSentence($inlineProject);
+
+                if (mb_strlen($inlineHeadline) >= 10) {
+                    return $inlineHeadline;
+                }
+            }
+
+            $candidate = null;
+
+            for ($offset = 1; $offset <= 4; $offset++) {
+                $nextLine = $lines[$index + $offset] ?? null;
+
+                if ($nextLine === null) {
+                    break;
+                }
+
+                if ($this->isBoilerplateLine($nextLine) || $this->isCodeOnlyLine($nextLine)) {
+                    continue;
+                }
+
+                $candidate = $nextLine;
+                break;
+            }
+
+            if ($candidate === null) {
+                continue;
+            }
+
+            $headline = $this->headlineFromSentence($candidate);
+
+            if (mb_strlen($headline) >= 10) {
+                return $headline;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function linesFromText(string $text): array
+    {
+        $normalized = preg_replace("/\r\n?/", "\n", $text) ?? '';
+        $parts = preg_split("/\n+/", $normalized) ?: [];
+        $lines = [];
+
+        foreach ($parts as $part) {
+            $line = $this->normalizeWhitespace($part);
+
+            if ($line === '') {
+                continue;
+            }
+
+            $lines[] = $line;
+        }
+
+        return $lines;
+    }
+
+    private function isBoilerplateLine(string $line): bool
+    {
+        $patterns = [
+            '/^proj\s*#/i',
+            '/^munis\s*#:/i',
+            '/published on the city\'?s website/i',
+            '/^sealed proposals$/i',
+            '/^notice is hereby given/i',
+            '/^all bids received/i',
+            '/^dated at wichita/i',
+            '/^this information and any addenda/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $line) === 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isCodeOnlyLine(string $line): bool
+    {
+        if (preg_match('/^[\dA-Z.\-\/#]+$/', str_replace(' ', '', $line)) === 1) {
+            return true;
+        }
+
+        return false;
     }
 
     private function isLikelyTruncated(string $summary): bool

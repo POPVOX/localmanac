@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Article;
 use App\Models\ArticleSource;
 use App\Models\City;
 use App\Services\Ingestion\ArticleWriter;
@@ -74,4 +75,54 @@ it('stores long source uid values', function () {
     expect(strlen($sourceUid))->toBeGreaterThan(255)
         ->and($source)->not()->toBeNull()
         ->and($source->source_uid)->toBe($sourceUid);
+});
+
+it('does not overwrite existing summary with null on re-scrape', function () {
+    $writer = new ArticleWriter;
+    $city = makeCity();
+
+    $article = $writer->write([
+        'city_id' => $city->id,
+        'title' => 'Good Title',
+        'summary' => 'Existing summary',
+        'source' => [
+            'source_url' => 'https://example.com/article-summary',
+        ],
+    ]);
+
+    $writer->write([
+        'city_id' => $city->id,
+        'title' => 'Good Title',
+        'summary' => null,
+        'source' => [
+            'source_url' => 'https://example.com/article-summary',
+        ],
+    ], $article);
+
+    expect($article->fresh()?->summary)->toBe('Existing summary');
+});
+
+it('keeps strong existing title when incoming title is weak', function () {
+    $writer = new ArticleWriter;
+    $city = makeCity();
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Wichita Valley Center Flood Control Project Repairs',
+        'summary' => 'Existing summary',
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://example.com/article-title',
+    ]);
+
+    $writer->write([
+        'city_id' => $city->id,
+        'title' => '458-2024-085587_LegalNotice (PDF)',
+        'summary' => null,
+        'source' => [
+            'source_url' => 'https://example.com/article-title',
+        ],
+    ], $article);
+
+    expect($article->fresh()?->title)->toBe('Wichita Valley Center Flood Control Project Repairs');
 });

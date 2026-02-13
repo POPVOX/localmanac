@@ -63,6 +63,7 @@ class ExtractPdfBody implements ShouldQueue
         $response = $this->httpClient()->get($this->pdfUrl);
         $meta['http_status'] = $response->status();
         $meta['content_type'] = $response->header('Content-Type');
+        $meta['content_disposition'] = $response->header('Content-Disposition');
         $meta['bytes'] = strlen((string) $response->body());
 
         if (! $response->successful()) {
@@ -72,8 +73,20 @@ class ExtractPdfBody implements ShouldQueue
             return;
         }
 
+        $binary = (string) $response->body();
+        $filename = $this->filenameFromContentDisposition($meta['content_disposition']);
+        $detectedType = $this->detectDocumentType(
+            $meta['content_type'],
+            $meta['content_disposition'],
+            $binary,
+            $this->pdfUrl
+        );
+
+        $meta['filename'] = $filename;
+        $meta['detected_type'] = $detectedType;
+
         try {
-            $pdfPath = $this->storePdf($response->body());
+            $storedPath = $this->storeDocument($binary, $this->storageExtension($detectedType));
         } catch (RuntimeException $exception) {
             $error = $exception->getMessage();
             $this->persistBody($article, $rawText, $cleanedText, $status, $error, $meta);
@@ -82,19 +95,25 @@ class ExtractPdfBody implements ShouldQueue
         }
 
         try {
-            $meta['pdf_magic_header'] = substr((string) file_get_contents($pdfPath), 0, 4);
+            $meta['pdf_magic_header'] = substr((string) file_get_contents($storedPath), 0, 4);
         } catch (\Throwable $e) {
             $meta['pdf_magic_header'] = null;
         }
 
-        if (! $this->isPdfResponse($meta['content_type'])) {
+        if ($detectedType === 'docx') {
+            $this->handleDocxExtraction($article, $storedPath, $meta);
+
+            return;
+        }
+
+        if ($detectedType !== 'pdf') {
             $error = 'Non-PDF response detected';
             $this->persistBody($article, $rawText, $cleanedText, $status, $error, $meta);
 
             return;
         }
 
-        $result = $this->runPdfToText($pdfPath);
+        $result = $this->runPdfToText($storedPath);
         $meta['pdftotext_exit_code'] = $result['exit_code'];
         $meta['pdftotext_stdout'] = $result['stdout'];
         $meta['pdftotext_stderr'] = $result['stderr'];
@@ -116,12 +135,13 @@ class ExtractPdfBody implements ShouldQueue
             if (! $ocrEnabled) {
                 $status = 'empty';
                 $error = 'Scanned PDF (no text layer); OCR not enabled for this scraper.';
+                $meta['method'] = 'pdftotext';
                 $this->persistBody($article, $rawText, $cleanedText, $status, $error, $meta);
 
                 return;
             }
 
-            $ocrResult = $this->performOcr($pdfPath, $maxOcrPages);
+            $ocrResult = $this->performOcr($storedPath, $maxOcrPages);
             $meta = array_merge($meta, $ocrResult['meta']);
             $rawText = $ocrResult['text'];
             $meaningfulOcrLength = $this->meaningfulLength($rawText);
@@ -130,6 +150,7 @@ class ExtractPdfBody implements ShouldQueue
             if ($ocrResult['status'] === 'failed') {
                 $status = 'failed';
                 $error = $ocrResult['error'] ?? 'OCR failed';
+                $meta['method'] = 'ocr';
                 $this->persistBody($article, $rawText, $cleanedText, $status, $error, $meta);
 
                 return;
@@ -138,6 +159,7 @@ class ExtractPdfBody implements ShouldQueue
             if ($meaningfulOcrLength === 0) {
                 $status = 'empty';
                 $error = 'No extractable text after OCR';
+                $meta['method'] = 'ocr';
                 $this->persistBody($article, $rawText, $cleanedText, $status, $error, $meta);
 
                 return;
@@ -145,30 +167,18 @@ class ExtractPdfBody implements ShouldQueue
 
             $cleanedText = $this->cleanText($rawText);
             $status = 'ocr_success';
+            $meta['method'] = 'ocr';
 
-            $this->persistBody($article, $rawText, $cleanedText, $status, $error, $meta);
-
-            if ($cleanedText !== '') {
-                app(ArticleTextService::class)->refresh($article, cleanedText: $cleanedText);
-            }
-
-            $this->reindexArticle($article);
-            $this->dispatchEnrichment($article);
+            $this->persistAndProjectExtraction($article, $rawText, $cleanedText, $status, $error, $meta);
 
             return;
         }
 
         $cleanedText = $this->cleanText($rawText);
         $status = 'success';
+        $meta['method'] = 'pdftotext';
 
-        $this->persistBody($article, $rawText, $cleanedText, $status, $error, $meta);
-
-        if ($cleanedText !== '') {
-            app(ArticleTextService::class)->refresh($article, cleanedText: $cleanedText);
-        }
-
-        $this->reindexArticle($article);
-        $this->dispatchEnrichment($article);
+        $this->persistAndProjectExtraction($article, $rawText, $cleanedText, $status, $error, $meta);
     }
 
     /**
@@ -196,15 +206,17 @@ class ExtractPdfBody implements ShouldQueue
         return trim($normalized);
     }
 
-    protected function storePdf(string $contents): string
+    protected function storeDocument(string $contents, string $extension = 'pdf'): string
     {
+        $extension = trim($extension) !== '' ? strtolower(trim($extension)) : 'bin';
+        $extension = preg_replace('/[^a-z0-9]+/', '', $extension) ?: 'bin';
         $hash = sha1($this->pdfUrl);
-        $path = "pdfs/{$hash}.pdf";
+        $path = "pdfs/{$hash}.{$extension}";
 
         $stored = Storage::disk('local')->put($path, $contents);
 
         if (! $stored) {
-            throw new RuntimeException('Unable to store PDF contents');
+            throw new RuntimeException('Unable to store downloaded document');
         }
 
         return Storage::disk('local')->path($path);
@@ -217,17 +229,181 @@ class ExtractPdfBody implements ShouldQueue
             ->withHeaders(['User-Agent' => 'LocalmanacBot/1.0']);
     }
 
-    private function isPdfResponse(string|array|null $contentType): bool
+    private function handleDocxExtraction(Article $article, string $docxPath, array $meta): void
     {
-        if (is_array($contentType)) {
-            $contentType = implode(';', $contentType);
+        try {
+            $rawText = $this->extractDocxText($docxPath);
+        } catch (RuntimeException $exception) {
+            $meta['method'] = 'docx_xml';
+            $this->persistBody($article, null, null, 'failed', $exception->getMessage(), $meta);
+
+            return;
         }
 
-        if (! $contentType) {
-            return false;
+        $meta['method'] = 'docx_xml';
+        $meta['extracted_text_length'] = mb_strlen($rawText);
+        $meta['docx_meaningful_length'] = $this->meaningfulLength($rawText);
+
+        if ($meta['docx_meaningful_length'] === 0) {
+            $this->persistBody($article, $rawText, null, 'empty', 'No extractable text in DOCX', $meta);
+
+            return;
         }
 
-        return str_contains(strtolower($contentType), 'application/pdf');
+        $cleanedText = $this->cleanText($rawText);
+        $this->persistAndProjectExtraction($article, $rawText, $cleanedText, 'success', null, $meta);
+    }
+
+    private function persistAndProjectExtraction(
+        Article $article,
+        ?string $rawText,
+        ?string $cleanedText,
+        string $status,
+        ?string $error,
+        array $meta
+    ): void {
+        $this->persistBody($article, $rawText, $cleanedText, $status, $error, $meta);
+
+        if ($cleanedText !== null && trim($cleanedText) !== '') {
+            app(ArticleTextService::class)->refresh($article, cleanedText: $cleanedText);
+        }
+
+        $this->reindexArticle($article);
+        $this->dispatchEnrichment($article);
+    }
+
+    private function detectDocumentType(
+        string|array|null $contentType,
+        string|array|null $contentDisposition,
+        string $body,
+        string $url
+    ): string {
+        $contentTypeValue = mb_strtolower($this->headerValue($contentType));
+        $contentDispositionValue = mb_strtolower($this->headerValue($contentDisposition));
+        $magicHeader = strtolower(bin2hex(substr($body, 0, 4)));
+        $urlLower = mb_strtolower($url);
+
+        if (str_contains($contentTypeValue, 'application/pdf') || $magicHeader === '25504446') {
+            return 'pdf';
+        }
+
+        if (
+            str_contains($contentTypeValue, 'wordprocessingml.document')
+            || str_contains($contentTypeValue, 'application/msword')
+            || str_contains($contentDispositionValue, '.docx')
+            || str_contains($contentDispositionValue, '.doc')
+            || preg_match('/\.docx?($|\?)/', $urlLower) === 1
+        ) {
+            return 'docx';
+        }
+
+        if ($magicHeader === '504b0304') {
+            return 'docx';
+        }
+
+        return 'unknown';
+    }
+
+    private function storageExtension(string $detectedType): string
+    {
+        return match ($detectedType) {
+            'pdf' => 'pdf',
+            'docx' => 'docx',
+            default => 'bin',
+        };
+    }
+
+    private function filenameFromContentDisposition(string|array|null $contentDisposition): ?string
+    {
+        $value = $this->headerValue($contentDisposition);
+
+        if ($value === '') {
+            return null;
+        }
+
+        if (preg_match('/filename\*?=(?:UTF-8\'\')?\"?([^\";]+)\"?/i', $value, $matches) !== 1) {
+            return null;
+        }
+
+        $filename = trim($matches[1]);
+        $filename = rawurldecode($filename);
+
+        return $filename !== '' ? $filename : null;
+    }
+
+    private function headerValue(string|array|null $value): string
+    {
+        if (is_array($value)) {
+            return trim(implode(';', $value));
+        }
+
+        if (is_string($value)) {
+            return trim($value);
+        }
+
+        return '';
+    }
+
+    private function extractDocxText(string $docxPath): string
+    {
+        $zip = new \ZipArchive;
+        $opened = $zip->open($docxPath);
+
+        if ($opened !== true) {
+            throw new RuntimeException('Unable to open DOCX file');
+        }
+
+        try {
+            $documentXml = $zip->getFromName('word/document.xml');
+        } finally {
+            $zip->close();
+        }
+
+        if (! is_string($documentXml) || trim($documentXml) === '') {
+            throw new RuntimeException('DOCX missing word/document.xml');
+        }
+
+        $dom = new \DOMDocument;
+        $previous = libxml_use_internal_errors(true);
+        $loaded = $dom->loadXML($documentXml);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        if (! $loaded) {
+            throw new RuntimeException('Unable to parse DOCX XML');
+        }
+
+        $xpath = new \DOMXPath($dom);
+        $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+
+        $paragraphs = [];
+        $nodes = $xpath->query('//w:body//w:p');
+
+        if ($nodes === false) {
+            return '';
+        }
+
+        foreach ($nodes as $paragraphNode) {
+            $texts = $xpath->query('.//w:t', $paragraphNode);
+
+            if ($texts === false) {
+                continue;
+            }
+
+            $line = '';
+
+            foreach ($texts as $textNode) {
+                $line .= $textNode->nodeValue;
+            }
+
+            $line = $this->cleanText($line);
+
+            if ($line !== '') {
+                $paragraphs[] = $line;
+            }
+        }
+
+        return trim(implode("\n\n", $paragraphs));
     }
 
     private function persistBody(
