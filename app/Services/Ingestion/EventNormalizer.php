@@ -8,7 +8,8 @@ class EventNormalizer
 {
     public function normalizeTitle(string $title): string
     {
-        $normalized = trim($title);
+        $normalized = html_entity_decode($title, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $normalized = trim($normalized);
         $normalized = preg_replace('/\s+/', ' ', $normalized) ?? '';
 
         return Str::lower($normalized);

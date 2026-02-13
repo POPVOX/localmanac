@@ -15,20 +15,26 @@ class Index extends Component
 {
     use WithPagination;
 
+    public string $search = '';
+
     public ?int $cityId = null;
 
     public ?int $sourceId = null;
 
-    public bool $hasUrlOnly = false;
+    public string $sortField = 'events.starts_at';
+
+    public string $sortDirection = 'asc';
 
     public ?string $startDate = null;
 
     public ?string $endDate = null;
 
     protected array $queryString = [
+        'search' => ['except' => ''],
         'cityId' => ['except' => null],
         'sourceId' => ['except' => null],
-        'hasUrlOnly' => ['except' => false],
+        'sortField' => ['except' => 'events.starts_at'],
+        'sortDirection' => ['except' => 'asc'],
         'startDate' => ['except' => null],
         'endDate' => ['except' => null],
     ];
@@ -55,12 +61,12 @@ class Index extends Component
         $this->resetPage();
     }
 
-    public function updatingSourceId(): void
+    public function updatingSearch(): void
     {
         $this->resetPage();
     }
 
-    public function updatingHasUrlOnly(): void
+    public function updatingSourceId(): void
     {
         $this->resetPage();
     }
@@ -75,22 +81,62 @@ class Index extends Component
         $this->resetPage();
     }
 
+    public function sortBy(string $field): void
+    {
+        if ($this->sortField === $field) {
+            $this->sortDirection = $this->sortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+            $this->sortField = $field;
+            $this->sortDirection = 'asc';
+        }
+
+        $this->resetPage();
+    }
+
     public function render(): View
     {
         $city = $this->resolveCity();
         $timezone = $this->resolveTimezone($city);
         [$start, $end] = $this->resolveDateRange($timezone);
+        $search = trim($this->search);
+        $direction = $this->sortDirection === 'desc' ? 'desc' : 'asc';
 
         $events = Event::query()
             ->with(['city', 'sourceItems.eventSource'])
-            ->whereNotNull('starts_at')
-            ->when($this->cityId, fn ($query) => $query->where('city_id', $this->cityId))
+            ->whereNotNull('events.starts_at')
+            ->when($this->cityId, fn ($query) => $query->where('events.city_id', $this->cityId))
             ->when($this->sourceId, function ($query) {
                 $query->whereHas('sourceItems', fn ($inner) => $inner->where('event_source_id', $this->sourceId));
             })
-            ->when($this->hasUrlOnly, fn ($query) => $query->whereNotNull('event_url')->where('event_url', '!=', ''))
-            ->whereBetween('starts_at', [$start, $end])
-            ->orderBy('starts_at')
+            ->whereBetween('events.starts_at', [$start, $end])
+            ->when($search !== '', function ($query) use ($search) {
+                $query->leftJoin('cities', 'cities.id', '=', 'events.city_id')
+                    ->leftJoin('event_source_items as source_items_search', 'source_items_search.event_id', '=', 'events.id')
+                    ->leftJoin('event_sources as event_sources_search', 'event_sources_search.id', '=', 'source_items_search.event_source_id')
+                    ->select('events.*')
+                    ->where(function ($inner) use ($search) {
+                        $inner->where('events.title', 'like', "%{$search}%")
+                            ->orWhere('events.location_name', 'like', "%{$search}%")
+                            ->orWhere('events.description', 'like', "%{$search}%")
+                            ->orWhere('cities.name', 'like', "%{$search}%")
+                            ->orWhere('event_sources_search.name', 'like', "%{$search}%");
+                    })
+                    ->distinct();
+            })
+            ->when($this->sortField, function ($query) use ($direction) {
+                $allowed = [
+                    'events.title',
+                    'events.starts_at',
+                ];
+
+                $field = in_array($this->sortField, $allowed, true)
+                    ? $this->sortField
+                    : 'events.starts_at';
+
+                $query->orderBy($field, $direction)->orderBy('events.id');
+            }, function ($query) {
+                $query->orderBy('events.starts_at')->orderBy('events.id');
+            })
             ->paginate(20);
 
         $cities = City::query()->orderBy('name')->get();

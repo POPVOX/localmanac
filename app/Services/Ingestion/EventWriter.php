@@ -20,7 +20,7 @@ class EventWriter
     public function write(EventSource $source, EventDTO $event): Event
     {
         $cityId = $source->city_id;
-        $title = trim($event->title);
+        $title = $this->sanitizeTitle($event->title);
         $startsAt = $event->startsAt;
 
         if (! $cityId) {
@@ -39,7 +39,7 @@ class EventWriter
         $locationAddress = $this->sanitizeLocation($event->locationAddress);
 
         $normalizedTitle = $this->normalizer->normalizeTitle($title);
-        $normalizedLocation = $this->normalizer->normalizeLocation($locationName, $locationAddress);
+        $normalizedLocation = $this->normalizeHashLocation($locationName, $locationAddress);
         $startsAtUtc = $startsAt->copy()->utc()->format('Y-m-d H:i:s');
         $sourceHash = $this->resolveSourceHash($event, $cityId, $normalizedTitle, $normalizedLocation, $startsAtUtc);
 
@@ -140,17 +140,32 @@ class EventWriter
         string $normalizedLocation,
         string $startsAtUtc,
     ): string {
+        $fallbackHash = sha1($cityId.'|'.$normalizedTitle.'|'.$startsAtUtc.'|'.$normalizedLocation);
         $sourceHash = $event->sourceHash;
 
         if ($sourceHash !== null) {
             $sourceHash = trim($sourceHash);
 
             if ($sourceHash !== '') {
-                return $this->normalizeSourceHash($sourceHash);
+                $normalizedSourceHash = $this->normalizeSourceHash($sourceHash);
+
+                if ($normalizedSourceHash === $fallbackHash) {
+                    return $normalizedSourceHash;
+                }
+
+                $hasFallbackMatch = Event::query()
+                    ->where('source_hash', $fallbackHash)
+                    ->exists();
+
+                if ($hasFallbackMatch) {
+                    return $fallbackHash;
+                }
+
+                return $normalizedSourceHash;
             }
         }
 
-        return sha1($cityId.'|'.$normalizedTitle.'|'.$startsAtUtc.'|'.$normalizedLocation);
+        return $fallbackHash;
     }
 
     private function normalizeSourceHash(string $value): string
@@ -168,15 +183,38 @@ class EventWriter
         return sha1($value);
     }
 
+    private function normalizeHashLocation(?string $locationName, ?string $locationAddress): string
+    {
+        if ($locationName !== null && trim($locationName) !== '') {
+            return $this->normalizer->normalizeTitle($locationName);
+        }
+
+        if ($locationAddress !== null && trim($locationAddress) !== '') {
+            return $this->normalizer->normalizeTitle($locationAddress);
+        }
+
+        return '';
+    }
+
     private function sanitizeLocation(?string $value): ?string
     {
         if ($value === null) {
             return null;
         }
 
-        $cleaned = str_replace('\\', '', $value);
+        $cleaned = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $cleaned = str_replace(['\\', "\u{00A0}"], ['', ' '], $cleaned);
+        $cleaned = preg_replace('/\s*,\s*/', ', ', $cleaned) ?? '';
         $cleaned = trim(preg_replace('/\s+/', ' ', $cleaned) ?? '');
 
         return $cleaned !== '' ? $cleaned : null;
+    }
+
+    private function sanitizeTitle(string $value): string
+    {
+        $cleaned = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $cleaned = trim(preg_replace('/\s+/', ' ', trim($cleaned)) ?? '');
+
+        return $cleaned;
     }
 }

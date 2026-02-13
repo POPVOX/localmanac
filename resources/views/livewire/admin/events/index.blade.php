@@ -2,11 +2,18 @@
     <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
             <flux:heading size="xl" level="1">{{ __('Events') }}</flux:heading>
-            <flux:subheading>{{ __('Inspect ingested events by city, source, and date range.') }}</flux:subheading>
+            <flux:subheading>{{ __('Search, sort, and inspect ingested events by city, source, and date range.') }}</flux:subheading>
         </div>
     </div>
 
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-6 items-end">
+    <div class="grid gap-4 items-end md:grid-cols-2 xl:grid-cols-6">
+        <flux:input
+            wire:model.live.debounce.300ms="search"
+            :label="__('Search')"
+            placeholder="{{ __('Title, city, source') }}"
+            class="md:col-span-2 xl:col-span-2"
+        />
+
         <flux:select wire:model.live="cityId" :label="__('City')">
             <option value="">{{ __('All cities') }}</option>
             @foreach ($cities as $city)
@@ -32,28 +39,32 @@
             :label="__('End date')"
             type="date"
         />
-
-        <flux:field class="self-end xl:justify-self-end xl:pl-10">
-            <flux:label class="sr-only">{{ __('Has URL only') }}</flux:label>
-
-            <div class="h-11 flex items-center gap-3 justify-end pr-4">
-                <flux:text class="text-sm font-medium leading-tight text-zinc-800 dark:text-zinc-100">
-                    {{ __('Has URL only') }}
-                </flux:text>
-
-                <flux:switch wire:model.live="hasUrlOnly" />
-            </div>
-        </flux:field>
     </div>
 
     <flux:card padding="lg" variant="subtle">
-        <flux:table :paginate="$events" class="table-fixed">
+        <flux:table :paginate="$events">
             <flux:table.columns sticky>
-                <flux:table.column sticky class="w-[360px]">{{ __('Title') }}</flux:table.column>
-                <flux:table.column class="w-[140px]">{{ __('City') }}</flux:table.column>
-                <flux:table.column class="w-[220px]">{{ __('Starts') }}</flux:table.column>
+                <flux:table.column sticky class="w-[320px]">
+                    <flux:table.sortable
+                        :sorted="$sortField === 'events.title'"
+                        :direction="$sortDirection"
+                        wire:click="sortBy('events.title')"
+                    >
+                        <div>{{ __('Title') }}</div>
+                    </flux:table.sortable>
+                </flux:table.column>
+                <flux:table.column class="w-[120px]">{{ __('City') }}</flux:table.column>
+                <flux:table.column class="w-[200px]">
+                    <flux:table.sortable
+                        :sorted="$sortField === 'events.starts_at'"
+                        :direction="$sortDirection"
+                        wire:click="sortBy('events.starts_at')"
+                    >
+                        <div>{{ __('Starts') }}</div>
+                    </flux:table.sortable>
+                </flux:table.column>
                 <flux:table.column class="max-w-[240px]">{{ __('Location') }}</flux:table.column>
-                <flux:table.column class="max-w-[220px]">{{ __('Source') }}</flux:table.column>
+                <flux:table.column class="max-w-[180px]">{{ __('Source') }}</flux:table.column>
                 <flux:table.column align="end" class="min-w-[140px]">{{ __('Actions') }}</flux:table.column>
             </flux:table.columns>
 
@@ -63,17 +74,16 @@
                         $tz = $event->city?->timezone ?? config('app.timezone', 'UTC');
                         $sourceItem = $event->sourceItems->first();
                         $source = $sourceItem?->eventSource;
-                        $startLabel = $event->starts_at ? $event->starts_at->clone()->shiftTimezone($tz)->format('M j, Y g:i A') : null;
-                        if ($event->all_day && $event->starts_at) {
-                            $startLabel = $event->starts_at->clone()->shiftTimezone($tz)->format('M j, Y');
-                        }
+                        $startLabel = $event->starts_at ? $event->starts_at->clone()->shiftTimezone($tz)->format('M j, Y') : null;
                     @endphp
                     <flux:table.row :key="$event->id">
-                        <flux:table.cell variant="strong" sticky class="w-[360px]">
+                        <flux:table.cell variant="strong" sticky class="w-[320px]">
                             @php
-                                $eventTitle = $event->title ?: __('Event :id', ['id' => $event->id]);
+                                $eventTitle = $event->title
+                                    ? html_entity_decode($event->title, ENT_QUOTES | ENT_HTML5, 'UTF-8')
+                                    : __('Event :id', ['id' => $event->id]);
                             @endphp
-                            <div class="w-[360px] truncate">
+                            <div class="w-[320px] truncate">
                                 <flux:link :href="route('admin.events.show', $event)" wire:navigate class="block truncate" title="{{ $eventTitle }}">
                                     {{ $eventTitle }}
                                 </flux:link>
@@ -88,7 +98,7 @@
                                 {{ $event->location_name ?: __('—') }}
                             </div>
                         </flux:table.cell>
-                        <flux:table.cell class="max-w-[220px]">
+                        <flux:table.cell class="max-w-[180px]">
                             <div class="truncate" title="{{ $source?->name ?? __('—') }}">
                                 {{ $source?->name ?? __('—') }}
                             </div>

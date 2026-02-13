@@ -81,6 +81,7 @@
                         <div>{{ __('Type') }}</div>
                     </flux:table.sortable>
                 </flux:table.column>
+                <flux:table.column class="w-[112px]">{{ __('Active') }}</flux:table.column>
                 <flux:table.column>
                     <flux:table.sortable
                         :sorted="$sortField === 'scrapers.source_url'"
@@ -88,16 +89,6 @@
                         wire:click="sortBy('scrapers.source_url')"
                     >
                         <div>{{ __('Source URL') }}</div>
-                    </flux:table.sortable>
-                </flux:table.column>
-                <flux:table.column align="center">
-                    <flux:table.sortable
-                        :sorted="$sortField === 'scrapers.is_enabled'"
-                        :direction="$sortDirection"
-                        wire:click="sortBy('scrapers.is_enabled')"
-                        class="justify-center"
-                    >
-                        <div>{{ __('Active') }}</div>
                     </flux:table.sortable>
                 </flux:table.column>
                 <flux:table.column>{{ __('Last scraped') }}</flux:table.column>
@@ -120,6 +111,13 @@
                                 {{ $scraper->type }}
                             </flux:badge>
                         </flux:table.cell>
+                        <flux:table.cell class="w-[112px]">
+                            <flux:switch
+                                :checked="$scraper->is_enabled"
+                                wire:click="toggleActive({{ $scraper->id }})"
+                                aria-label="{{ __('Toggle active') }}"
+                            />
+                        </flux:table.cell>
                         <flux:table.cell>
                             @if ($scraper->source_url)
                                 <flux:link href="{{ $scraper->source_url }}" target="_blank">
@@ -128,13 +126,6 @@
                             @else
                                 <flux:text variant="subtle">{{ __('—') }}</flux:text>
                             @endif
-                        </flux:table.cell>
-                        <flux:table.cell align="center">
-                            <flux:switch
-                                :checked="$scraper->is_enabled"
-                                wire:click="toggleActive({{ $scraper->id }})"
-                                aria-label="{{ __('Toggle active') }}"
-                            />
                         </flux:table.cell>
                         <flux:table.cell>
                             @php

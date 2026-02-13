@@ -54,7 +54,7 @@
                 <flux:table.column sticky>{{ __('Name') }}</flux:table.column>
                 <flux:table.column>{{ __('City') }}</flux:table.column>
                 <flux:table.column>{{ __('Type') }}</flux:table.column>
-                <flux:table.column align="center">{{ __('Active') }}</flux:table.column>
+                <flux:table.column class="w-[112px]">{{ __('Active') }}</flux:table.column>
                 <flux:table.column>{{ __('Last run') }}</flux:table.column>
                 <flux:table.column align="end">{{ __('Actions') }}</flux:table.column>
             </flux:table.columns>
@@ -84,7 +84,7 @@
                                 {{ strtoupper(str_replace('_', ' ', $source->source_type)) }}
                             </flux:badge>
                         </flux:table.cell>
-                        <flux:table.cell align="center">
+                        <flux:table.cell class="w-[112px]">
                             <flux:switch
                                 :checked="$source->is_active"
                                 wire:click="toggleActive({{ $source->id }})"

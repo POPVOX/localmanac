@@ -12,3 +12,11 @@
 
 @vite(['resources/css/app.css', 'resources/js/app.js'])
 @fluxAppearance
+
+<style>
+    [data-flux-switch],
+    [data-flux-switch] > span {
+        transition: none !important;
+        animation: none !important;
+    }
+</style>

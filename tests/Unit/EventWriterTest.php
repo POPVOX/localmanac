@@ -78,6 +78,127 @@ it('sanitizes location fields before saving', function () {
         ->and($saved->location_address)->toBe('10025 W. Central, Wichita, KS 67212');
 });
 
+it('decodes html entities in titles before saving', function () {
+    $source = EventSource::factory()->create([
+        'source_type' => 'ics',
+        'source_url' => 'https://example.com/calendar.ics',
+    ]);
+
+    $writer = new EventWriter(new EventNormalizer);
+
+    $event = new EventDTO(
+        title: 'Art House 310 First Friday &#8211; Amy Herrman',
+        startsAt: Carbon::parse('2026-02-06 18:00', 'UTC'),
+        endsAt: null,
+        allDay: false,
+        locationName: 'Art House 310',
+        locationAddress: null,
+        description: null,
+        eventUrl: null,
+        externalId: 'arthouse-1',
+        sourceUrl: null,
+        rawPayload: [],
+    );
+
+    $writer->write($source, $event);
+
+    expect(Event::firstOrFail()->title)->toBe('Art House 310 First Friday – Amy Herrman');
+});
+
+it('uses canonical hash when an equivalent normalized event already exists', function () {
+    $source = EventSource::factory()->create([
+        'source_type' => 'ics',
+        'source_url' => 'https://example.com/calendar.ics',
+    ]);
+
+    $writer = new EventWriter(new EventNormalizer);
+    $startsAt = Carbon::parse('2026-01-15 10:00', 'UTC');
+
+    $firstEvent = new EventDTO(
+        title: 'Board Meeting',
+        startsAt: $startsAt,
+        endsAt: null,
+        allDay: false,
+        locationName: 'City Hall, 123 Main St',
+        locationAddress: null,
+        description: null,
+        eventUrl: null,
+        externalId: 'uid-123',
+        sourceUrl: 'https://example.com/events/board-meeting',
+        rawPayload: [],
+    );
+
+    $writer->write($source, $firstEvent);
+
+    $sameEventWithDifferentSourceHash = new EventDTO(
+        title: 'Board Meeting',
+        startsAt: $startsAt,
+        endsAt: null,
+        allDay: false,
+        locationName: 'City Hall\\, 123 Main St',
+        locationAddress: null,
+        description: null,
+        eventUrl: null,
+        externalId: 'uid-123',
+        sourceUrl: 'https://example.com/events/board-meeting',
+        rawPayload: [],
+        sourceHash: 'vendor-specific-hash-v2'
+    );
+
+    $writer->write($source, $sameEventWithDifferentSourceHash);
+
+    expect(Event::count())->toBe(1)
+        ->and(EventSourceItem::count())->toBe(1);
+});
+
+it('does not split events when only location address formatting changes', function () {
+    $source = EventSource::factory()->create([
+        'source_type' => 'ics',
+        'source_url' => 'https://example.com/calendar.ics',
+    ]);
+
+    $writer = new EventWriter(new EventNormalizer);
+    $startsAt = Carbon::parse('2026-02-25 10:00', 'UTC');
+
+    $firstEvent = new EventDTO(
+        title: 'Senior Wednesday',
+        startsAt: $startsAt,
+        endsAt: null,
+        allDay: false,
+        locationName: 'Wichita-Sedgwick Co. Historical Museum',
+        locationAddress: null,
+        description: null,
+        eventUrl: null,
+        externalId: 'senior-1',
+        sourceUrl: null,
+        rawPayload: [],
+    );
+
+    $secondEvent = new EventDTO(
+        title: 'Senior Wednesday',
+        startsAt: $startsAt,
+        endsAt: null,
+        allDay: false,
+        locationName: 'Wichita-Sedgwick Co. Historical Museum',
+        locationAddress: '204 S Main St\\, Wichita\\, KS',
+        description: null,
+        eventUrl: null,
+        externalId: 'senior-1',
+        sourceUrl: null,
+        rawPayload: [],
+        sourceHash: 'upstream-v2-senior-wednesday'
+    );
+
+    $writer->write($source, $firstEvent);
+    $writer->write($source, $secondEvent);
+
+    $saved = Event::firstOrFail();
+
+    expect(Event::count())->toBe(1)
+        ->and($saved->location_name)->toBe('Wichita-Sedgwick Co. Historical Museum')
+        ->and($saved->location_address)->toBe('204 S Main St, Wichita, KS');
+});
+
 it('retries event writes once after recoverable sequence drift is repaired', function () {
     $source = EventSource::factory()->create([
         'source_type' => 'ics',

@@ -135,16 +135,7 @@
                         <div>{{ __('Priority') }}</div>
                     </flux:table.sortable>
                 </flux:table.column>
-                <flux:table.column align="center">
-                    <flux:table.sortable
-                        :sorted="$sortField === 'chat_sources.is_active'"
-                        :direction="$sortDirection"
-                        wire:click="sortBy('chat_sources.is_active')"
-                        class="justify-center"
-                    >
-                        <div>{{ __('Active') }}</div>
-                    </flux:table.sortable>
-                </flux:table.column>
+                <flux:table.column class="w-[112px]">{{ __('Active') }}</flux:table.column>
                 <flux:table.column>{{ __('Updated') }}</flux:table.column>
                 <flux:table.column align="end">{{ __('Actions') }}</flux:table.column>
             </flux:table.columns>
@@ -160,7 +151,7 @@
                             </flux:link>
                         </flux:table.cell>
                         <flux:table.cell align="center">{{ $source->priority }}</flux:table.cell>
-                        <flux:table.cell align="center">
+                        <flux:table.cell class="w-[112px]">
                             <flux:switch
                                 :checked="$source->is_active"
                                 wire:click="toggleActive({{ $source->id }})"
