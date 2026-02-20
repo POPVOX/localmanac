@@ -52,7 +52,7 @@ class Calendar extends Component
             'allDayEvents' => $allDayEvents,
             'timedEventGroups' => $timedEventGroups,
             'timezone' => $timezone,
-        ])->layout('layouts.demo');
+        ])->layout('layouts.app-dashboard');
     }
 
     /**

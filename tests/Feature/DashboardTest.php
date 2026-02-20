@@ -26,8 +26,27 @@ test('verified users can visit the dashboard', function () {
         ->assertDontSee('data-testid="new-conversation-button"', false);
 });
 
-test('verified users can visit the scrapers admin page', function () {
+test('regular users do not see admin dashboard link in dropdown', function () {
     $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $response = $this->get(route('dashboard'));
+    $response->assertOk()
+        ->assertDontSee('Admin Dashboard');
+});
+
+test('super admins see admin dashboard link in dropdown', function () {
+    $user = User::factory()->superAdmin()->create();
+    $this->actingAs($user);
+
+    $response = $this->get(route('dashboard'));
+    $response->assertOk()
+        ->assertSee('Admin Dashboard')
+        ->assertSee(route('admin.dashboard'), false);
+});
+
+test('super admins can visit the scrapers admin page', function () {
+    $user = User::factory()->superAdmin()->create();
     $this->actingAs($user);
 
     $response = $this->get(route('admin.scrapers.index'));

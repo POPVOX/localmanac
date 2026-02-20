@@ -30,7 +30,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        Gate::define('access-admin', fn (User $user): bool => $user->hasVerifiedEmail());
+        Gate::define('access-admin', fn (User $user): bool => $user->isSuperAdmin());
+        Gate::define('manage-raw-scraper-config', fn (User $user): bool => $user->isSuperAdmin());
 
         RateLimiter::for('ask', function (Request $request) {
             return Limit::perMinute((int) config('chat.rate_limit_per_minute', 30))

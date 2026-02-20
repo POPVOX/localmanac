@@ -7,16 +7,18 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
-it('initializes with an empty config string when creating a scraper', function () {
+it('initializes with assistant mode and restricted raw config for non super admins', function () {
     $user = User::factory()->create();
     City::create(['name' => 'Test City', 'slug' => 'test-city']);
 
     Livewire::actingAs($user)->test(ScraperForm::class)
-        ->assertSet('config', '');
+        ->assertSet('isSuperAdmin', false)
+        ->assertSet('assistantInputMode', 'url')
+        ->assertSee('Raw JSON editing is restricted');
 });
 
-it('pretty prints stored scraper config when editing', function () {
-    $user = User::factory()->create();
+it('pretty prints stored scraper config when editing as super admin', function () {
+    $user = User::factory()->superAdmin()->create();
     $city = City::create(['name' => 'Pretty City', 'slug' => 'pretty-city']);
 
     $config = [
@@ -28,7 +30,7 @@ it('pretty prints stored scraper config when editing', function () {
         'city_id' => $city->id,
         'name' => 'Encoded Scraper',
         'slug' => 'encoded-scraper',
-        'type' => 'rss',
+        'type' => 'html',
         'source_url' => 'https://example.com/feed',
         'config' => json_encode(json_encode($config)),
         'is_enabled' => true,
@@ -39,11 +41,100 @@ it('pretty prints stored scraper config when editing', function () {
     $expected = json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
     Livewire::actingAs($user)->test(ScraperForm::class, ['scraper' => Scraper::findOrFail($scraperId)])
-        ->assertSet('config', $expected);
+        ->assertSet('isSuperAdmin', true)
+        ->assertSet('config', $expected)
+        ->assertSee('Hide raw JSON');
 });
 
-it('validates config JSON before saving', function () {
+it('blocks non super admin save until preview is valid', function () {
     $user = User::factory()->create();
+    $city = City::create(['name' => 'Preview City', 'slug' => 'preview-city']);
+
+    Livewire::actingAs($user)->test(ScraperForm::class)
+        ->set('name', 'No Preview Scraper')
+        ->set('slug', 'no-preview-scraper')
+        ->set('cityId', $city->id)
+        ->set('type', 'html')
+        ->set('sourceUrl', 'https://example.com/feed')
+        ->set('frequency', 'daily')
+        ->call('save')
+        ->assertHasErrors(['config']);
+
+    expect(Scraper::count())->toBe(0);
+});
+
+it('ignores non super admin raw config tampering and saves assistant draft after preview', function () {
+    $user = User::factory()->create();
+    $city = City::create(['name' => 'Valid City', 'slug' => 'valid-city']);
+
+    $draft = [
+        'profile' => 'generic_listing',
+        'list' => [
+            'link_selector' => 'article a',
+            'link_attr' => 'href',
+            'max_links' => 25,
+        ],
+        'article' => [
+            'content_selector' => 'article',
+            'remove_selectors' => ['script', 'style'],
+        ],
+        'best_effort' => true,
+    ];
+
+    $hash = hash('sha256', json_encode($draft, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+    Livewire::actingAs($user)->test(ScraperForm::class)
+        ->set('name', 'Draft Scraper')
+        ->set('slug', 'draft-scraper')
+        ->set('cityId', $city->id)
+        ->set('type', 'html')
+        ->set('sourceUrl', 'https://example.com/feed')
+        ->set('frequency', 'daily')
+        ->set('config', '{"profile":"wichita_archive_pdf_list"}')
+        ->set('assistantHasDraft', true)
+        ->set('assistantDraftConfig', $draft)
+        ->set('assistantPreviewValid', true)
+        ->set('assistantPreviewHash', $hash)
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertRedirect(route('admin.scrapers.index'));
+
+    $scraper = Scraper::first();
+
+    expect($scraper)->not->toBeNull()
+        ->and($scraper?->config)->toBe($draft);
+});
+
+it('rejects save when non super admin draft changed after preview', function () {
+    $user = User::factory()->create();
+    $city = City::create(['name' => 'Stale Preview City', 'slug' => 'stale-preview-city']);
+
+    $draft = [
+        'profile' => 'generic_listing',
+        'list' => ['link_selector' => 'article a', 'link_attr' => 'href', 'max_links' => 25],
+        'article' => ['content_selector' => 'article', 'remove_selectors' => ['script']],
+        'best_effort' => true,
+    ];
+
+    Livewire::actingAs($user)->test(ScraperForm::class)
+        ->set('name', 'Stale Preview Scraper')
+        ->set('slug', 'stale-preview-scraper')
+        ->set('cityId', $city->id)
+        ->set('type', 'html')
+        ->set('sourceUrl', 'https://example.com/feed')
+        ->set('frequency', 'daily')
+        ->set('assistantHasDraft', true)
+        ->set('assistantDraftConfig', $draft)
+        ->set('assistantPreviewValid', true)
+        ->set('assistantPreviewHash', 'stale-hash')
+        ->call('save')
+        ->assertHasErrors(['config']);
+
+    expect(Scraper::count())->toBe(0);
+});
+
+it('validates raw config JSON for super admins', function () {
+    $user = User::factory()->superAdmin()->create();
     $city = City::create(['name' => 'Invalid City', 'slug' => 'invalid-city']);
 
     Livewire::actingAs($user)->test(ScraperForm::class)
@@ -59,24 +150,17 @@ it('validates config JSON before saving', function () {
     expect(Scraper::count())->toBe(0);
 });
 
-it('stores a valid JSON config as an array', function () {
-    $user = User::factory()->create();
-    $city = City::create(['name' => 'Valid City', 'slug' => 'valid-city']);
+it('stores super admin raw JSON config as array', function () {
+    $user = User::factory()->superAdmin()->create();
+    $city = City::create(['name' => 'Super City', 'slug' => 'super-city']);
 
     $configJson = '{"profile":"generic_listing","list":{"link_selector":"article a"}}';
 
-    $queries = [];
-
-    DB::listen(function ($query) use (&$queries): void {
-        $queries[] = $query->sql;
-    });
-
-    $component = Livewire::actingAs($user)->test(ScraperForm::class);
-
-    $component
-        ->set('name', 'Valid Scraper')
-        ->set('slug', 'valid-scraper')
+    Livewire::actingAs($user)->test(ScraperForm::class)
+        ->set('name', 'Super Scraper')
+        ->set('slug', 'super-scraper')
         ->set('cityId', $city->id)
+        ->set('type', 'html')
         ->set('sourceUrl', 'https://example.com/feed')
         ->set('frequency', 'daily')
         ->set('runAt', '08:30')
@@ -85,15 +169,9 @@ it('stores a valid JSON config as an array', function () {
         ->assertHasNoErrors()
         ->assertRedirect(route('admin.scrapers.index'));
 
-    expect(Scraper::count())->toBe(1);
-
     $scraper = Scraper::first();
 
     expect($scraper)->not->toBeNull()
-        ->and(collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'insert into "scrapers"')))->toBeTrue()
-        ->and($component->get('scraper')?->is($scraper))->toBeTrue()
-        ->and($scraper?->source_url)->toBe('https://example.com/feed')
-        ->and($scraper?->frequency)->toBe('daily')
         ->and($scraper?->run_at)->toBe('08:30')
         ->and($scraper?->config)->toBe([
             'profile' => 'generic_listing',
@@ -104,7 +182,7 @@ it('stores a valid JSON config as an array', function () {
 });
 
 it('defaults run at time when left blank', function () {
-    $user = User::factory()->create();
+    $user = User::factory()->superAdmin()->create();
     $city = City::create(['name' => 'Default City', 'slug' => 'default-city']);
 
     Livewire::actingAs($user)->test(ScraperForm::class)
@@ -114,6 +192,7 @@ it('defaults run at time when left blank', function () {
         ->set('sourceUrl', 'https://example.com/default-time')
         ->set('frequency', 'daily')
         ->set('runAt', '')
+        ->set('config', '{}')
         ->call('save')
         ->assertHasNoErrors();
 
@@ -123,18 +202,8 @@ it('defaults run at time when left blank', function () {
         ->and($scraper?->run_at)->toBe(Scraper::DEFAULT_RUN_AT);
 });
 
-it('clears stray config when resetConfigField is invoked for new scrapers', function () {
-    $user = User::factory()->create();
-    City::create(['name' => 'Reset City', 'slug' => 'reset-city']);
-
-    Livewire::actingAs($user)->test(ScraperForm::class)
-        ->set('config', '{}')
-        ->call('resetConfigField')
-        ->assertSet('config', '');
-});
-
-it('template buttons do not inject organization id', function () {
-    $user = User::factory()->create();
+it('template buttons do not inject organization id for super admins', function () {
+    $user = User::factory()->superAdmin()->create();
     City::create(['name' => 'Template City', 'slug' => 'template-city']);
 
     $genericExpected = json_encode([

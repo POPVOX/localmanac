@@ -101,39 +101,173 @@
                 <flux:text variant="subtle">{{ __('Inactive scrapers will be skipped until re-enabled.') }}</flux:text>
             </div>
 
-            <flux:field class="space-y-2">
-                <div class="flex flex-wrap items-end justify-between gap-3">
-                    <div>
-                        <flux:heading size="sm">{{ __('Config (JSON)') }}</flux:heading>
-                        <flux:text variant="subtle">{{ __('Scraper-specific settings. Must be valid JSON.') }}</flux:text>
-                    </div>
-
-                    <div class="flex flex-wrap gap-2">
-                        <flux:button type="button" variant="subtle" wire:click.prevent="applyTemplate('documenters')">
-                            {{ __('Documenters default') }}
-                        </flux:button>
-                        <flux:button type="button" variant="subtle" wire:click.prevent="applyTemplate('generic_listing')">
-                            {{ __('Generic listing default') }}
-                        </flux:button>
-                        <flux:button type="button" variant="subtle" wire:click.prevent="applyTemplate('wichita_archive_pdf_list')">
-                            {{ __('Wichita Archive PDF list') }}
-                        </flux:button>
-                    </div>
+            <flux:field class="space-y-4 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
+                <div>
+                    <flux:heading size="sm">{{ __('Config Assistant') }}</flux:heading>
+                    <flux:text variant="subtle">{{ __('Generate config from source content, then preview sample extraction before saving.') }}</flux:text>
                 </div>
 
-                <flux:textarea
-                    wire:model.live="config"
-                    wire:init="resetConfigField"
-                    wire:key="scraper-config-{{ $scraper?->id ?? 'new' }}"
-                    rows="12"
-                    placeholder=""
-                    class="font-mono text-sm w-full min-h-[240px] rounded-lg border border-zinc-200 bg-zinc-50 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
-                />
+                @if ($assistantConfigNotice)
+                    <flux:callout icon="information-circle" variant="warning" :heading="__('Existing config notice')">
+                        <flux:text variant="subtle">{{ $assistantConfigNotice }}</flux:text>
+                    </flux:callout>
+                @endif
 
-                <flux:text variant="subtle">
-                    {{ __('Tip: Use the template buttons to start, then tweak selectors per site.') }}
-                </flux:text>
+                <div class="grid gap-4 md:grid-cols-2">
+                    <flux:select wire:model.live="assistantInputMode" :label="__('Source input mode')">
+                        <option value="url">{{ __('Fetch from URL') }}</option>
+                        <option value="paste">{{ __('Paste source HTML') }}</option>
+                    </flux:select>
+
+                    @if ($assistantFetchRenderer)
+                        <flux:field>
+                            <flux:label>{{ __('Last fetch renderer') }}</flux:label>
+                            <flux:text>{{ strtoupper($assistantFetchRenderer) }}</flux:text>
+                        </flux:field>
+                    @endif
+                </div>
+
+                @if ($assistantInputMode === 'paste')
+                    <flux:textarea
+                        wire:model.live="assistantSourceHtml"
+                        rows="8"
+                        :label="__('Paste source HTML')"
+                        placeholder="{{ __('Paste page source here') }}"
+                        class="font-mono text-xs"
+                    />
+                @endif
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <flux:button type="button" variant="primary" wire:click="generateConfigDraft" wire:loading.attr="disabled" wire:target="generateConfigDraft">
+                        <span wire:loading.remove wire:target="generateConfigDraft">{{ __('Generate draft') }}</span>
+                        <span wire:loading wire:target="generateConfigDraft">{{ __('Generating...') }}</span>
+                    </flux:button>
+
+                    <flux:button
+                        type="button"
+                        variant="subtle"
+                        wire:click="previewGeneratedConfig"
+                        wire:loading.attr="disabled"
+                        wire:target="previewGeneratedConfig"
+                        :disabled="! $assistantHasDraft"
+                    >
+                        <span wire:loading.remove wire:target="previewGeneratedConfig">{{ __('Preview extraction') }}</span>
+                        <span wire:loading wire:target="previewGeneratedConfig">{{ __('Previewing...') }}</span>
+                    </flux:button>
+
+                    @if ($assistantHasDraft)
+                        <flux:badge color="indigo" variant="subtle">
+                            {{ __('Profile: :profile', ['profile' => $assistantDraftProfile ?? 'n/a']) }}
+                        </flux:badge>
+                    @endif
+                    @if ($assistantConfidence !== null)
+                        <flux:badge color="zinc" variant="subtle">
+                            {{ __('Confidence: :value', ['value' => number_format($assistantConfidence * 100, 0).'%']) }}
+                        </flux:badge>
+                    @endif
+                    @if ($assistantHasDraft)
+                        <flux:badge :color="$assistantPreviewValid ? 'green' : 'amber'" variant="subtle">
+                            {{ $assistantPreviewValid ? __('Preview ready') : __('Preview required') }}
+                        </flux:badge>
+                    @endif
+                </div>
+
+                @if ($assistantWarnings !== [])
+                    <flux:callout icon="information-circle" variant="warning" :heading="__('Draft warnings')">
+                        <div class="space-y-1 text-sm">
+                            @foreach ($assistantWarnings as $warning)
+                                <div>{{ $warning }}</div>
+                            @endforeach
+                        </div>
+                    </flux:callout>
+                @endif
+
+                @if ($assistantPreviewError)
+                    <flux:callout icon="x-circle" variant="danger" :heading="__('Preview error')">
+                        <flux:text variant="subtle">{{ $assistantPreviewError }}</flux:text>
+                    </flux:callout>
+                @endif
+
+                @if ($assistantPreviewWarnings !== [])
+                    <flux:callout icon="information-circle" variant="warning" :heading="__('Preview notes')">
+                        <div class="space-y-1 text-sm">
+                            @foreach ($assistantPreviewWarnings as $warning)
+                                <div>{{ $warning }}</div>
+                            @endforeach
+                        </div>
+                    </flux:callout>
+                @endif
+
+                @if ($assistantPreviewItems !== [])
+                    <flux:table>
+                        <flux:table.columns>
+                            <flux:table.column>{{ __('Title') }}</flux:table.column>
+                            <flux:table.column>{{ __('Source URL') }}</flux:table.column>
+                            <flux:table.column>{{ __('Type') }}</flux:table.column>
+                            <flux:table.column>{{ __('Published') }}</flux:table.column>
+                        </flux:table.columns>
+                        <flux:table.rows>
+                            @foreach ($assistantPreviewItems as $item)
+                                <flux:table.row>
+                                    <flux:table.cell>{{ $item['title'] ?? '—' }}</flux:table.cell>
+                                    <flux:table.cell>
+                                        @if (! empty($item['source_url']))
+                                            <flux:link href="{{ $item['source_url'] }}" target="_blank">{{ \Illuminate\Support\Str::limit($item['source_url'], 60) }}</flux:link>
+                                        @else
+                                            <flux:text variant="subtle">{{ __('—') }}</flux:text>
+                                        @endif
+                                    </flux:table.cell>
+                                    <flux:table.cell>{{ $item['content_type'] ?? '—' }}</flux:table.cell>
+                                    <flux:table.cell>{{ $item['published_at'] ?? '—' }}</flux:table.cell>
+                                </flux:table.row>
+                            @endforeach
+                        </flux:table.rows>
+                    </flux:table>
+                @endif
             </flux:field>
+
+            @if ($isSuperAdmin)
+                <flux:field class="space-y-2">
+                    <div class="flex flex-wrap items-end justify-between gap-3">
+                        <div>
+                            <flux:heading size="sm">{{ __('Config (JSON)') }}</flux:heading>
+                            <flux:text variant="subtle">{{ __('Raw JSON is available to super admins only.') }}</flux:text>
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-2">
+                            <flux:button type="button" variant="subtle" wire:click="toggleAdvancedConfig">
+                                {{ $showAdvancedConfig ? __('Hide raw JSON') : __('Show raw JSON') }}
+                            </flux:button>
+                        </div>
+                    </div>
+
+                    @if ($showAdvancedConfig)
+                        <div class="flex flex-wrap gap-2">
+                            <flux:button type="button" variant="subtle" wire:click.prevent="applyTemplate('documenters')">
+                                {{ __('Documenters default') }}
+                            </flux:button>
+                            <flux:button type="button" variant="subtle" wire:click.prevent="applyTemplate('generic_listing')">
+                                {{ __('Generic listing default') }}
+                            </flux:button>
+                            <flux:button type="button" variant="subtle" wire:click.prevent="applyTemplate('wichita_archive_pdf_list')">
+                                {{ __('Wichita Archive PDF list') }}
+                            </flux:button>
+                        </div>
+
+                        <flux:textarea
+                            wire:model.live="config"
+                            wire:init="resetConfigField"
+                            wire:key="scraper-config-{{ $scraper?->id ?? 'new' }}"
+                            rows="12"
+                            class="font-mono text-sm w-full min-h-[240px] rounded-lg border border-zinc-200 bg-zinc-50 text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+                        />
+                    @endif
+                </flux:field>
+            @else
+                <flux:text variant="subtle">
+                    {{ __('Raw JSON editing is restricted. Use the assistant draft and preview workflow.') }}
+                </flux:text>
+            @endif
 
             <div class="flex items-center justify-end">
                 <flux:button type="submit" variant="primary" wire:loading.attr="disabled">

@@ -8,8 +8,8 @@ use App\Models\EventSourceItem;
 use App\Models\User;
 use Livewire\Livewire;
 
-test('verified users can visit the event sources admin page', function () {
-    $user = User::factory()->create();
+test('super admins can visit the event sources admin page', function () {
+    $user = User::factory()->superAdmin()->create();
     $this->actingAs($user);
     config(['app.name' => 'LocAlmanac']);
 
@@ -19,8 +19,8 @@ test('verified users can visit the event sources admin page', function () {
         ->assertSee('LocAlmanac');
 });
 
-test('verified users can visit the events admin page', function () {
-    $user = User::factory()->create();
+test('super admins can visit the events admin page', function () {
+    $user = User::factory()->superAdmin()->create();
     $this->actingAs($user);
 
     $response = $this->get(route('admin.events.index'));
@@ -28,8 +28,8 @@ test('verified users can visit the events admin page', function () {
     $response->assertOk();
 });
 
-test('verified users can visit an event detail page', function () {
-    $user = User::factory()->create();
+test('super admins can visit an event detail page', function () {
+    $user = User::factory()->superAdmin()->create();
     $event = Event::factory()->create();
 
     $this->actingAs($user);
@@ -39,8 +39,8 @@ test('verified users can visit an event detail page', function () {
     $response->assertOk();
 });
 
-test('verified users can visit an event edit page', function () {
-    $user = User::factory()->create();
+test('super admins can visit an event edit page', function () {
+    $user = User::factory()->superAdmin()->create();
     $event = Event::factory()->create();
 
     $this->actingAs($user);
@@ -51,7 +51,7 @@ test('verified users can visit an event edit page', function () {
 });
 
 test('events admin page filters by search term', function () {
-    $user = User::factory()->create();
+    $user = User::factory()->superAdmin()->create();
     $city = City::factory()->create();
 
     $matchingEvent = Event::factory()->create([
@@ -88,7 +88,7 @@ test('events admin page filters by search term', function () {
 });
 
 test('events admin page sorts by title', function () {
-    $user = User::factory()->create();
+    $user = User::factory()->superAdmin()->create();
     $city = City::factory()->create();
 
     Event::factory()->create([
@@ -116,7 +116,7 @@ test('events admin page sorts by title', function () {
 });
 
 test('event source details mask auth tokens in config preview', function () {
-    $user = User::factory()->create();
+    $user = User::factory()->superAdmin()->create();
     $token = '7b501fa364a55caef77b7f775e7a4941';
 
     $source = EventSource::factory()->create([

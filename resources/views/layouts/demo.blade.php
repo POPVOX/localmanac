@@ -15,10 +15,7 @@
 
             @auth
                 <flux:navbar class="-mb-px">
-                    <flux:navbar.item href="#">Search</flux:navbar.item>
-                    <flux:navbar.item href="#">Issues</flux:navbar.item>
                     <flux:navbar.item href="{{ route('demo.calendar') }}" wire:navigate>Calendar</flux:navbar.item>
-                    <flux:navbar.item href="{{ route('questions') }}" wire:navigate>Questions</flux:navbar.item>
                 </flux:navbar>
             @endauth
 
@@ -49,6 +46,12 @@
                                 {{ __('Settings') }}
                             </flux:menu.item>
                         @endif
+
+                        @can('access-admin')
+                            <flux:menu.item :href="route('admin.dashboard')" icon="shield-check" wire:navigate>
+                                {{ __('Admin Dashboard') }}
+                            </flux:menu.item>
+                        @endcan
 
                         <flux:menu.separator />
 

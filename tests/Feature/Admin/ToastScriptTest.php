@@ -3,7 +3,7 @@
 use App\Models\User;
 
 test('admin pages include the flux toast handler', function () {
-    $user = User::factory()->create();
+    $user = User::factory()->superAdmin()->create();
 
     $response = $this->actingAs($user)->get(route('admin.cities.create'));
 
