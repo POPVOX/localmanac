@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\Article;
+use App\Models\ArticleSource;
 use App\Models\ChatSource;
 use App\Models\ChatSourceChunk;
 use App\Models\ChatSourcePage;
@@ -103,6 +105,82 @@ it('returns fallback answer when evidence is insufficient', function () {
 
     $response->assertOk()
         ->assertSeeText('I could not find the answer in the sources I checked.');
+});
+
+it('returns a cited weekly digest fallback for broad local update asks', function () {
+    Cache::flush();
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.retrieval_mode', 'local_only');
+    config()->set('chat.tools.web_search.enabled', false);
+
+    Carbon::setTestNow(Carbon::parse('2026-03-04 09:00:00', 'America/Chicago'));
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita Government',
+        'source_url' => 'https://www.wichita.gov/27/Government',
+        'is_active' => true,
+    ]);
+
+    $permitArticle = Article::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Planning Commission advances riverfront rezoning case',
+        'summary' => 'Commissioners moved a mixed-use rezoning request forward and set a public hearing deadline.',
+        'published_at' => Carbon::parse('2026-03-03 11:30:00', 'America/Chicago'),
+        'canonical_url' => 'https://example.com/articles/rezoning-riverfront',
+    ]);
+
+    ArticleSource::query()->create([
+        'city_id' => $city->id,
+        'article_id' => $permitArticle->id,
+        'source_url' => 'https://example.com/articles/rezoning-riverfront',
+        'source_type' => 'web',
+    ]);
+
+    $serviceArticle = Article::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'City announces temporary water service disruption downtown',
+        'summary' => 'Utility crews scheduled overnight valve repairs and provided restoration times.',
+        'published_at' => Carbon::parse('2026-03-02 08:15:00', 'America/Chicago'),
+        'canonical_url' => 'https://example.com/articles/water-disruption-downtown',
+    ]);
+
+    ArticleSource::query()->create([
+        'city_id' => $city->id,
+        'article_id' => $serviceArticle->id,
+        'source_url' => 'https://example.com/articles/water-disruption-downtown',
+        'source_type' => 'web',
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'I could not find the answer in the sources I checked.',
+            'citations' => [],
+            'source_mode' => 'none',
+            'confidence' => 0.0,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()
+        ->postJson('/ask', [
+            'question' => 'Summarize the most important local updates in Wichita from the last 7 days. Focus on decisions, projects, and deadlines, and include citations.',
+            'city_id' => $city->id,
+        ]);
+
+    $response->assertOk()
+        ->assertSeeText('Here are the latest local updates in Wichita from the last 7 days:')
+        ->assertSeeText('Planning Commission advances riverfront rezoning case')
+        ->assertSeeText('City announces temporary water service disruption downtown')
+        ->assertJsonPath('citations.0.source_url', 'https://example.com/articles/rezoning-riverfront')
+        ->assertJsonPath('citations.1.source_url', 'https://example.com/articles/water-disruption-downtown');
+
+    expect((string) $response->json('answer'))->not->toContain('I could not find the answer in the sources I checked.');
 });
 
 it('keeps reranked evidence when minimum score filtering is enabled', function () {
@@ -354,6 +432,57 @@ it('answers event asks and keeps ask response contract unchanged', function () {
             'city' => ['id', 'name', 'slug'],
             'meta' => ['sources_used', 'pages_fetched', 'cache_hits'],
         ]);
+
+    StructuredChatAnswerAgent::assertPrompted(function ($prompt): bool {
+        $tools = collect($prompt->agent->tools);
+
+        return $prompt->contains('Event intent detected: yes')
+            && $tools->contains(fn ($tool): bool => $tool instanceof EventSearchTool);
+    });
+});
+
+it('treats public meeting asks as event intent', function () {
+    Cache::flush();
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.retrieval_mode', 'local_then_web');
+    config()->set('chat.tools.web_search.enabled', false);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita Government',
+        'source_url' => 'https://www.wichita.gov/27/Government',
+        'is_active' => true,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'A city council meeting is scheduled next week.',
+            'citations' => [
+                [
+                    'title' => 'City Council Agenda',
+                    'source_url' => 'https://events.wichita.gov/city-council',
+                    'type' => 'html',
+                ],
+            ],
+            'source_mode' => 'local',
+            'confidence' => 0.8,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()
+        ->postJson('/ask', [
+            'question' => 'What city council and board meetings are coming up next week?',
+            'city_id' => $city->id,
+        ]);
+
+    $response->assertOk()
+        ->assertSeeText('city council meeting');
 
     StructuredChatAnswerAgent::assertPrompted(function ($prompt): bool {
         $tools = collect($prompt->agent->tools);
