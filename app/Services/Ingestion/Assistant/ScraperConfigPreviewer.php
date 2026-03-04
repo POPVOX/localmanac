@@ -33,6 +33,8 @@ class ScraperConfigPreviewer
         array $config,
         ?int $scraperId = null,
     ): array {
+        $config = $this->applyPreviewExecutionLimits($type, $config);
+
         $scraper = new Scraper;
         $scraper->forceFill([
             'id' => $scraperId,
@@ -72,6 +74,80 @@ class ScraperConfigPreviewer
             'items' => $previewItems,
             'warnings' => $warnings,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     * @return array<string, mixed>
+     */
+    private function applyPreviewExecutionLimits(string $type, array $config): array
+    {
+        if (mb_strtolower(trim($type)) !== 'html') {
+            return $config;
+        }
+
+        if (Arr::get($config, 'profile') !== 'generic_listing') {
+            return $config;
+        }
+
+        $this->applyCappedInteger(
+            config: $config,
+            path: 'list.max_links',
+            cap: (int) config('scraper-assistant.preview.generic_listing.max_links', 6),
+            minimum: 1,
+        );
+        $this->applyCappedInteger(
+            config: $config,
+            path: 'list.max_pages',
+            cap: (int) config('scraper-assistant.preview.generic_listing.max_pages', 1),
+            minimum: 1,
+        );
+        $this->applyCappedInteger(
+            config: $config,
+            path: 'fetch.playwright.timeout_ms',
+            cap: (int) config('scraper-assistant.preview.generic_listing.playwright_timeout_ms', 15000),
+            minimum: 1000,
+        );
+        $this->applyCappedInteger(
+            config: $config,
+            path: 'fetch.playwright.refresh_attempts',
+            cap: (int) config('scraper-assistant.preview.generic_listing.playwright_refresh_attempts', 1),
+            minimum: 0,
+        );
+        $this->applyCappedInteger(
+            config: $config,
+            path: 'fetch.playwright.max_scroll_steps',
+            cap: (int) config('scraper-assistant.preview.generic_listing.playwright_max_scroll_steps', 4),
+            minimum: 0,
+        );
+        $this->applyCappedInteger(
+            config: $config,
+            path: 'fetch.playwright.scroll_pause_ms',
+            cap: (int) config('scraper-assistant.preview.generic_listing.playwright_scroll_pause_ms', 400),
+            minimum: 50,
+        );
+
+        return $config;
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    private function applyCappedInteger(array &$config, string $path, int $cap, int $minimum): void
+    {
+        if ($cap < $minimum) {
+            return;
+        }
+
+        $value = Arr::get($config, $path);
+
+        if (! is_numeric($value)) {
+            Arr::set($config, $path, $cap);
+
+            return;
+        }
+
+        Arr::set($config, $path, max($minimum, min((int) $value, $cap)));
     }
 
     /**

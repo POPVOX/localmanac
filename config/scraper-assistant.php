@@ -10,6 +10,14 @@ return [
 
     'preview' => [
         'max_items' => (int) env('SCRAPER_ASSISTANT_PREVIEW_MAX_ITEMS', 5),
+        'generic_listing' => [
+            'max_links' => (int) env('SCRAPER_ASSISTANT_PREVIEW_GENERIC_MAX_LINKS', 6),
+            'max_pages' => (int) env('SCRAPER_ASSISTANT_PREVIEW_GENERIC_MAX_PAGES', 1),
+            'playwright_timeout_ms' => (int) env('SCRAPER_ASSISTANT_PREVIEW_GENERIC_PLAYWRIGHT_TIMEOUT_MS', 15000),
+            'playwright_refresh_attempts' => (int) env('SCRAPER_ASSISTANT_PREVIEW_GENERIC_PLAYWRIGHT_REFRESH_ATTEMPTS', 1),
+            'playwright_max_scroll_steps' => (int) env('SCRAPER_ASSISTANT_PREVIEW_GENERIC_PLAYWRIGHT_MAX_SCROLL_STEPS', 4),
+            'playwright_scroll_pause_ms' => (int) env('SCRAPER_ASSISTANT_PREVIEW_GENERIC_PLAYWRIGHT_SCROLL_PAUSE_MS', 400),
+        ],
     ],
 
     'html_defaults' => [
