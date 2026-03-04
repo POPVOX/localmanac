@@ -1,11 +1,13 @@
 <div class="space-y-8">
-    <flux:card padding="xl" class="space-y-6 rounded-2xl border border-zinc-200 bg-gradient-to-br from-white via-white to-emerald-50/30 shadow-sm">
-        @php
-            $hasConversation = $conversationId || count($messages) > 0;
-        @endphp
+    {{-- ── Chat area ─────────────────────────────────────────────── --}}
+    @php
+        $hasConversation = $conversationId || count($messages) > 0;
+    @endphp
 
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div class="space-y-2">
+    <div class="overflow-hidden rounded-3xl border border-zinc-200/60 bg-white shadow-lg">
+        {{-- Header strip --}}
+        <div class="flex flex-col gap-4 border-b border-zinc-100 bg-zinc-50/60 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
+            <div class="space-y-0.5">
                 <flux:heading size="lg" level="1">
                     {{ __('Ask LocAlmanac About :city', ['city' => $city?->name ?? __('your city')]) }}
                 </flux:heading>
@@ -14,13 +16,16 @@
                 </flux:subheading>
             </div>
 
-            <div class="flex flex-wrap items-center justify-end gap-2">
-                <div class="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-700">
-                    {{ __('Powered by verified sources') }}
-                </div>
+            <div class="flex items-center gap-2 text-xs font-medium text-emerald-700">
+                <span class="relative flex size-2">
+                    <span class="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-60"></span>
+                    <span class="relative inline-flex size-2 rounded-full bg-emerald-500"></span>
+                </span>
+                {{ __('Powered by verified sources') }}
             </div>
         </div>
 
+        {{-- Conversation body --}}
         <div
             x-data="{
                 pendingQuestion: '',
@@ -37,73 +42,86 @@
                 queueScrollToBottom() {
                     this.scrollTimers.forEach((timer) => clearTimeout(timer));
                     this.scrollTimers = [];
-
                     [0, 60, 140, 260, 420].forEach((delay) => {
                         this.scrollTimers.push(setTimeout(() => this.scrollToBottom(), delay));
                     });
                 },
             }"
             x-init="scrollToBottom()"
-            class="space-y-4 rounded-2xl border border-zinc-200 bg-white/80 p-4 shadow-sm backdrop-blur"
+            class="flex flex-col"
         >
+            {{-- Empty state — shown before any messages --}}
+            <div
+                x-show="!hasMessages && !pendingQuestion"
+                x-transition:leave.opacity.duration.150ms
+                class="flex flex-col items-center justify-center px-6 py-12 text-center"
+            >
+                <div class="mx-auto mb-6 grid size-16 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
+                    <flux:icon icon="chat-bubble-left-right" class="size-8" />
+                </div>
+                <p class="text-base font-medium text-zinc-800">{{ __('What would you like to know?') }}</p>
+                <p class="mt-1 max-w-sm text-sm text-zinc-500">
+                    {{ __('Ask about permits, meetings, city services, or anything happening in :city.', ['city' => $city?->name ?? __('your city')]) }}
+                </p>
+            </div>
+
+            {{-- Message thread --}}
             <div
                 x-ref="chatScroll"
                 x-show="hasMessages || pendingQuestion"
                 x-cloak
-                class="max-h-[360px] space-y-4 overflow-y-auto pr-1"
+                class="max-h-[420px] space-y-1 overflow-y-auto px-6 py-5"
                 x-on:chat-updated.window="hasMessages = true; pendingQuestion = ''; queueScrollToBottom()"
+                x-on:chat-reset.window="hasMessages = false; pendingQuestion = ''"
             >
                 @foreach ($messages as $message)
                     @php
                         $isUser = $message['role'] === 'user';
-                        $bubbleClasses = $isUser
-                            ? 'border-sky-200 bg-sky-50 text-zinc-800'
-                            : 'border-zinc-200 bg-white text-zinc-900';
-                        $bubbleMaxWidth = $isUser ? 'max-w-2xl' : 'max-w-3xl';
                     @endphp
-                    <div class="flex w-full {{ $isUser ? 'justify-end' : 'justify-start' }}">
-                        <div class="{{ $bubbleMaxWidth }} w-full space-y-2 rounded-2xl border px-4 py-3 shadow-sm {{ $bubbleClasses }}">
-                            <flux:badge
-                                color="{{ $isUser ? 'sky' : 'emerald' }}"
-                                variant="subtle"
-                                class="w-fit"
-                            >
-                                {{ $isUser ? __('You') : __('Assistant') }}
-                            </flux:badge>
-
-                            <flux:text class="whitespace-pre-wrap">{{ $message['content'] }}</flux:text>
+                    <div class="flex w-full {{ $isUser ? 'justify-end' : 'justify-start' }} py-1.5">
+                        <div @class([
+                            'max-w-[85%] space-y-2 rounded-2xl px-4 py-3',
+                            'bg-emerald-600 text-white' => $isUser,
+                            'bg-zinc-100 text-zinc-900' => ! $isUser,
+                        ])>
+                            <div class="whitespace-pre-wrap text-sm leading-relaxed">{{ $message['content'] }}</div>
 
                             @if (! empty($message['citations']))
-                                <div class="border-t border-zinc-100 pt-2">
-                                    <div class="flex flex-wrap items-center gap-1.5">
+                                <div @class([
+                                    'flex flex-wrap items-center gap-1.5 border-t pt-2',
+                                    'border-emerald-500/40' => $isUser,
+                                    'border-zinc-200' => ! $isUser,
+                                ])>
                                     @foreach ($message['citations'] as $citation)
-                                            <a
-                                                href="{{ $citation['source_url'] }}"
-                                                target="_blank"
-                                                class="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-medium text-zinc-500 transition hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-700"
-                                            >
-                                                <flux:icon icon="arrow-top-right-on-square" class="size-3" />
-                                                <span>{{ \Illuminate\Support\Str::limit($citation['title'], 36) }}</span>
-                                            </a>
+                                        <a
+                                            href="{{ $citation['source_url'] }}"
+                                            target="_blank"
+                                            @class([
+                                                'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium transition',
+                                                'bg-emerald-500/30 text-emerald-50 hover:bg-emerald-500/50' => $isUser,
+                                                'bg-white border border-zinc-200 text-zinc-500 hover:text-zinc-700 hover:border-zinc-300' => ! $isUser,
+                                            ])
+                                        >
+                                            <flux:icon icon="arrow-top-right-on-square" class="size-3" />
+                                            <span>{{ \Illuminate\Support\Str::limit($citation['title'], 36) }}</span>
+                                        </a>
                                     @endforeach
-                                    </div>
                                 </div>
                             @endif
                         </div>
                     </div>
                 @endforeach
 
-                <div wire:loading.block wire:target="ask" class="w-full space-y-3">
-                    <div x-show="pendingQuestion" x-cloak class="flex w-full justify-end">
-                        <div class="w-full max-w-2xl space-y-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 shadow-sm text-zinc-800">
-                            <flux:badge color="sky" variant="subtle" class="w-fit">{{ __('You') }}</flux:badge>
-                            <flux:text class="whitespace-pre-wrap" x-text="pendingQuestion"></flux:text>
+                {{-- Loading / pending state --}}
+                <div wire:loading.block wire:target="ask" class="w-full space-y-1">
+                    <div x-show="pendingQuestion" x-cloak class="flex w-full justify-end py-1.5">
+                        <div class="max-w-[85%] rounded-2xl bg-emerald-600 px-4 py-3 text-white">
+                            <div class="whitespace-pre-wrap text-sm leading-relaxed" x-text="pendingQuestion"></div>
                         </div>
                     </div>
 
-                    <div class="flex w-full justify-start">
-                        <div class="w-full max-w-2xl space-y-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-sm">
-                            <flux:badge color="emerald" variant="subtle" class="w-fit">{{ __('Assistant') }}</flux:badge>
+                    <div class="flex w-full justify-start py-1.5">
+                        <div class="rounded-2xl bg-zinc-100 px-4 py-3">
                             <div
                                 role="status"
                                 aria-live="polite"
@@ -116,30 +134,28 @@
                                     <span class="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-bounce [animation-delay:120ms]"></span>
                                     <span class="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-bounce [animation-delay:240ms]"></span>
                                 </span>
-                                <span>{{ __('Thinking') }}</span>
+                                <span>{{ __('Thinking…') }}</span>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div @class([
-                'pt-4',
-                'border-t border-zinc-200' => count($messages) > 0,
-            ])>
+            {{-- Composer --}}
+            <div class="border-t border-zinc-100 px-6 pb-5 pt-4">
                 <form
                     wire:submit.prevent="ask"
                     x-on:submit="pendingQuestion = ($refs.chatComposer?.querySelector('textarea')?.value ?? '').trim(); if (pendingQuestion) { hasMessages = true; setTimeout(() => { const input = $refs.chatComposer?.querySelector('textarea'); if (input) { input.value = ''; } }, 0); } queueScrollToBottom();"
-                    class="space-y-4"
+                    class="space-y-3"
                 >
                     <flux:composer
                         x-ref="chatComposer"
                         wire:model.defer="question"
-                        placeholder="{{ __('How much does a garage sale permit cost? How do I report a water leak?') }}"
+                        placeholder="{{ __('Type your question here') }}"
                         rows="1"
                         max-rows="2"
                         submit="enter"
-                        class="border-zinc-200 bg-white shadow-sm [&_textarea]:px-5 [&_textarea]:py-4 [&_textarea]:text-base"
+                        class="rounded-xl border-zinc-200 bg-zinc-50 [&_textarea]:px-4 [&_textarea]:py-3 [&_textarea]:text-sm"
                     >
                         <x-slot name="actionsTrailing" class="flex items-center justify-end gap-2">
                             @if ($hasConversation)
@@ -147,7 +163,7 @@
                                     type="button"
                                     wire:click="startNewConversation"
                                     data-testid="new-conversation-button"
-                                    class="inline-grid h-10 w-10 place-items-center rounded-full border border-zinc-200 bg-white text-zinc-500 shadow-sm transition hover:bg-zinc-50 hover:text-zinc-700"
+                                    class="inline-grid size-9 place-items-center rounded-full text-zinc-400 transition hover:bg-zinc-200 hover:text-zinc-600"
                                     aria-label="{{ __('Start a new conversation') }}"
                                     title="{{ __('Start a new conversation') }}"
                                 >
@@ -159,7 +175,7 @@
                                 type="submit"
                                 size="sm"
                                 variant="primary"
-                                class="h-10 w-10 rounded-full bg-emerald-600 p-0 text-white shadow-sm hover:bg-emerald-500 inline-grid place-items-center"
+                                class="inline-grid size-9 place-items-center rounded-full bg-emerald-600 p-0 text-white hover:bg-emerald-500"
                                 wire:loading.attr="disabled"
                                 aria-label="{{ __('Send question') }}"
                             >
@@ -171,17 +187,17 @@
 
                     <div class="flex flex-wrap gap-2">
                         @php
-                            $chipStyles = [
-                                'bg-emerald-50 text-emerald-700 border-emerald-200',
-                                'bg-sky-50 text-sky-700 border-sky-200',
-                                'bg-purple-50 text-purple-700 border-purple-200',
-                                'bg-orange-50 text-orange-700 border-orange-200',
+                            $chipColors = [
+                                'text-emerald-700 bg-emerald-50 hover:bg-emerald-100',
+                                'text-sky-700 bg-sky-50 hover:bg-sky-100',
+                                'text-purple-700 bg-purple-50 hover:bg-purple-100',
+                                'text-orange-700 bg-orange-50 hover:bg-orange-100',
                             ];
                         @endphp
                         @foreach ($promptChips as $index => $chip)
                             <button
                                 type="button"
-                                class="h-9 rounded-full border px-4 text-xs font-semibold transition hover:-translate-y-0.5 hover:shadow-sm {{ $chipStyles[$index % count($chipStyles)] }}"
+                                class="rounded-full px-3.5 py-1.5 text-xs font-semibold transition {{ $chipColors[$index % count($chipColors)] }}"
                                 wire:click="applyPrompt(@js($chip['prompt']))"
                             >
                                 {{ $chip['label'] }}
@@ -191,28 +207,50 @@
                 </form>
             </div>
         </div>
-    </flux:card>
-
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <flux:card padding="lg" class="text-center rounded-2xl border border-zinc-200 bg-white shadow-sm">
-            <flux:heading size="xl" class="text-purple-600">{{ $stats['locationLabel'] }}</flux:heading>
-            <flux:subheading>{{ __('Your Location') }}</flux:subheading>
-        </flux:card>
-        <flux:card padding="lg" class="text-center rounded-2xl border border-zinc-200 bg-white shadow-sm">
-            <flux:heading size="xl">{{ $stats['totalArticles'] }}</flux:heading>
-            <flux:subheading>{{ __('Total Articles') }}</flux:subheading>
-        </flux:card>
-        <flux:card padding="lg" class="text-center rounded-2xl border border-zinc-200 bg-white shadow-sm">
-            <flux:heading size="xl" class="text-emerald-600">{{ $stats['addedToday'] }}</flux:heading>
-            <flux:subheading>{{ __('Added Today') }}</flux:subheading>
-        </flux:card>
-        <flux:card padding="lg" class="text-center rounded-2xl border border-zinc-200 bg-white shadow-sm">
-            <flux:heading size="xl" class="text-blue-600">{{ $stats['categoryCount'] }}</flux:heading>
-            <flux:subheading>{{ __('Categories') }}</flux:subheading>
-        </flux:card>
     </div>
 
-    <flux:card padding="lg" class="rounded-2xl border border-zinc-200 bg-white shadow-sm">
+    {{-- ── Stats strip ───────────────────────────────────────────── --}}
+    <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div class="flex items-center gap-3 rounded-2xl border border-zinc-200/60 bg-white px-5 py-4 shadow-sm">
+            <div class="grid size-10 shrink-0 place-items-center rounded-xl bg-purple-50 text-purple-600">
+                <flux:icon icon="map-pin" class="size-5" />
+            </div>
+            <div class="min-w-0">
+                <div class="truncate text-base font-semibold text-purple-600">{{ $stats['locationLabel'] }}</div>
+                <div class="text-xs text-zinc-500">{{ __('Your Location') }}</div>
+            </div>
+        </div>
+        <div class="flex items-center gap-3 rounded-2xl border border-zinc-200/60 bg-white px-5 py-4 shadow-sm">
+            <div class="grid size-10 shrink-0 place-items-center rounded-xl bg-zinc-100 text-zinc-600">
+                <flux:icon icon="document-text" class="size-5" />
+            </div>
+            <div>
+                <div class="text-base font-semibold text-zinc-800">{{ $stats['totalArticles'] }}</div>
+                <div class="text-xs text-zinc-500">{{ __('Total Articles') }}</div>
+            </div>
+        </div>
+        <div class="flex items-center gap-3 rounded-2xl border border-zinc-200/60 bg-white px-5 py-4 shadow-sm">
+            <div class="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600">
+                <flux:icon icon="plus-circle" class="size-5" />
+            </div>
+            <div>
+                <div class="text-base font-semibold text-emerald-600">{{ $stats['addedToday'] }}</div>
+                <div class="text-xs text-zinc-500">{{ __('Added Today') }}</div>
+            </div>
+        </div>
+        <div class="flex items-center gap-3 rounded-2xl border border-zinc-200/60 bg-white px-5 py-4 shadow-sm">
+            <div class="grid size-10 shrink-0 place-items-center rounded-xl bg-sky-50 text-sky-600">
+                <flux:icon icon="tag" class="size-5" />
+            </div>
+            <div>
+                <div class="text-base font-semibold text-sky-600">{{ $stats['categoryCount'] }}</div>
+                <div class="text-xs text-zinc-500">{{ __('Categories') }}</div>
+            </div>
+        </div>
+    </div>
+
+    {{-- ── Article search & filters ──────────────────────────────── --}}
+    <div class="rounded-2xl border border-zinc-200/60 bg-white p-5 shadow-sm">
         <div class="grid gap-4">
             <div class="w-full">
                 <label for="article-search" class="sr-only">{{ __('Search articles') }}</label>
@@ -220,8 +258,8 @@
                     id="article-search"
                     wire:model.live.debounce.300ms="articleSearch"
                     type="search"
-                    placeholder="{{ __('Search articles...') }}"
-                    class="h-12 w-full rounded-xl border border-zinc-200 bg-white px-5 text-base text-zinc-700 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-100"
+                    placeholder="{{ __('Search articles…') }}"
+                    class="h-11 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 text-sm text-zinc-700 transition focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                 />
             </div>
 
@@ -234,7 +272,7 @@
                     <div class="flex flex-wrap items-center gap-2">
                         <button
                             type="button"
-                            class="h-10 rounded-full border px-5 text-sm font-semibold transition {{ $activeIssueAreaId ? 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100' : 'border-emerald-600 bg-emerald-600 text-white shadow-sm' }}"
+                            class="h-9 rounded-full px-4 text-sm font-medium transition {{ $activeIssueAreaId ? 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200' : 'bg-emerald-600 text-white shadow-sm' }}"
                             wire:click="clearIssueArea"
                         >
                             {{ __('All') }}
@@ -244,7 +282,7 @@
                                 @foreach ($featuredIssueAreas as $issueArea)
                                     <button
                                         type="button"
-                                        class="h-10 shrink-0 rounded-full border px-5 text-sm font-semibold transition {{ $activeIssueAreaId === $issueArea->id ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm' : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100' }}"
+                                        class="h-9 shrink-0 rounded-full px-4 text-sm font-medium transition {{ $activeIssueAreaId === $issueArea->id ? 'bg-emerald-600 text-white shadow-sm' : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200' }}"
                                         wire:click="selectIssueArea({{ $issueArea->id }})"
                                     >
                                         {{ $issueArea->name }}
@@ -256,7 +294,7 @@
                         <div x-data="{ open: false }" class="relative">
                             <button
                                 type="button"
-                                class="h-10 rounded-full border px-5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+                                class="h-9 rounded-full bg-zinc-100 px-4 text-sm font-medium text-zinc-700 transition hover:bg-zinc-200"
                                 x-on:click="open = !open"
                             >
                                 {{ __('More') }}
@@ -268,14 +306,14 @@
                                 x-on:click.away="open = false"
                                 class="absolute right-0 top-12 z-10 w-[320px] rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl"
                             >
-                                <div class="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                <div class="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
                                     {{ __('All Categories') }}
                                 </div>
-                                <div class="max-h-64 space-y-2 overflow-y-auto pr-1">
+                                <div class="max-h-64 space-y-1.5 overflow-y-auto pr-1">
                                     @foreach ($issueAreas as $issueArea)
                                         <button
                                             type="button"
-                                            class="flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm font-semibold transition {{ $activeIssueAreaId === $issueArea->id ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm' : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100' }}"
+                                            class="flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium transition {{ $activeIssueAreaId === $issueArea->id ? 'bg-emerald-600 text-white' : 'text-zinc-700 hover:bg-zinc-100' }}"
                                             wire:click="selectIssueArea({{ $issueArea->id }})"
                                             x-on:click="open = false"
                                         >
@@ -286,7 +324,7 @@
                                 @if ($activeIssueAreaId)
                                     <button
                                         type="button"
-                                        class="mt-3 w-full rounded-xl border border-zinc-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-zinc-600 transition hover:bg-zinc-100"
+                                        class="mt-3 w-full rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 transition hover:bg-zinc-100"
                                         wire:click="clearIssueArea"
                                         x-on:click="open = false"
                                     >
@@ -301,7 +339,7 @@
                         @foreach ($articleFallbackChips as $chip)
                             <button
                                 type="button"
-                                class="h-10 rounded-full border px-5 text-sm font-semibold transition {{ strcasecmp(trim($articleSearch), trim($chip)) === 0 ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm' : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100' }}"
+                                class="h-9 rounded-full px-4 text-sm font-medium transition {{ strcasecmp(trim($articleSearch), trim($chip)) === 0 ? 'bg-emerald-600 text-white shadow-sm' : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200' }}"
                                 wire:click="useArticleFilterChip(@js($chip))"
                             >
                                 {{ $chip }}
@@ -311,17 +349,16 @@
                 @endif
             </div>
         </div>
-    </flux:card>
+    </div>
 
+    {{-- ── Feed + sidebar ────────────────────────────────────────── --}}
     <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <flux:card id="dashboard-feed" padding="xl" class="space-y-6 rounded-2xl border border-zinc-200 bg-white shadow-sm">
-            <div class="flex items-center justify-between">
-                <flux:heading size="lg">
-                    {{ __('Your :city Feed', ['city' => $city?->name ?? __('City')]) }}
-                </flux:heading>
-            </div>
+        <div id="dashboard-feed" class="space-y-6 rounded-2xl border border-zinc-200/60 bg-white p-6 shadow-sm">
+            <flux:heading size="lg">
+                {{ __('Your :city Feed', ['city' => $city?->name ?? __('City')]) }}
+            </flux:heading>
 
-            <div class="space-y-5">
+            <div class="divide-y divide-zinc-100">
                 @forelse ($articles as $article)
                     @php
                         $articleTime = $article->published_at ?? $article->created_at;
@@ -335,25 +372,23 @@
                             ->take(2);
                         $summary = $article->summary ?: __('No summary available yet.');
                     @endphp
-                    <div class="space-y-2 border-b border-zinc-200 pb-5 last:border-b-0 last:pb-0">
-                        <flux:heading size="sm" class="text-zinc-900">
-                            <a
-                                href="{{ route('articles.show', $article) }}"
-                                class="transition hover:text-emerald-600"
-                            >
-                                {{ $article->title ?? __('Untitled') }}
-                            </a>
-                        </flux:heading>
-                        <flux:text class="text-sm text-zinc-600">
+                    <div class="space-y-2 py-5 first:pt-0 last:pb-0">
+                        <a
+                            href="{{ route('articles.show', $article) }}"
+                            class="text-sm font-semibold text-zinc-900 transition hover:text-emerald-600"
+                        >
+                            {{ $article->title ?? __('Untitled') }}
+                        </a>
+                        <p class="text-sm leading-relaxed text-zinc-600">
                             {{ \Illuminate\Support\Str::limit($summary, 360) }}
-                        </flux:text>
-                        <div class="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+                        </p>
+                        <div class="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
                             @if ($articleTimeLabel)
                                 <span>{{ $articleTimeLabel }}</span>
                             @endif
                             <span>{{ $sourceLabel }}</span>
                             @foreach ($issueAreaBadges as $badge)
-                                <flux:badge color="zinc" variant="subtle">{{ $badge }}</flux:badge>
+                                <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-500">{{ $badge }}</span>
                             @endforeach
                         </div>
                     </div>
@@ -367,51 +402,51 @@
                     <flux:pagination :paginator="$articles" scroll-to="#dashboard-feed" />
                 </div>
             @endif
-        </flux:card>
+        </div>
 
         <div class="space-y-6">
-            <flux:card padding="lg" class="space-y-4 rounded-2xl border border-zinc-200 bg-white shadow-sm">
+            <div class="space-y-4 rounded-2xl border border-zinc-200/60 bg-white p-5 shadow-sm">
                 <flux:heading size="lg">{{ __('Welcome to LocAlmanac') }}</flux:heading>
-                <flux:text class="text-sm text-zinc-600">
+                <p class="text-sm leading-relaxed text-zinc-600">
                     {{ __('Your AI-powered local news portal. Ask questions, browse articles, and stay informed about what\'s happening in your community.') }}
-                </flux:text>
-                <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                    <strong>{{ __('Pilot Status:') }}</strong>
+                </p>
+                <div class="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                    <span class="font-semibold">{{ __('Pilot Status:') }}</span>
                     {{ __('Live with real Wichita data! Try the AI assistant above.') }}
                 </div>
-            </flux:card>
+            </div>
 
-            <flux:card padding="lg" class="space-y-4 rounded-2xl border border-zinc-200 bg-white shadow-sm">
+            <div class="space-y-4 rounded-2xl border border-zinc-200/60 bg-white p-5 shadow-sm">
                 <flux:heading size="lg">{{ __('Browse by Category') }}</flux:heading>
-                <flux:text class="text-sm text-zinc-600">
+                <p class="text-sm text-zinc-500">
                     {{ __('Select a category to filter the article feed.') }}
-                </flux:text>
-                <div class="space-y-2">
+                </p>
+                <div class="space-y-1">
                     <button
                         type="button"
-                        class="flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm font-medium transition {{ $activeIssueAreaId === null ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm' : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100' }}"
+                        class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition {{ $activeIssueAreaId === null ? 'bg-emerald-600 text-white' : 'text-zinc-700 hover:bg-zinc-100' }}"
                         wire:click="clearIssueArea"
                         aria-pressed="{{ $activeIssueAreaId === null ? 'true' : 'false' }}"
                     >
-                        <span class="text-base leading-none">{{ $activeIssueAreaId === null ? '•' : '◦' }}</span>
+                        <span class="size-1.5 rounded-full {{ $activeIssueAreaId === null ? 'bg-white' : 'bg-emerald-500' }}"></span>
                         <span>{{ __('All categories') }}</span>
                     </button>
 
                     @forelse ($issueAreas as $issueArea)
                         <button
                             type="button"
-                            class="flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm font-medium transition {{ $activeIssueAreaId === $issueArea->id ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm' : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100' }}"
+                            class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition {{ $activeIssueAreaId === $issueArea->id ? 'bg-emerald-600 text-white' : 'text-zinc-700 hover:bg-zinc-100' }}"
                             wire:click="selectIssueArea({{ $issueArea->id }})"
                             aria-pressed="{{ $activeIssueAreaId === $issueArea->id ? 'true' : 'false' }}"
                         >
-                            <span class="text-base leading-none {{ $activeIssueAreaId === $issueArea->id ? 'text-white' : 'text-emerald-600' }}">•</span>
+                            <span class="size-1.5 rounded-full {{ $activeIssueAreaId === $issueArea->id ? 'bg-white' : 'bg-emerald-500' }}"></span>
                             <span>{{ $issueArea->name }}</span>
                         </button>
                     @empty
                         <flux:text variant="subtle">{{ __('No categories yet.') }}</flux:text>
                     @endforelse
                 </div>
-            </flux:card>
+            </div>
         </div>
     </div>
 </div>

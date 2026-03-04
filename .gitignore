@@ -25,8 +25,12 @@ organizations.csv
 scrapers.csv
 
 # IDE / agent tooling
+.agents/
+.claude/
+.codex/
 .cursor/
 .junie/
+.kiro/
 data.ms/
 .mcp.json
 

@@ -116,7 +116,7 @@ class Dashboard extends Component
         $this->conversationId = null;
         session()->forget($this->conversationSessionKey());
         $this->messages = [];
-        $this->dispatch('chat-updated');
+        $this->dispatch('chat-reset');
     }
 
     public function applyPrompt(string $prompt): void

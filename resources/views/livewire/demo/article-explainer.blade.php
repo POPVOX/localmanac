@@ -77,18 +77,24 @@
                             {{ __('Where we are in the process') }}
                         </flux:text>
 
-                        <div class="flex flex-col gap-6">
+                        <flux:timeline>
                             @foreach ($processTimelineItems as $item)
-                                <div class="relative flex gap-4 pb-6 last:pb-0">
-                                    <div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-2 {{ $this->processTimelineStatusClasses($item['status']) }}">
-                                        @php
-                                            $statusIcon = $this->processTimelineStatusIcon($item['status']);
-                                        @endphp
+                                @php
+                                    $fluxStatus = match ($item['status']) {
+                                        'completed' => 'complete',
+                                        'current' => 'current',
+                                        default => 'incomplete',
+                                    };
+                                    $statusIcon = $this->processTimelineStatusIcon($item['status']);
+                                @endphp
+                                <flux:timeline.item :status="$fluxStatus">
+                                    <flux:timeline.indicator :status="$fluxStatus">
                                         @if ($statusIcon)
                                             <flux:icon :icon="$statusIcon" variant="micro" class="size-4" />
                                         @endif
-                                    </div>
-                                    <div class="flex flex-1 flex-col gap-1">
+                                    </flux:timeline.indicator>
+
+                                    <flux:timeline.content :status="$fluxStatus">
                                         <div class="flex flex-wrap items-center gap-2">
                                             <flux:text class="font-medium">{{ $item['label'] }}</flux:text>
                                             @if ($item['badge_text'])
@@ -105,13 +111,10 @@
                                         @if ($item['note'])
                                             <flux:text variant="subtle">{{ $item['note'] }}</flux:text>
                                         @endif
-                                    </div>
-                                    @if (! $loop->last)
-                                        <span class="absolute left-4 top-9 h-full w-px bg-zinc-200 dark:bg-zinc-700"></span>
-                                    @endif
-                                </div>
+                                    </flux:timeline.content>
+                                </flux:timeline.item>
                             @endforeach
-                        </div>
+                        </flux:timeline>
                     </div>
                 @endif
 
