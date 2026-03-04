@@ -1,12 +1,15 @@
 <?php
 
-use Livewire\Livewire;
 use App\Models\User;
+use Livewire\Livewire;
 
 test('profile page is displayed', function () {
     $this->actingAs($user = User::factory()->create());
 
-    $this->get(route('profile.edit'))->assertOk();
+    $this->get(route('profile.edit'))
+        ->assertOk()
+        ->assertDontSee(route('two-factor.show'), false)
+        ->assertDontSee(route('appearance.edit'), false);
 });
 
 test('profile information can be updated', function () {
