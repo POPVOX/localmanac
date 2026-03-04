@@ -6,9 +6,7 @@ use App\Models\ArticleBody;
 use App\Models\City;
 use Illuminate\Support\Facades\Queue;
 
-it('queues enrichment for articles with enough text', function () {
-    config()->set('enrichment.min_cleaned_text_chars', 10);
-
+it('queues enrichment for articles with non-empty text', function () {
     $city = City::create([
         'name' => 'Backfill City',
         'slug' => 'backfill-city',
@@ -28,16 +26,30 @@ it('queues enrichment for articles with enough text', function () {
         'extraction_status' => 'success',
     ]);
 
+    $shortButEligible = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Short Text',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $shortButEligible->id,
+        'cleaned_text' => 'short',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
     $ineligible = Article::create([
         'city_id' => $city->id,
-        'title' => 'Too Short',
+        'title' => 'Empty Text',
         'status' => 'published',
         'content_type' => 'html',
     ]);
 
     ArticleBody::create([
         'article_id' => $ineligible->id,
-        'cleaned_text' => 'short',
+        'cleaned_text' => '   ',
         'extracted_at' => now(),
         'extraction_status' => 'success',
     ]);
@@ -48,6 +60,10 @@ it('queues enrichment for articles with enough text', function () {
 
     Queue::assertPushed(EnrichArticle::class, function (EnrichArticle $job) use ($eligible) {
         return $job->articleId === $eligible->id;
+    });
+
+    Queue::assertPushed(EnrichArticle::class, function (EnrichArticle $job) use ($shortButEligible) {
+        return $job->articleId === $shortButEligible->id;
     });
 
     Queue::assertNotPushed(EnrichArticle::class, function (EnrichArticle $job) use ($ineligible) {

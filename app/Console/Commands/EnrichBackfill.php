@@ -21,7 +21,7 @@ class EnrichBackfill extends Command
      *
      * @var string
      */
-    protected $description = 'Queue enrichment for articles with extractable text';
+    protected $description = 'Queue enrichment for articles with non-empty text';
 
     /**
      * Execute the console command.
@@ -55,13 +55,12 @@ class EnrichBackfill extends Command
 
     private function eligibleArticlesQuery(): Builder
     {
-        $minChars = (int) config('enrichment.min_cleaned_text_chars', 800);
         $cityOption = $this->option('city');
 
         $query = Article::query()
-            ->whereHas('body', function ($query) use ($minChars): void {
+            ->whereHas('body', function ($query): void {
                 $query->whereNotNull('cleaned_text')
-                    ->whereRaw('length(cleaned_text) >= ?', [$minChars]);
+                    ->whereRaw('length(trim(cleaned_text)) > 0');
             })
             ->orderBy('id');
 

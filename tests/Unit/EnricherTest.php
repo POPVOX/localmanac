@@ -225,3 +225,178 @@ it('merges enrichment results when the entity call succeeds', function () {
         ->and($payload['enrichment']['confidence'])->toBe(0.69)
         ->and($payload['confidence'])->toBe(0.88);
 });
+
+it('enriches short cleaned text instead of returning an empty payload', function () {
+    config()->set('enrichment.enabled', true);
+    config()->set('enrichment.min_cleaned_text_chars', 800);
+
+    $city = City::create([
+        'name' => 'Short Text City',
+        'slug' => 'short-text-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Short civic update',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => 'Bond election vote is Tuesday.',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    CivicAnalysisAgent::fake([
+        [
+            'analysis' => [
+                'dimensions' => [
+                    'comprehensibility' => 0.5,
+                    'orientation' => 0.4,
+                    'representation' => 0.3,
+                    'agency' => 0.6,
+                    'relevance' => 0.7,
+                    'timeliness' => 0.8,
+                ],
+                'justifications' => [
+                    'comprehensibility' => 'Short but clear.',
+                    'orientation' => 'Explains what to watch.',
+                    'representation' => 'Mentions voters.',
+                    'agency' => 'Contains civic action.',
+                    'relevance' => 'Local election context.',
+                    'timeliness' => 'Upcoming date.',
+                ],
+                'opportunities' => [],
+                'confidence' => 0.76,
+            ],
+            'process_timeline' => [
+                'items' => [],
+                'current_key' => null,
+            ],
+            'confidence' => 0.76,
+        ],
+    ]);
+    EntityEnrichmentAgent::fake([
+        [
+            'enrichment' => [
+                'people' => [],
+                'organizations' => [],
+                'locations' => [],
+                'keywords' => [
+                    [
+                        'keyword' => 'bond election',
+                        'confidence' => 0.7,
+                        'evidence' => [
+                            ['quote' => 'Bond election vote is Tuesday.', 'start' => 0, 'end' => 30],
+                        ],
+                    ],
+                ],
+                'issue_areas' => [],
+                'confidence' => 0.7,
+            ],
+            'confidence' => 0.7,
+        ],
+    ]);
+    ExplainerAgent::fake([
+        [
+            'explainer' => [
+                'whats_happening' => 'Voters will decide on a bond election.',
+                'why_it_matters' => 'It affects school funding.',
+                'key_details' => ['Election on Tuesday'],
+                'what_to_watch' => ['Final vote totals'],
+                'evidence' => null,
+            ],
+        ],
+    ]);
+
+    $payload = app(Enricher::class)->enrich($article->fresh());
+
+    expect($payload['analysis']['confidence'])->toBe(0.76)
+        ->and($payload['enrichment']['keywords'])->toHaveCount(1)
+        ->and($payload['explainer']['whats_happening'])->toBe('Voters will decide on a bond election.');
+});
+
+it('uses title and summary as fallback text when cleaned text is empty', function () {
+    config()->set('enrichment.enabled', true);
+
+    $city = City::create([
+        'name' => 'Fallback City',
+        'slug' => 'fallback-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'City updates park plan',
+        'summary' => 'Council approved a revised parks maintenance timeline.',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => '',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    CivicAnalysisAgent::fake([
+        [
+            'analysis' => [
+                'dimensions' => [
+                    'comprehensibility' => 0.5,
+                    'orientation' => 0.5,
+                    'representation' => 0.4,
+                    'agency' => 0.6,
+                    'relevance' => 0.7,
+                    'timeliness' => 0.7,
+                ],
+                'justifications' => [
+                    'comprehensibility' => 'Clear summary.',
+                    'orientation' => 'Includes what changed.',
+                    'representation' => 'References council decision.',
+                    'agency' => 'Residents can track updates.',
+                    'relevance' => 'Local civic impact.',
+                    'timeliness' => 'Recent action.',
+                ],
+                'opportunities' => [],
+                'confidence' => 0.71,
+            ],
+            'process_timeline' => [
+                'items' => [],
+                'current_key' => null,
+            ],
+            'confidence' => 0.71,
+        ],
+    ]);
+    EntityEnrichmentAgent::fake([
+        [
+            'enrichment' => [
+                'people' => [],
+                'organizations' => [],
+                'locations' => [],
+                'keywords' => [],
+                'issue_areas' => [],
+                'confidence' => 0.6,
+            ],
+            'confidence' => 0.6,
+        ],
+    ]);
+    ExplainerAgent::fake([
+        [
+            'explainer' => [
+                'whats_happening' => 'The city approved an updated plan.',
+                'why_it_matters' => 'Residents will see scheduling changes.',
+                'key_details' => null,
+                'what_to_watch' => null,
+                'evidence' => null,
+            ],
+        ],
+    ]);
+
+    $payload = app(Enricher::class)->enrich($article->fresh());
+
+    expect($payload['analysis']['confidence'])->toBe(0.71)
+        ->and($payload['explainer']['why_it_matters'])->toBe('Residents will see scheduling changes.');
+});

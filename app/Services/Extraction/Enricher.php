@@ -67,6 +67,10 @@ class Enricher
         $cleanedText = Utf8Sanitizer::sanitize(trim((string) ($article->body?->cleaned_text ?? '')));
 
         if ($cleanedText === '') {
+            $cleanedText = $this->fallbackText($article);
+        }
+
+        if ($cleanedText === '') {
             return $this->emptyPayload();
         }
 
@@ -74,7 +78,11 @@ class Enricher
         $originalLength = mb_strlen($cleanedText);
 
         if ($originalLength < $minChars) {
-            return $this->emptyPayload();
+            Log::debug('Enrichment proceeding with short article text.', [
+                'article_id' => $article->id,
+                'original_length' => $originalLength,
+                'minimum_length' => $minChars,
+            ]);
         }
 
         $maxChars = (int) config('enrichment.max_text_chars', 18000);
@@ -513,6 +521,16 @@ PROMPT;
             'process_timeline' => $this->normalizeProcessTimeline(Arr::get($structured, 'process_timeline', [])),
             'confidence' => $this->clampConfidence(Arr::get($structured, 'confidence', 0.0)),
         ];
+    }
+
+    private function fallbackText(Article $article): string
+    {
+        $title = Utf8Sanitizer::sanitize(trim((string) $article->title));
+        $summary = Utf8Sanitizer::sanitize(trim((string) ($article->summary ?? '')));
+
+        $parts = array_values(array_filter([$title, $summary], fn (string $value): bool => $value !== ''));
+
+        return implode("\n\n", $parts);
     }
 
     /**
