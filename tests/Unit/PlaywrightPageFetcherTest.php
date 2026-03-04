@@ -118,3 +118,43 @@ JS);
         ->and($result['body'])->toContain('|0|3|Mozilla/5.0')
         ->and($result['body'])->toContain('|1|14|750');
 });
+
+it('ignores placeholder proxy and storage state values', function () {
+    $nodeStub = makeExecutableScript('node-stub-env-placeholder.sh', <<<'SH'
+#!/bin/sh
+printf '{"url":"https://example.com/final","html":"<html><body>%s|%s|%s|%s|%s</body></html>"}' \
+  "$PLAYWRIGHT_STORAGE_STATE_PATH" \
+  "$PLAYWRIGHT_PROXY_SERVER" \
+  "$PLAYWRIGHT_PROXY_USERNAME" \
+  "$PLAYWRIGHT_PROXY_PASSWORD" \
+  "$PLAYWRIGHT_PROXY_BYPASS"
+SH);
+
+    $scriptStub = makeExecutableScript('playwright-script-stub-env-placeholder.mjs', <<<'JS'
+// Placeholder script file required by PlaywrightPageFetcher.
+JS);
+
+    config()->set('chat.playwright_node_binary', $nodeStub);
+    config()->set('chat.playwright_script', $scriptStub);
+    config()->set('chat.playwright_timeout', 1000);
+    config()->set('chat.playwright_storage_state_path', 'path/to/storage/state');
+    config()->set('chat.playwright_proxy_server', 'http://proxy.example.com:8080');
+    config()->set('chat.playwright_proxy_username', 'user');
+    config()->set('chat.playwright_proxy_password', 'pass');
+    config()->set('chat.playwright_proxy_bypass', 'localhost');
+
+    $result = app(PlaywrightPageFetcher::class)->fetch('https://example.com/start', [
+        'storage_state_path' => 'path/to/storage/state',
+        'proxy' => [
+            'server' => 'http://proxy.example.com:8080',
+            'username' => 'user',
+            'password' => 'pass',
+            'bypass' => 'localhost',
+        ],
+    ]);
+
+    expect($result)->not->toBeNull()
+        ->and($result['body'])->not->toContain('path/to/storage/state')
+        ->and($result['body'])->not->toContain('proxy.example.com')
+        ->and($result['body'])->toContain('<body>||||</body>');
+});

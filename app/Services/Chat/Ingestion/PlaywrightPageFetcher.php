@@ -311,6 +311,9 @@ class PlaywrightPageFetcher
         }
 
         $trimmed = trim($rawPath);
+        if ($this->isPlaceholderStorageStatePath($trimmed)) {
+            return null;
+        }
 
         if (str_starts_with($trimmed, DIRECTORY_SEPARATOR)) {
             return $trimmed;
@@ -385,6 +388,10 @@ class PlaywrightPageFetcher
         }
 
         if ($server === null) {
+            return null;
+        }
+
+        if ($this->isPlaceholderProxyServer($server)) {
             return null;
         }
 
@@ -482,5 +489,38 @@ class PlaywrightPageFetcher
         }
 
         return max(100, min(10000, (int) $value));
+    }
+
+    private function isPlaceholderProxyServer(string $server): bool
+    {
+        $trimmed = trim($server);
+
+        if ($trimmed === '') {
+            return false;
+        }
+
+        $host = parse_url($trimmed, PHP_URL_HOST);
+
+        if (! is_string($host) || trim($host) === '') {
+            return false;
+        }
+
+        $normalizedHost = mb_strtolower(trim($host));
+
+        return $normalizedHost === 'proxy.example.com'
+            || str_ends_with($normalizedHost, '.example.com');
+    }
+
+    private function isPlaceholderStorageStatePath(string $path): bool
+    {
+        $normalized = str_replace('\\', '/', mb_strtolower(trim($path)));
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        return str_contains($normalized, 'path/to/storage/state')
+            || str_contains($normalized, '/path/to/')
+            || str_contains($normalized, 'your-storage-state');
     }
 }

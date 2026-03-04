@@ -78,6 +78,7 @@ class ScraperConfigAiRefiner
             'Generate a valid scraper config for the supported profiles only.',
             'Supported profiles: rss, wichitadocumenters, generic_listing, wichita_archive_pdf_list.',
             'Do not invent new keys outside schema.',
+            'Never output placeholder values like `proxy.example.com`, `path/to/storage/state`, `user`, or `pass`.',
             'For html profiles, prefer robust configs with specific selectors and fetch.playwright settings.',
             'For infinite-scroll or lazy-loaded listings, set fetch.playwright.auto_scroll to true.',
             'Avoid broad selectors like `article a` when more specific title-link selectors exist.',
@@ -232,6 +233,13 @@ class ScraperConfigAiRefiner
         $proxy = Arr::get($config, 'fetch.playwright.proxy');
         if (! is_array($proxy) || $proxy === [] || ! is_string($proxy['server'] ?? null) || trim((string) $proxy['server']) === '') {
             Arr::forget($config, 'fetch.playwright.proxy');
+        } elseif ($this->isPlaceholderProxyServer((string) $proxy['server'])) {
+            Arr::forget($config, 'fetch.playwright.proxy');
+        }
+
+        $storageStatePath = Arr::get($config, 'fetch.playwright.storage_state_path');
+        if (is_string($storageStatePath) && $this->isPlaceholderStorageStatePath($storageStatePath)) {
+            Arr::forget($config, 'fetch.playwright.storage_state_path');
         }
 
         return $config;
@@ -277,5 +285,38 @@ class ScraperConfigAiRefiner
         }
 
         return trim(mb_strtolower($host));
+    }
+
+    private function isPlaceholderProxyServer(string $server): bool
+    {
+        $trimmed = trim($server);
+
+        if ($trimmed === '') {
+            return false;
+        }
+
+        $host = parse_url($trimmed, PHP_URL_HOST);
+
+        if (! is_string($host) || trim($host) === '') {
+            return false;
+        }
+
+        $normalizedHost = mb_strtolower(trim($host));
+
+        return $normalizedHost === 'proxy.example.com'
+            || str_ends_with($normalizedHost, '.example.com');
+    }
+
+    private function isPlaceholderStorageStatePath(string $path): bool
+    {
+        $normalized = str_replace('\\', '/', mb_strtolower(trim($path)));
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        return str_contains($normalized, 'path/to/storage/state')
+            || str_contains($normalized, '/path/to/')
+            || str_contains($normalized, 'your-storage-state');
     }
 }

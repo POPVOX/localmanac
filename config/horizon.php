@@ -253,7 +253,7 @@ return [
                 'maxProcesses' => 2,
             ],
             'supervisor-embedding' => [
-                'maxProcesses' => 2,
+                'maxProcesses' => 5,
             ],
         ],
 
