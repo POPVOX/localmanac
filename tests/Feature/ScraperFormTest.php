@@ -6,6 +6,7 @@ use App\Models\Scraper;
 use App\Models\User;
 use App\Services\Ingestion\Assistant\ScraperAssistantSourceFetcher;
 use App\Services\Ingestion\Assistant\ScraperConfigDrafter;
+use App\Services\Ingestion\Assistant\ScraperConfigPreviewer;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
@@ -291,4 +292,39 @@ it('does not persist fetched source html in component state after draft generati
         ->assertSet('assistantHasDraft', true)
         ->assertSet('assistantFetchRenderer', 'http')
         ->assertSet('assistantFetchedHtml', '');
+});
+
+it('formats assistant preview published dates and constrains preview table width', function () {
+    $user = User::factory()->create();
+    $city = City::create(['name' => 'Date City', 'slug' => 'date-city', 'timezone' => 'America/Chicago']);
+
+    $previewer = Mockery::mock(ScraperConfigPreviewer::class);
+    $previewer->shouldReceive('preview')
+        ->once()
+        ->andReturn([
+            'items' => [
+                [
+                    'title' => 'Very long title for formatting test',
+                    'source_url' => 'https://example.com/very/long/path/that/keeps/going/without/spaces',
+                    'content_type' => 'full',
+                    'published_at' => '2026-03-04T12:21:23+00:00',
+                    'summary' => null,
+                ],
+            ],
+            'warnings' => [],
+            'valid' => true,
+        ]);
+    app()->instance(ScraperConfigPreviewer::class, $previewer);
+
+    Livewire::actingAs($user)->test(ScraperForm::class)
+        ->set('cityId', $city->id)
+        ->set('type', 'html')
+        ->set('sourceUrl', 'https://example.com/feed')
+        ->set('assistantHasDraft', true)
+        ->set('assistantDraftConfig', ['profile' => 'generic_listing'])
+        ->call('previewGeneratedConfig')
+        ->assertSet('assistantPreviewItems.0.published_at', 'Mar 4, 2026')
+        ->assertDontSee('2026-03-04T12:21:23+00:00')
+        ->assertSee('Mar 4, 2026')
+        ->assertSeeHtml('w-full table-fixed');
 });

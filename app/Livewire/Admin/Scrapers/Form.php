@@ -271,7 +271,7 @@ class Form extends Component
                 scraperId: $this->scraper?->id,
             );
 
-            $this->assistantPreviewItems = $preview['items'];
+            $this->assistantPreviewItems = $this->formatAssistantPreviewItems($preview['items']);
             $this->assistantPreviewWarnings = $preview['warnings'];
             $this->assistantPreviewValid = (bool) $preview['valid'];
             $this->assistantPreviewError = null;
@@ -645,6 +645,53 @@ class Form extends Component
         $this->assistantPreviewValid = false;
         $this->assistantPreviewError = null;
         $this->assistantPreviewHash = null;
+    }
+
+    /**
+     * @param  array<int, array<string, string|null>>  $items
+     * @return array<int, array<string, string|null>>
+     */
+    private function formatAssistantPreviewItems(array $items): array
+    {
+        $timezone = $this->resolveAssistantPreviewTimezone();
+
+        return array_map(function (array $item) use ($timezone): array {
+            $item['published_at'] = $this->formatAssistantPreviewPublishedAt($item['published_at'] ?? null, $timezone);
+
+            return $item;
+        }, $items);
+    }
+
+    private function resolveAssistantPreviewTimezone(): string
+    {
+        if ($this->cityId === null) {
+            return config('app.timezone', 'UTC');
+        }
+
+        $timezone = City::query()
+            ->whereKey($this->cityId)
+            ->value('timezone');
+
+        if (! is_string($timezone) || trim($timezone) === '') {
+            return config('app.timezone', 'UTC');
+        }
+
+        return $timezone;
+    }
+
+    private function formatAssistantPreviewPublishedAt(mixed $value, string $timezone): ?string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse($value)
+                ->setTimezone($timezone)
+                ->format('M j, Y');
+        } catch (Throwable) {
+            return $value;
+        }
     }
 
     /**

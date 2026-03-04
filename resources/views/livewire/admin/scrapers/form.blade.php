@@ -199,26 +199,36 @@
                 @endif
 
                 @if ($assistantPreviewItems !== [])
-                    <flux:table>
+                    <flux:table class="w-full table-fixed">
                         <flux:table.columns>
-                            <flux:table.column>{{ __('Title') }}</flux:table.column>
-                            <flux:table.column>{{ __('Source URL') }}</flux:table.column>
-                            <flux:table.column>{{ __('Type') }}</flux:table.column>
-                            <flux:table.column>{{ __('Published') }}</flux:table.column>
+                            <flux:table.column class="w-[46%]">{{ __('Title') }}</flux:table.column>
+                            <flux:table.column class="w-[34%]">{{ __('Source URL') }}</flux:table.column>
+                            <flux:table.column class="w-[20%]">{{ __('Published') }}</flux:table.column>
                         </flux:table.columns>
                         <flux:table.rows>
                             @foreach ($assistantPreviewItems as $item)
                                 <flux:table.row>
-                                    <flux:table.cell>{{ $item['title'] ?? '—' }}</flux:table.cell>
-                                    <flux:table.cell>
-                                        @if (! empty($item['source_url']))
-                                            <flux:link href="{{ $item['source_url'] }}" target="_blank">{{ \Illuminate\Support\Str::limit($item['source_url'], 60) }}</flux:link>
+                                    <flux:table.cell class="max-w-0 align-top">
+                                        @if (! empty($item['title']))
+                                            <span class="block truncate" title="{{ $item['title'] }}">
+                                                {{ \Illuminate\Support\Str::limit($item['title'], 64) }}
+                                            </span>
                                         @else
                                             <flux:text variant="subtle">{{ __('—') }}</flux:text>
                                         @endif
                                     </flux:table.cell>
-                                    <flux:table.cell>{{ $item['content_type'] ?? '—' }}</flux:table.cell>
-                                    <flux:table.cell>{{ $item['published_at'] ?? '—' }}</flux:table.cell>
+                                    <flux:table.cell class="max-w-0 align-top">
+                                        @if (! empty($item['source_url']))
+                                            <flux:link href="{{ $item['source_url'] }}" target="_blank" class="block truncate" title="{{ $item['source_url'] }}">
+                                                {{ \Illuminate\Support\Str::of($item['source_url'])->replaceFirst('https://', '')->replaceFirst('http://', '')->limit(44) }}
+                                            </flux:link>
+                                        @else
+                                            <flux:text variant="subtle">{{ __('—') }}</flux:text>
+                                        @endif
+                                    </flux:table.cell>
+                                    <flux:table.cell class="align-top whitespace-nowrap">
+                                        {{ $item['published_at'] ?? '—' }}
+                                    </flux:table.cell>
                                 </flux:table.row>
                             @endforeach
                         </flux:table.rows>
