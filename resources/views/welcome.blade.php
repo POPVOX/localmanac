@@ -63,7 +63,7 @@
                             {{ __('Built for civic clarity') }}
                         </flux:text>
 
-                        <flux:heading size="xl" level="1" class="max-w-2xl text-balance text-4xl leading-tight sm:text-5xl">
+                        <flux:heading size="xl" level="1" class="max-w-2xl text-balance font-serif text-4xl leading-tight text-green-900 sm:text-5xl">
                             {{ __('LocAlmanac helps your community keep up with what matters locally.') }}
                         </flux:heading>
 

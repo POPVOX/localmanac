@@ -10,6 +10,8 @@
 
 /* Re-assign Flux's gray of choice... */
 @theme {
+    --font-serif: 'Lora', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
+
     --color-zinc-50: var(--color-stone-50);
     --color-zinc-100: var(--color-stone-100);
     --color-zinc-200: var(--color-stone-200);
