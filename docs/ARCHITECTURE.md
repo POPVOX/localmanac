@@ -1,185 +1,89 @@
-# LocAlmanac Architecture (V1)
+# Localmanac Architecture (Current)
 
-## Current State (as of 2026-01-14)
-- Article + calendar ingestion are implemented end-to-end (scrapers + event sources, runner, admin, demo calendar).
-- Enrichment and analysis run via Prism multi-pass prompts with evidence packs and explainer projections.
+Updated: March 2026
 
-## Goals
-LocAlmanac is a civic information platform that ingests public sources (news, agendas, minutes, etc.), normalizes them into structured entities, and answers questions with citations.
+## System Goal
 
-V1 prioritizes:
-- reliable ingestion + provenance
-- entity resolution (aliases)
-- “AI outputs are claims” (not facts)
-- search as a projection (not the database)
+Localmanac provides city-scoped civic awareness by combining:
 
-## Non-Goals (V1)
-- complex UI/UX polish
-- multi-city federation (we support `city_id` everywhere, but ship with 1 city)
-- a full knowledge graph engine
-- perfect entity resolution (we start deterministic; improve iteratively)
+- structured ingestion from local sources
+- enrichment and projection of article meaning
+- evidence-backed retrieval and answer synthesis
+- operational controls in super-admin interfaces
 
----
+## High-Level Runtime Flow
 
-## Core Principles
-1. **Database is source of truth.** Search is derived.
-2. **Provenance is mandatory.** No orphaned content.
-3. **AI writes claims, never facts directly.**
-4. **Models are dumb.** Orchestration lives in Services/Actions.
-5. **City scoping is explicit.** Every query is city-aware.
+1. Ingestion writes canonical content records.
+2. Enrichment jobs analyze article text and write derived outputs.
+3. Projection layers materialize enrichment outputs for UI and retrieval.
+4. Search and chat retrieve city-scoped evidence.
+5. Livewire UIs render dashboards, demos, and admin workflows.
 
----
+## Primary Data Domains
 
-## Data Model Overview
-
-### City / Tenancy
 - `cities`
-- `city_id` is required on city-scoped records.
-- Taxonomies may be global later, but V1 assumes city-scoped unless explicitly global.
+- `organizations`, `people`, `locations`, `entity_aliases`
+- `scrapers`, `scraper_runs`, `articles`, `article_bodies`, `article_sources`
+- `event_sources`, `event_ingestion_runs`, `events`, `event_source_items`
+- `claims`, `article_entities`, `article_issue_areas`, `keywords`, `article_keywords`
+- `article_analyses`, `civic_actions`, `process_timeline_items`, `article_explainers`
+- `chat_sources`, `chat_source_pages`, `chat_source_chunks`
+- `site_feedback`
 
-### Content & provenance
-- `articles` contain metadata (title, summary, published_at, canonical_url, content_hash, status).
-- `article_bodies` store raw + cleaned text (and optionally raw_html).
-- `article_sources` store source URLs + type and optionally organization attribution.
+## Authorization Model
 
-### Events / Calendar
-- `event_sources` define city-scoped calendar feeds + config (source_type, frequency, config).
-- `event_ingestion_runs` track per-source ingestion runs and outcomes.
-- `events` store normalized event records (starts_at/ends_at, all_day, location, event_url, source_hash).
-- `event_source_items` link events to source payloads + external IDs.
-- City scoping is explicit via `event_sources.city_id` and `events.city_id`.
-- Ingestion sources include ics, rss, json/json_api (profile registry), and html calendars (profile registry).
-- Timezone for parsing defaults to `event_sources.config.timezone`, then `cities.timezone`, and is stored in `timestampTz` fields.
+Authorization gates are explicit and super-admin based:
 
-### Entities
-- `organizations`, `people`, `locations`
-- `entity_aliases` provides alternative names for resolution (polymorphic by entity_type/entity_id).
+- `access-admin`
+- `manage-raw-scraper-config`
 
-### Roles (time-scoped truth)
-- `role_types`, `roles`
-- roles are time-bounded (start_date/end_date) and optionally “active”.
-- constraints are enforced at DB level when possible (Postgres partial unique indexes), otherwise in application logic + tests.
+Both gates resolve through `User::isSuperAdmin()`.
 
-### Taxonomy
-- `issue_areas` supports hierarchy via `parent_id`.
-- `tags` supports loose thematic grouping.
+## Application Surfaces
 
-### Claims (AI / extraction outputs)
-- `claims` are structured assertions with provenance:
-  - subject_type/subject_id
-  - predicate
-  - object_type/object_id OR value_json
-  - confidence, method, model, prompt_version
-  - source_article_id (required for AI extraction claims)
-  - approval fields (approved_at / rejected_at)
+- Public/demo routes: home, article explainer, demo calendar, questions
+- Authenticated user surface: dashboard with article search + chat
+- Admin surface: cities, organizations, scrapers, event sources, events, chat sources, feedback
+- API endpoint: `POST /ask` (throttled via `ask` rate limiter)
 
-Claims are the bridge between unstructured content and structured entities.
+## Search and Retrieval
 
----
+- Scout is used for article search and chat-source retrieval.
+- Dashboard article search uses Scout candidate retrieval and deterministic ordering, with SQL fallback when Scout fails.
+- Chat source selection uses Scout first, then priority fallback from DB.
 
-## Application Layers
+## Dashboard Article Discovery
 
-### 1) Ingestion (Scrape → Store)
-- Inputs: scraper config (articles) and event source config (calendar)
-- Outputs: Article + ArticleBody + ArticleSource (+ ScraperRun record) and Events + EventSourceItem + EventIngestionRun
-- Responsibilities:
-  - fetching (rss/html/pdf/api) and calendars (ics/rss/json/html)
-  - parsing
-  - dedupe (canonical URL + content hash + source UID)
-  - writing normalized content to DB
+Implemented dashboard article behavior includes:
 
-**Rule:** Ingestion may create entities only if explicitly configured (e.g., known organization attribution), otherwise entity creation happens during curation/resolution.
+- full-text search over article-indexed content
+- city-scoped result filtering
+- issue-area filtering
+- paginated feed/results
+- SQL-like fallback path when Scout retrieval throws
 
-### 2) Extraction (Text → Claims)
-- Inputs: ArticleBody.cleaned_text
-- Outputs: Claims only (no facts)
-- Responsibilities:
-  - identify mentions (people/orgs) and topic hints (issue areas)
-  - record provenance: method/model/prompt_version/confidence
-  - never “auto-create” entities without a human/curation path
+## Queue and Job Topology
 
-V1 may start with heuristics; AI is introduced behind this interface.
+- `analysis` queue: enrichment and scraper-run jobs
+- `ingestion` queue: chat source crawl jobs (configurable)
+- `embedding` queue: embedding jobs (configurable)
 
-### 3) Resolution (Mentions → Entities)
-- Inputs: a mention string + city_id + context
-- Outputs: a resolved entity OR a ranked candidate list
-- Strategy:
-  - exact match on slug/name
-  - alias match (entity_aliases)
-  - optional fuzzy match later (Postgres `pg_trgm`)
-- Resolution should be deterministic whenever possible.
+Recurring schedule commands:
 
-### 4) Query + Answering
-- `ContextBuilder`:
-  - resolves city
-  - resolves entities
-  - gathers relevant articles + sources + roles + approved claims
-- `AnswerSynthesizer`:
-  - produces answer text
-  - returns citations (URLs + titles)
-  - never invents sources; citations must map to stored `article_sources`
+- `scrape:schedule`
+- `calendar:schedule`
 
-**Rule:** The LLM receives a bounded context bundle and returns a structured answer + citations.
+## Reliability Safeguards
 
----
+- Sequence drift auto-recovery for selected Postgres PK sequences
+- Anti-bot detection with Playwright fallback paths in fetchers
+- Deterministic fallback answers and citations in chat when model output is insufficient
+- Configurable ingestion quality guard for low-quality article suppression
 
-## Search
-We use Laravel Scout with a dedicated search engine (Meilisearch preferred).
-- Indexed: articles (and later orgs/people)
-- Search is used for discovery and retrieval ranking.
-- The DB remains the authority for joins, roles, and facts.
+## Out of Scope in This Doc
 
-**Rule:** never rely on the search index for truth; only for finding candidate records.
+- Per-source selector tuning details
+- Prompt-level enrichment schema details
+- Product roadmap decisions
 
----
-
-## Code Organization (Laravel)
-Recommended namespaces:
-- `App\Domain\*` (optional: domain models/value objects)
-- `App\Services\Ingestion\*`
-- `App\Services\Extraction\*`
-- `App\Services\Resolution\*`
-- `App\Services\Query\*`
-- `App\Services\LLM\*`
-- `App\Jobs\*` (thin: call services)
-- `App\Console\Commands\*` (thin: call services)
-
-**Rule:** Controllers/Livewire/Commands should orchestrate, not implement business logic.
-
----
-
-## Testing Strategy (V1)
-- Unit tests:
-  - dedupe logic
-  - parsers (with fixtures)
-  - resolver behavior (aliases)
-- Integration tests:
-  - ingestion end-to-end with mocked HTTP
-  - extraction writing claims
-  - context builder returns correct citations
-
-**Rule:** Every pipeline stage should be testable without network calls.
-
----
-
-## Security & Safety
-- Never store secrets in repo.
-- Scraped content is untrusted: sanitize before display.
-- Rate-limit public endpoints.
-- Log IDs, not raw content.
-
----
-
-## Operational Notes
-- Postgres is the primary DB (RDS in production).
-- Background work uses queues for scrapers/extraction.
-- All ingestion and extraction operations create audit records (scraper_runs, claims provenance).
-
----
-
-## “Stop the Line” Rules
-If any of these happen, treat as a bug:
-- an Article exists without a Source
-- an AI/extraction writes directly to facts tables instead of Claims
-- city scoping is missing from a query touching city-scoped tables
-- citations returned that do not map to stored source URLs
+See dedicated docs for those topics.

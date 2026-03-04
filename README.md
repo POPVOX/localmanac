@@ -1,32 +1,63 @@
 # Localmanac
 
-Localmanac is a city-scoped civic data system that ingests local government documents and public event calendars, normalizes them into structured records, and exposes them through administrative and public-facing interfaces.
+Localmanac is a city-scoped civic information platform. It ingests local articles and calendar events, enriches article content with structured analysis, and exposes evidence-backed answers through dashboard chat and public/demo surfaces.
 
-## What Exists
+## Current System (March 2026)
 
-### Articles
-- Ingestion from RSS, HTML, PDF, and OCR sources
-- Persistent raw bodies and normalized article records
-- Enrichment pipeline producing explainers, timelines, participation actions, and entities
-- Admin UI for managing sources, scrapers, and articles
-- Public-facing article views
+- Article ingestion for `rss` and `html` scrapers, including profile-based HTML fetchers (`generic_listing`, `wichitadocumenters`, `wichita_archive_pdf_list`)
+- Calendar ingestion for `ics`, `rss`, `json/json_api`, and `html` event sources
+- Queue-driven enrichment pipeline with civic analysis, entity extraction, process timeline projection, and explainer projection
+- City-scoped article search on dashboard with Scout-backed retrieval and SQL fallback
+- Ask API (`POST /ask`) with citations, plus dashboard chat with streaming and conversation memory for authenticated users
+- Super-admin-only admin console for cities, organizations, scrapers, events, event sources, chat sources, and feedback review
+- Site feedback capture widget for authenticated users (`site_feedback`)
 
-### Calendar Events
-- Ingestion from ICS, JSON APIs, RSS, and HTML calendars
-- City-scoped event normalization and de-duplication
-- Admin UI for event sources and ingestion runs
-- Public-facing calendar views
+## Quick Start
 
-### Administration
-- City management
-- Organization management
-- Article and scraper management
-- Event source and event management
+1. Install dependencies.
 
-## City Scoping
+```bash
+composer install
+npm install
+```
 
-All data is scoped by city. Wichita is the currently configured city. No city logic is hard-coded.
+2. Configure environment.
+
+```bash
+cp .env.example .env
+php artisan key:generate
+```
+
+3. Run database migrations.
+
+```bash
+php artisan migrate
+```
+
+4. Start the app.
+
+```bash
+composer run dev
+```
+
+## Useful Commands
+
+- `php artisan scrape:run {scraper}`
+- `php artisan scrape:schedule`
+- `php artisan calendar:run`
+- `php artisan calendar:schedule`
+- `php artisan enrich:article {id}`
+- `php artisan enrich:backfill`
+- `php artisan chat:ingest-sources`
+- `php artisan articles:prune-low-quality --help`
+- `php artisan users:super-admin {email}`
 
 ## Documentation
 
-Additional technical documentation lives in the `docs/` directory.
+See the docs index for current technical documentation:
+
+- [Documentation Index](docs/README.md)
+
+## City Scope
+
+All core records are city-scoped. Wichita is the default configured city in current usage, but city logic is not hard-coded to Wichita.

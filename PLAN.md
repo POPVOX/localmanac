@@ -1,149 +1,95 @@
-# LocAlmanac V1 Plan
+# Localmanac Plan (Current)
 
-## Current State (as of 2026-01-14)
-- Calendar ingestion (events) is implemented end-to-end, including sources, fetchers, runner, writer, and a demo calendar page.
-- Enrichment + analysis run in a Prism multi-pass flow with evidence packs and explainer projections.
-- Admin UI exists for scrapers and event sources/events, with claim review and alias management still pending.
+Updated: March 2026
 
-## Milestone 0 — Project baseline
-- [x] Set DB to PostgreSQL (local + env templates)
-- [x] Add Pint + Pest (or PHPUnit) + basic CI-friendly scripts
-- [x] Create `docs/` folder and add `ARCHITECTURE.md`
+## Current State Summary
 
-## Milestone 1 — Database schema (core)
-### Cities & tenancy
-- [x] Create `cities` table + City model
-- [x] Add `city_id` to all city-scoped tables from the start
+Implemented and operating:
 
-### Entities
-- [x] Create `organizations`, `people`, `locations`
-- [x] Create `entity_aliases` (polymorphic: entity_type/entity_id) + indexes
+- City-scoped article and calendar ingestion pipelines
+- Multi-pass enrichment and analysis with projections
+- Dashboard article feed/search/filter UX
+- Ask API with citations and event-aware behavior
+- Dashboard streaming chat with conversation memory
+- Super-admin-gated admin console for all operational areas
+- Site feedback capture and feedback review index
 
-### Content & provenance
-- [x] Create `articles` + `article_bodies`
-- [x] Create `article_sources`
-- [ ] Add explicit dedupe columns (future optimization; currently handled in code)
+## Milestone Status
 
-### Roles & taxonomy
-- [x] Create `role_types` + `roles` (time-scoped)
-- [x] Create `issue_areas` (hierarchy) + `tags`
+## Milestone 1: Data Model Foundations
 
-### Claims (AI outputs as claims)
-- [x] Create `claims` table (subject/predicate/object/value_json + provenance)
-- [x] Add enums/constants for the first 3 claim types:
-  - [x] article_mentions_person
-  - [x] article_mentions_org
-  - [x] article_issue_area
-- [x] Add indexes/constraints for claims:
-  - [x] index on (article_id, claim_type)
-  - [x] index on (city_id, claim_type)
-  - [x] optional: unique guard for (article_id, claim_type, subject_type, subject_id, value_hash)
+Status: Completed
 
-## Milestone 2 — Ingestion pipeline (no AI yet)
-- [x] Create `scrapers` + `scraper_runs`
-- [x] Implement `Ingestion\ScrapeRunner`
-- [x] Implement Fetchers:
-  - [x] RssFetcher
-  - [x] DocumentersFetcher (profile-based, Google Docs full-text)
-  - [x] HtmlFetcher (generic, selector-based)
-- [x] ScrapeRunner routes html fetchers by config.profile
-- [x] Implement `Ingestion\Deduplicator` (URL + hash strategy)
-- [x] Implement `Ingestion\ArticleWriter` (Article + Body + Source)
-- [x] Add a demo scraper config and seed it
-- [x] Add a command: `php artisan scrape:run {scraper}`
+- [x] Cities and city scoping across primary records
+- [x] Core entities and alias table
+- [x] Articles, article bodies, and article sources
+- [x] Event sources, events, and event source item lineage
+- [x] Claims and projection tables
 
-## Milestone 2.5 — Calendar ingestion (events)
-- [x] Create `event_sources`, `event_ingestion_runs`, `events`, `event_source_items`
-- [x] Implement `Ingestion\EventIngestionRunner` + `EventWriter`
-- [x] Implement event fetchers (ics, rss, json/json_api, html)
-- [x] Add JSON + HTML profile registries (with per-source config)
-- [x] Add admin UI for event sources and event views
-- [x] Add demo calendar page
+## Milestone 2: Ingestion
 
-## Milestone 3 — Extraction v1 (text + OCR + enrichment)
-- [x] Implement PDF text extraction + OCR fallback 
-- [x] Persist extracted full text to ArticleBody.cleaned_text
-- [x] Implement `Extraction\Extractor` (start heuristic; AI later)
-- [x] Implement `Extraction\ClaimWriter`
-- [x] Add command: `php artisan extract:article {id}`
-- [x] Ensure extraction never writes “facts” directly (claims only)
+Status: Completed
 
-### Structured enrichment (entities + keywords + issue areas)
-- [x] Implement `Extraction\Enricher` (LLM; structured JSON output)
-  - [x] People extraction (name + role/title if present + evidence spans)
-  - [x] Organization extraction (name + type guess + evidence spans)
-  - [x] Location extraction (name/address if present + evidence spans)
-  - [x] Keyword/topic extraction (normalized keywords + evidence spans)
-  - [x] Issue area suggestions (map to `issue_areas` slugs + evidence)
-- [x] Persist enrichment outputs as Claims (never directly on Articles)
-  - [x] Use `claims` as the source of truth (with evidence spans + confidence + provenance)
-  - [x] Add `Extraction\ClaimWriter` and write claims for people/orgs/locations/keywords/issue areas
-- [x] Add projection tables (derived from Claims; optional but useful for UI/search)
-  - [x] `article_entities` (article_id, entity_type, entity_id, confidence, source)
-  - [x] `article_issue_areas` (article_id, issue_area_id, confidence, source)
-  - [x] `keywords` (city_id, name, slug) + unique (city_id, slug)
-  - [x] `article_keywords` (article_id, keyword_id, confidence, source)
-- [x] Implement `Extraction\ProjectionWriter` to upsert projection tables from approved/high-confidence claims
-- [x] Dispatch enrichment automatically after `ArticleBody.cleaned_text` is written (post-extraction), with dedicated queue isolation (e.g. `enrichment`)
+- [x] Scraper runs and profile-based article ingestion
+- [x] Event source runs and calendar ingestion
+- [x] Deduplication and writer layers
+- [x] Scheduled ingestion commands for scrapers and event sources
+- [x] Sequence drift recovery for selected ingestion write paths
 
-## Milestone 3.5 — Analysis layer (summaries, tagging, civic relevance scoring)
-- [x] Create `article_analyses` table (dimension scores + final score + provenance + status)
-- [x] Implement Phase 1 heuristic scoring (fast, deterministic)
-  - [x] reading level / jargon density
-  - [x] timeliness (future dates, deadlines)
-  - [x] agency signals (calls to action, comment periods, meetings)
-  - [x] source type classification (gov/news/nonprofit/etc.)
-- [x] Implement Phase 2 LLM scoring for high-value content (store model + prompt_version + confidence)
-- [x] Compute weighted `civic_relevance_score` using the framework dimensions
-- [x] Persist extracted opportunities (dates/locations/URLs) for UI + chatbot
-- [x] Add minimal feedback capture (helpful/not helpful) for later calibration
-- [x] Build evidence packs to keep LLM prompts bounded and evidence-driven
-- [x] Analysis + enrichment executed via Prism-powered multi-pass LLM calls (analysis, timeline/actions, explainer, enrichment)
-- [x] Project explainers with evidence into `article_explainers`
+## Milestone 3: Enrichment and Analysis
 
-## Milestone 4 — Resolution v1 (aliases-first)
-- [ ] Implement `Resolution\EntityResolver`:
-  - [ ] exact match on slug/name
-  - [ ] alias match
-  - [ ] optional fuzzy match (pg_trgm later)
-- [ ] Add admin-only artisan tools:
-  - [ ] `alias:add`
-  - [ ] `alias:list`
+Status: Completed
 
-## Milestone 5 — Search v1 (Scout + Meilisearch)
-- [x] Install Scout + Meilisearch driver
-- [x] Index Articles (title, summary, cleaned_text)
-- [x] City-scoped search enforced
-- [ ] Tune Meilisearch filters/sorting (city_id, published_at)
-- [ ] Add a simple search endpoint: `/search?q=...`
-- [ ] Incorporate civic_relevance_score into search reranking
+- [x] Enrichment job pipeline and evidence-pack flow
+- [x] Civic analysis, entity extraction, and explainer passes
+- [x] Article analysis persistence and civic relevance calculation
+- [x] Claims writing and projection writers
+- [x] Civic actions, process timeline, and explainer projectors
 
-## Milestone 6 — Q&A v1 (context builder + citations)
-- [ ] Implement `Query\ContextBuilder`:
-  - [ ] resolve city
-  - [ ] resolve entities
-  - [ ] fetch relevant articles + sources + approved claims
-- [ ] Implement `LLM\AnswerSynthesizer` that returns:
-  - [ ] answer text
-  - [ ] list of citations (source_url + title)
-- [ ] Add `/ask` endpoint (JSON) first; UI later
+## Milestone 4: Search and Q&A
 
-## Milestone 7 — Admin UI (IN PROGRESS)
-- [x] Scraper management UI
-- [x] Event sources admin UI
-- [x] Events admin UI (index/show/edit)
-- [ ] Claim review UI (pending)
-- [ ] Article enrichment UI (pending)
-- [ ] Alias management UI (pending)
+Status: Partially Completed
 
-## Milestone 8 — Calendar events admin
-- [x] Event sources admin (index/show/create/edit + run controls)
-- [x] Events admin (index/show/edit with filters and source trace)
+- [x] Scout-backed article search behavior in dashboard
+- [x] Ask endpoint with citation response contract
+- [x] Event-aware ask handling and local fallback behavior
+- [x] Chat source selection with relevance + DB fallback
+- [ ] Formal civic-relevance reranking policy in production ranking flow
+- [ ] Expanded public search endpoint strategy beyond current surfaces
 
-## Definition of Done (v1)
-- [x] One city seeded
-- [x] 2–3 scrapers reliably ingesting
-- [x] Search returns sane results
-- [ ] Ask endpoint answers with citations
-- [x] Claims exist (persisted + projected)
-- [ ] Claims can be reviewed in UI
+## Milestone 5: Admin and Operations
+
+Status: In Progress
+
+- [x] Super-admin authorization gates
+- [x] Scraper, event source, event, city, organization admin pages
+- [x] Chat source admin page and metrics views
+- [x] Feedback capture + feedback admin index
+- [ ] Claim review UI
+- [ ] Alias management UI and workflows
+
+## Beyond Original Plan (Now Shipped)
+
+The following scope was delivered beyond the January 2026 baseline plan:
+
+- [x] Super-admin gate model (`access-admin`, `manage-raw-scraper-config`)
+- [x] Scraper assistant hardening with preview-gated saves for non-super-admin users
+- [x] Ingestion quality guard and `articles:prune-low-quality` command
+- [x] Dashboard streaming conversation memory persistence
+- [x] Event-window interpretation and deterministic event fallback answers
+- [x] Site-level feedback model, widget, and admin reporting surface
+- [x] Playwright hardening controls (proxy, storage state, refresh, auto-scroll)
+
+## Deferred / Backlog
+
+- Claim moderation workflow and review UX
+- Alias management and resolution tooling
+- Explicit search reranking rollout with civic relevance weighting
+- Additional search and answer quality benchmarking dashboards
+
+## Immediate Next Priorities
+
+1. Ship claim review UI and moderation actions.
+2. Ship alias/entity resolution operator tooling.
+3. Define and apply measurable search/answer quality KPIs.
+4. Continue source onboarding with targeted parser hardening.

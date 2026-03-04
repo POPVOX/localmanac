@@ -1,10 +1,18 @@
 # Wichita Calendar Sources
 
-This document catalogs public calendar and event sources for Wichita, Kansas. These URLs are candidates for calendar event ingestion into LocAlmanac.
+This document catalogs public calendar and event sources for Wichita, Kansas. These URLs are candidates for calendar event ingestion into Localmanac.
 
 **Purpose:** Enable residents to discover local events, meetings, and activities through a unified, searchable interface.
 
-**Last Updated:** January 2026
+**Last Updated:** March 2026
+
+---
+
+## Current Ingestion Status (March 2026)
+
+- Event ingestion platform support is implemented for `ics`, `rss`, `json/json_api`, and `html` sources.
+- This file remains a candidate source catalog; not every listed source is currently onboarded.
+- Prioritized and currently maintained ingestion entries are managed in admin event-source records.
 
 ---
 
@@ -178,7 +186,7 @@ Museums, theaters, and cultural centers:
 
 - **Sedgwick County Zoo**
   - https://scz.org/calendar
-  - *Note: Radio buttons on left side cover different event types but lack unique URLs*
+  - *Note: Radio-button filtering on the page can limit deterministic scraping by URL alone.*
 
 ---
 
@@ -237,26 +245,26 @@ Museums, theaters, and cultural centers:
 ## Implementation Notes
 
 ### Scraper Considerations
-- Many sites use calendar widgets or JavaScript-heavy interfaces
-- Some sources (like Sedgwick County Zoo) use state-dependent UI without unique URLs per category
-- Facebook groups require authentication
-- Eventbrite and Meetup may require API access for reliable scraping
-- Adult hockey schedules use query parameters for filtering - may need specialized handling
+- Many sites use calendar widgets or JavaScript-heavy interfaces.
+- Some sources use state-dependent UI without unique URLs per category.
+- Some social/community sources require authentication and are poor scraper candidates.
+- Eventbrite and Meetup often require API workflows for stable high-volume ingestion.
+- Long query-parameter schedule URLs can require source-specific normalization and dedupe handling.
 
 ### Priority Tiers (Suggested)
-1. **High Priority:** City government, major venues (INTRUST, Century II, Orpheum), established cultural institutions
-2. **Medium Priority:** Educational institutions, omnibus aggregators with good structure
-3. **Lower Priority:** Specialty interest sites, venues with limited event volume
+1. High priority: city government, public institutions, major venues.
+2. Medium priority: structured community aggregators.
+3. Lower priority: specialty and authentication-gated properties.
 
 ### Data Quality Expectations
-- Government sources: Highly structured, reliable
-- Major venues: Generally well-formatted with consistent patterns
-- Aggregators: Variable quality, may contain duplicates across sources
-- Social media: Requires authentication, data quality varies
+- Government/public sources are usually most stable.
+- Venue sources vary but are often parseable with profile tuning.
+- Aggregators can produce duplicate coverage and inconsistent metadata.
 
 ### Duplicate Detection Strategy
-Event deduplication will be critical given overlapping coverage. Consider matching on:
-- Event title (normalized)
-- Date/time
-- Location/venue
-- Source organization
+Event deduplication should continue to use normalized comparisons across:
+
+- event title
+- starts/ends timestamps
+- location/venue signals
+- source organization and source hash
