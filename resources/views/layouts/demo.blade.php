@@ -3,18 +3,17 @@
     <head>
         @include('partials.head')
     </head>
-    <body class="min-h-screen bg-white text-zinc-900 antialiased dark:bg-zinc-900 dark:text-zinc-100">
-        <flux:header container class="bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
-            <flux:brand href="{{ route('home') }}" name="LocAlmanac" wire:navigate>
-                <x-slot name="logo">
-                    <x-app-logo-icon class="size-5 text-zinc-900 dark:text-zinc-100" />
-                </x-slot>
-            </flux:brand>
+    <body class="app-shell-bg text-zinc-900 antialiased dark:text-zinc-100">
+        <flux:header container class="app-shell-header">
+            <a href="{{ route('home') }}" class="flex items-center" wire:navigate>
+                <x-app-logo />
+            </a>
 
             <flux:spacer />
 
             @auth
                 <flux:navbar class="-mb-px">
+                    <flux:navbar.item href="{{ route('dashboard') }}" wire:navigate>Dashboard</flux:navbar.item>
                     <flux:navbar.item href="{{ route('demo.calendar') }}" wire:navigate>Calendar</flux:navbar.item>
                 </flux:navbar>
             @endauth
@@ -69,6 +68,10 @@
         <flux:main container>
             {{ $slot }}
         </flux:main>
+
+        @auth
+            <livewire:feedback.widget />
+        @endauth
 
         @fluxScripts
     </body>

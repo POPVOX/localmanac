@@ -3,6 +3,7 @@
 use App\Models\Article;
 use App\Models\City;
 use App\Models\Scraper;
+use App\Services\Ingestion\ArticleQualityGuard;
 use App\Services\Ingestion\ArticleWriter;
 use App\Services\Ingestion\Deduplicator;
 use App\Services\Ingestion\Fetchers\RssFetcher;
@@ -99,6 +100,45 @@ it('skips invalid items', function () {
         ->and($run->items_created)->toBe(0)
         ->and($run->items_updated)->toBe(0)
         ->and($run->meta['skipped_items'])->toBe(1);
+});
+
+it('skips items rejected by quality guard', function () {
+    $city = City::create(['name' => 'Test City', 'slug' => 'test-city']);
+    $scraper = makeScraper($city);
+
+    $items = [[
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'Kami Steinle',
+        'source' => ['source_url' => 'https://example.com/staff_profile/kami-steinle'],
+        'body' => ['cleaned_text' => 'Assistant News Editor'],
+    ]];
+
+    $fetcher = M::mock(RssFetcher::class);
+    $fetcher->shouldReceive('fetch')->once()->andReturn($items);
+
+    $deduplicator = M::mock(Deduplicator::class);
+    $deduplicator->shouldNotReceive('findExisting');
+
+    $writer = M::mock(ArticleWriter::class);
+    $writer->shouldNotReceive('write');
+
+    $qualityGuard = M::mock(ArticleQualityGuard::class);
+    $qualityGuard->shouldReceive('rejectionReason')
+        ->once()
+        ->with($items[0])
+        ->andReturn(ArticleQualityGuard::REASON_MIN_CONTENT);
+
+    $runner = new ScrapeRunner($deduplicator, $writer, $fetcher, null, $qualityGuard);
+
+    $run = $runner->run($scraper);
+
+    expect($run->status)->toBe('success')
+        ->and($run->items_found)->toBe(1)
+        ->and($run->items_created)->toBe(0)
+        ->and($run->items_updated)->toBe(0)
+        ->and($run->meta['skipped_items'])->toBe(1)
+        ->and($run->meta['skipped_reasons']['min_content'])->toBe(1);
 });
 
 it('updates when deduplicated article is returned', function () {

@@ -4,6 +4,8 @@ use App\Livewire\Admin\Scrapers\Form as ScraperForm;
 use App\Models\City;
 use App\Models\Scraper;
 use App\Models\User;
+use App\Services\Ingestion\Assistant\ScraperAssistantSourceFetcher;
+use App\Services\Ingestion\Assistant\ScraperConfigDrafter;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
@@ -236,4 +238,57 @@ it('template buttons do not inject organization id for super admins', function (
         ->assertSet('config', $genericExpected)
         ->call('applyTemplate', 'wichita_archive_pdf_list')
         ->assertSet('config', $wichitaExpected);
+});
+
+it('does not persist fetched source html in component state after draft generation', function () {
+    $user = User::factory()->create();
+    $city = City::create(['name' => 'Payload City', 'slug' => 'payload-city']);
+    $largeHtml = str_repeat('<div>payload</div>', 90000);
+
+    $sourceFetcher = Mockery::mock(ScraperAssistantSourceFetcher::class);
+    $sourceFetcher->shouldReceive('fetch')
+        ->once()
+        ->with('https://example.com/large-feed')
+        ->andReturn([
+            'html' => $largeHtml,
+            'final_url' => 'https://example.com/large-feed',
+            'renderer' => 'http',
+            'warnings' => [],
+            'used_webfetch' => false,
+        ]);
+    app()->instance(ScraperAssistantSourceFetcher::class, $sourceFetcher);
+
+    $drafter = Mockery::mock(ScraperConfigDrafter::class);
+    $drafter->shouldReceive('draft')
+        ->once()
+        ->with('html', 'https://example.com/large-feed', $largeHtml)
+        ->andReturn([
+            'profile' => 'generic_listing',
+            'config' => [
+                'profile' => 'generic_listing',
+                'list' => [
+                    'link_selector' => 'main a[href*="/post/"]',
+                    'link_attr' => 'href',
+                    'max_links' => 25,
+                ],
+                'article' => [
+                    'content_selector' => 'main',
+                    'remove_selectors' => ['script', 'style', 'nav', 'footer'],
+                ],
+                'best_effort' => true,
+            ],
+            'warnings' => [],
+            'confidence' => 0.84,
+            'mode' => 'ai_refined',
+        ]);
+    app()->instance(ScraperConfigDrafter::class, $drafter);
+
+    Livewire::actingAs($user)->test(ScraperForm::class)
+        ->set('cityId', $city->id)
+        ->set('type', 'html')
+        ->set('sourceUrl', 'https://example.com/large-feed')
+        ->call('generateConfigDraft')
+        ->assertSet('assistantHasDraft', true)
+        ->assertSet('assistantFetchRenderer', 'http')
+        ->assertSet('assistantFetchedHtml', '');
 });

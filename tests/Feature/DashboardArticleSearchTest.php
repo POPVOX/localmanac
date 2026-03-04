@@ -1,0 +1,289 @@
+<?php
+
+use App\Livewire\Dashboard;
+use App\Models\Article;
+use App\Models\ArticleBody;
+use App\Models\ArticleIssueArea;
+use App\Models\City;
+use App\Models\IssueArea;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Support\Collection;
+use Illuminate\Support\LazyCollection;
+use Laravel\Scout\Builder;
+use Laravel\Scout\EngineManager;
+use Laravel\Scout\Engines\Engine;
+use Livewire\Livewire;
+
+it('searches dashboard articles by full text body content', function () {
+    config()->set('scout.driver', 'collection');
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $matching = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Permit Overview',
+        'summary' => 'General city update',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::factory()->create([
+        'article_id' => $matching->id,
+        'cleaned_text' => 'Council packet includes bluebonnet permit signal details.',
+    ]);
+
+    $nonMatching = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Water Main Work',
+        'summary' => 'Infrastructure update',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::factory()->create([
+        'article_id' => $nonMatching->id,
+        'cleaned_text' => 'Road closure details for downtown construction.',
+    ]);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->set('articleSearch', 'bluebonnet permit signal')
+        ->assertSee('Permit Overview')
+        ->assertDontSee('Water Main Work');
+});
+
+it('scopes dashboard article search results to the selected city', function () {
+    config()->set('scout.driver', 'collection');
+
+    $wichita = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $topeka = City::create([
+        'name' => 'Topeka',
+        'slug' => 'topeka',
+    ]);
+
+    $wichitaArticle = Article::create([
+        'city_id' => $wichita->id,
+        'title' => 'Wichita Permit Notice',
+        'summary' => 'Neighborhood update',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::factory()->create([
+        'article_id' => $wichitaArticle->id,
+        'cleaned_text' => 'Magnolia permit bulletin for Wichita residents.',
+    ]);
+
+    $topekaArticle = Article::create([
+        'city_id' => $topeka->id,
+        'title' => 'Topeka Permit Notice',
+        'summary' => 'Neighborhood update',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::factory()->create([
+        'article_id' => $topekaArticle->id,
+        'cleaned_text' => 'Magnolia permit bulletin for Topeka residents.',
+    ]);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $wichita->id)
+        ->set('articleSearch', 'magnolia permit bulletin')
+        ->assertSee('Wichita Permit Notice')
+        ->assertDontSee('Topeka Permit Notice');
+});
+
+it('applies issue area filtering to dashboard full text search results', function () {
+    config()->set('scout.driver', 'collection');
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $zoning = IssueArea::create([
+        'city_id' => $city->id,
+        'name' => 'Zoning',
+        'slug' => 'zoning',
+    ]);
+
+    $transit = IssueArea::create([
+        'city_id' => $city->id,
+        'name' => 'Transit',
+        'slug' => 'transit',
+    ]);
+
+    $zoningArticle = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Zoning Hearing Schedule',
+        'summary' => 'Board agenda',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::factory()->create([
+        'article_id' => $zoningArticle->id,
+        'cleaned_text' => 'Maple corridor zoning ordinance hearing timeline.',
+    ]);
+
+    ArticleIssueArea::create([
+        'article_id' => $zoningArticle->id,
+        'issue_area_id' => $zoning->id,
+        'confidence' => 0.95,
+        'source' => 'llm',
+    ]);
+
+    $transitArticle = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Transit Detour Notice',
+        'summary' => 'Bus route update',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::factory()->create([
+        'article_id' => $transitArticle->id,
+        'cleaned_text' => 'Maple corridor zoning ordinance hearing timeline.',
+    ]);
+
+    ArticleIssueArea::create([
+        'article_id' => $transitArticle->id,
+        'issue_area_id' => $transit->id,
+        'confidence' => 0.95,
+        'source' => 'llm',
+    ]);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->set('activeIssueAreaId', $zoning->id)
+        ->set('articleSearch', 'maple corridor zoning ordinance')
+        ->assertSee('Zoning Hearing Schedule')
+        ->assertDontSee('Transit Detour Notice');
+});
+
+it('falls back to sql like filtering when scout search errors on dashboard', function () {
+    registerFailingScoutEngine();
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    Article::create([
+        'city_id' => $city->id,
+        'title' => 'Fallback Permit Article',
+        'summary' => 'Rosewood fallback needle summary',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    Article::create([
+        'city_id' => $city->id,
+        'title' => 'Unrelated Notice',
+        'summary' => 'Different summary text',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->set('articleSearch', 'rosewood fallback needle')
+        ->assertSee('Fallback Permit Article')
+        ->assertDontSee('Unrelated Notice');
+});
+
+it('paginates dashboard feed results', function () {
+    config()->set('scout.driver', 'collection');
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    foreach (range(1, 11) as $number) {
+        $label = str_pad((string) $number, 2, '0', STR_PAD_LEFT);
+
+        Article::create([
+            'city_id' => $city->id,
+            'title' => 'Feed Entry '.$label,
+            'summary' => 'Summary '.$number,
+            'status' => 'published',
+            'content_type' => 'html',
+            'published_at' => now()->subMinutes(12 - $number),
+        ]);
+    }
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->assertSee('Feed Entry 11')
+        ->assertDontSee('Feed Entry 01')
+        ->call('setPage', 2, 'articles-page')
+        ->assertSee('Feed Entry 01')
+        ->assertDontSee('Feed Entry 11');
+});
+
+function registerFailingScoutEngine(): void
+{
+    config()->set('scout.driver', 'fake');
+
+    $engine = new class extends Engine
+    {
+        public function update(mixed $models): void {}
+
+        public function delete(mixed $models): void {}
+
+        public function search(Builder $builder): array
+        {
+            throw new \RuntimeException('Scout unavailable');
+        }
+
+        public function paginate(Builder $builder, mixed $perPage, mixed $page): array
+        {
+            return $this->search($builder);
+        }
+
+        public function mapIds(mixed $results): Collection
+        {
+            return collect();
+        }
+
+        public function map(Builder $builder, mixed $results, mixed $model): EloquentCollection
+        {
+            return $model->newCollection();
+        }
+
+        public function lazyMap(Builder $builder, mixed $results, mixed $model): LazyCollection
+        {
+            return $this->map($builder, $results, $model)->lazy();
+        }
+
+        public function getTotalCount(mixed $results): int
+        {
+            return 0;
+        }
+
+        public function flush(mixed $model): void {}
+
+        public function createIndex(mixed $name, array $options = []): mixed
+        {
+            return null;
+        }
+
+        public function deleteIndex(mixed $name): mixed
+        {
+            return null;
+        }
+    };
+
+    $engineManager = app(EngineManager::class);
+    $engineManager->forgetDrivers();
+    $engineManager->extend('fake', fn () => $engine);
+}

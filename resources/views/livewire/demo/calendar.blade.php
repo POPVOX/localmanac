@@ -30,7 +30,7 @@
         </div>
 
         <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_auto]">
-            <flux:card padding="lg" class="space-y-4 rounded-2xl border border-zinc-200 bg-white shadow-sm">
+            <section class="space-y-4 px-1 py-1">
                 <div class="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-100 pb-4">
                     <flux:heading size="md" level="2">
                         {{ $selectedDateLabel }}
@@ -66,11 +66,11 @@
                 </div>
 
                 @if (! $hasEvents)
-                    <flux:card padding="lg" class="rounded-2xl border border-zinc-200 bg-zinc-50/70 text-center">
+                    <div class="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-6 text-center">
                         <flux:text>
                             {{ __('No events scheduled for this day.') }}
                         </flux:text>
-                    </flux:card>
+                    </div>
                 @else
                     <div class="space-y-3">
                         @foreach ($allDayEvents as $event)
@@ -85,7 +85,7 @@
                                 $descriptionText = $normalizeText($event->description ? strip_tags($event->description) : null);
                             @endphp
 
-                            <flux:card wire:key="all-day-event-{{ $event->id }}" padding="lg" class="space-y-3 rounded-2xl border border-zinc-200 bg-white shadow-sm">
+                            <flux:card wire:key="all-day-event-{{ $event->id }}" padding="lg" class="space-y-3 rounded-xl border border-zinc-200/70 bg-zinc-50/40">
                                 <div class="flex flex-wrap items-baseline justify-between gap-2">
                                     <flux:heading size="md" level="3" class="min-w-0">
                                         @if ($event->event_url)
@@ -139,7 +139,7 @@
                                     $descriptionText = $normalizeText($event->description ? strip_tags($event->description) : null);
                                 @endphp
 
-                                <flux:card wire:key="timed-event-{{ $event->id }}" padding="lg" class="space-y-3 rounded-2xl border border-zinc-200 bg-white shadow-sm">
+                                <flux:card wire:key="timed-event-{{ $event->id }}" padding="lg" class="space-y-3 rounded-xl border border-zinc-200/70 bg-zinc-50/40">
                                     <div class="flex flex-wrap items-baseline justify-between gap-2">
                                         <flux:heading size="md" level="3" class="min-w-0">
                                             @if ($event->event_url)
@@ -182,7 +182,7 @@
                         @endforeach
                     </div>
                 @endif
-            </flux:card>
+            </section>
 
             <flux:card padding="md" class="h-fit rounded-2xl border border-zinc-200 bg-white shadow-sm">
                 <flux:calendar wire:model.live="selectedDate" mode="single" with-today class="w-fit" />

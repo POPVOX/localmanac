@@ -1,358 +1,374 @@
-@component('layouts.demo')
-    <div class="flex flex-col gap-24 py-12">
-        <section class="flex items-center justify-center">
-            <div class="flex flex-wrap items-center justify-center gap-3 rounded-full border border-sky-200/70 bg-gradient-to-r from-sky-500/90 to-emerald-400/80 px-4 py-2 text-sm text-white shadow-sm dark:border-sky-500/30">
-                <flux:text class="text-white">{{ __('Local civic updates and events in one place.') }}</flux:text>
-                @guest
-                    @if (Route::has('register'))
-                        <flux:link href="{{ route('register') }}" wire:navigate class="text-white underline underline-offset-4">
-                            {{ __('Create account') }}
-                        </flux:link>
-                    @endif
-                @endguest
-            </div>
-        </section>
+<!DOCTYPE html>
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="dark">
+    <head>
+        @include('partials.head')
+    </head>
+    <body class="min-h-screen bg-[radial-gradient(circle_at_20%_-10%,_#f5efe3_0%,_#f8f5ef_35%,_#f4f2ec_70%,_#eeebe4_100%)] text-zinc-900 antialiased dark:bg-zinc-900 dark:text-zinc-100">
+        <div class="relative overflow-x-clip">
+            @php
+                $heroImagePath = null;
 
-        <section class="relative overflow-hidden rounded-3xl border border-zinc-200/70 bg-gradient-to-br from-white via-sky-50 to-emerald-50 px-6 py-14 shadow-sm dark:border-zinc-800/70 dark:from-zinc-950 dark:via-slate-900 dark:to-emerald-950">
-            <div class="pointer-events-none absolute -top-24 left-8 h-64 w-64 rounded-full bg-sky-200/70 blur-3xl dark:bg-sky-500/10"></div>
-            <div class="pointer-events-none absolute -bottom-24 right-10 h-72 w-72 rounded-full bg-amber-200/60 blur-3xl dark:bg-amber-500/10"></div>
+                foreach (['images/people.png', 'images/people.jpg', 'images/people.jpeg', 'images/people.webp'] as $candidatePath) {
+                    if (file_exists(public_path($candidatePath))) {
+                        $heroImagePath = $candidatePath;
+                        break;
+                    }
+                }
+            @endphp
 
-            <div class="relative flex flex-col items-center gap-6 text-center">
-                <div class="inline-flex items-center gap-3 rounded-full border border-white/70 bg-white/80 px-4 py-1.5 text-sm text-slate-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-200">
-                    <flux:badge color="zinc" variant="subtle">{{ __('Meetings') }}</flux:badge>
-                    <flux:badge color="zinc" variant="subtle">{{ __('Notices') }}</flux:badge>
-                    <flux:badge color="zinc" variant="subtle">{{ __('Events') }}</flux:badge>
-                    <span class="sr-only">{{ __('Key content types') }}</span>
-                </div>
+            <div class="pointer-events-none absolute -left-28 top-0 h-80 w-80 rounded-full bg-emerald-200/30 blur-3xl"></div>
+            <div class="pointer-events-none absolute -right-24 top-20 h-72 w-72 rounded-full bg-amber-200/35 blur-3xl"></div>
 
-                <flux:heading size="xl" level="1" class="max-w-3xl">
-                    <span class="bg-gradient-to-r from-slate-900 via-slate-700 to-sky-700 text-transparent bg-clip-text dark:from-white dark:via-slate-100 dark:to-sky-200">
-                        {{ __('LocAlmanac') }}
-                    </span>
-                    {{ __(' keeps local civic updates in one clean view.') }}
-                </flux:heading>
+            <header class="mx-auto flex w-full max-w-7xl items-center justify-between px-6 pt-8 sm:px-8 lg:px-12">
+                <a href="{{ route('home') }}" class="inline-flex items-center" wire:navigate>
+                    <x-app-logo-icon class="h-12 w-auto sm:h-14" />
+                </a>
 
-                <flux:text class="max-w-2xl">
-                    {{ __('See what’s happening, what’s next, and how to participate — with links back to the original source.') }}
-                </flux:text>
-
-                <div class="flex flex-wrap items-center justify-center gap-3">
+                <nav class="flex items-center gap-3 text-sm font-semibold text-zinc-700">
                     @guest
-                        @if (Route::has('register'))
-                            <flux:button href="{{ route('register') }}" variant="primary" wire:navigate>
-                                {{ __('Create account') }}
-                            </flux:button>
-                        @endif
                         @if (Route::has('login'))
-                            <flux:link href="{{ route('login') }}" variant="subtle" wire:navigate>
+                            <a
+                                href="{{ route('login') }}"
+                                wire:navigate
+                                class="rounded-full px-4 py-2 transition hover:bg-white/70 hover:text-zinc-900"
+                            >
                                 {{ __('Log in') }}
-                            </flux:link>
+                            </a>
+                        @endif
+                        @if (Route::has('register'))
+                            <a
+                                href="{{ route('register') }}"
+                                wire:navigate
+                                class="rounded-full border border-emerald-200 bg-white/80 px-4 py-2 text-emerald-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow"
+                            >
+                                {{ __('Create account') }}
+                            </a>
                         @endif
                     @else
-                        <flux:button href="{{ route('dashboard') }}" variant="primary" wire:navigate>
-                            {{ __('Go to dashboard') }}
-                        </flux:button>
-                        @if (Route::has('profile.edit'))
-                            <flux:link href="{{ route('profile.edit') }}" variant="subtle" wire:navigate>
-                                {{ __('Settings') }}
-                            </flux:link>
-                        @endif
+                        <a
+                            href="{{ route('dashboard') }}"
+                            wire:navigate
+                            class="rounded-full border border-emerald-200 bg-white/80 px-4 py-2 text-emerald-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow"
+                        >
+                            {{ __('Dashboard') }}
+                        </a>
                     @endguest
-                </div>
+                </nav>
+            </header>
 
-                <flux:text variant="subtle">{{ __('Coverage varies by city and source availability.') }}</flux:text>
+            <main class="mx-auto flex w-full max-w-7xl flex-col gap-16 px-6 pb-16 pt-10 sm:px-8 lg:px-12 lg:pt-14">
+                <section class="grid gap-8 lg:grid-cols-[1fr_0.95fr] lg:items-center">
+                    <div class="flex flex-col gap-6">
+                        <flux:text class="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-800">
+                            {{ __('Built for civic clarity') }}
+                        </flux:text>
 
-                <div class="mt-8 grid w-full max-w-5xl gap-6 lg:grid-cols-[1.2fr,0.8fr]">
-                    <flux:card padding="lg" class="bg-white/80 shadow-lg ring-1 ring-zinc-200/60 dark:bg-zinc-900/70 dark:ring-zinc-700/60">
-                        <div class="flex items-center justify-between">
-                            <flux:heading size="sm" level="2">
-                                {{ __('Today in your city') }}
-                            </flux:heading>
-                            <flux:badge color="zinc" variant="subtle">{{ __('Preview') }}</flux:badge>
+                        <flux:heading size="xl" level="1" class="max-w-2xl text-balance text-4xl leading-tight sm:text-5xl">
+                            {{ __('LocAlmanac helps your community keep up with what matters locally.') }}
+                        </flux:heading>
+
+                        <flux:text class="max-w-xl text-base leading-relaxed text-zinc-700 sm:text-lg">
+                            {{ __('Meetings, notices, and local events with clear context on impact, timing, and where to participate.') }}
+                        </flux:text>
+
+                        <div class="grid max-w-xl gap-3 sm:grid-cols-3">
+                            <div class="rounded-xl border border-zinc-200/70 bg-zinc-50/80 px-3 py-3">
+                                <flux:text class="text-sm font-semibold text-zinc-800">{{ __('Local information') }}</flux:text>
+                                <flux:text variant="subtle" class="mt-1 text-xs">{{ __('Public resources') }}</flux:text>
+                            </div>
+                            <div class="rounded-xl border border-zinc-200/70 bg-zinc-50/80 px-3 py-3">
+                                <flux:text class="text-sm font-semibold text-zinc-800">{{ __('Local news') }}</flux:text>
+                                <flux:text variant="subtle" class="mt-1 text-xs">{{ __('Relevant updates') }}</flux:text>
+                            </div>
+                            <div class="rounded-xl border border-zinc-200/70 bg-zinc-50/80 px-3 py-3">
+                                <flux:text class="text-sm font-semibold text-zinc-800">{{ __('Local data') }}</flux:text>
+                                <flux:text variant="subtle" class="mt-1 text-xs">{{ __('Clear context') }}</flux:text>
+                            </div>
                         </div>
 
-                        <div class="mt-4 flex flex-col gap-3">
-                            <div class="flex items-start gap-3 rounded-lg bg-white/90 p-3 shadow-sm dark:bg-zinc-900/80">
-                                <flux:badge color="sky" variant="subtle">{{ __('Event') }}</flux:badge>
-                                <div class="flex flex-col gap-1 text-start">
-                                    <flux:text>{{ __('Parks committee meeting') }}</flux:text>
-                                    <flux:text variant="subtle">{{ __('7:00 PM • City Hall') }}</flux:text>
+                        <div class="flex flex-wrap items-center gap-3 pt-1">
+                            @guest
+                                @if (Route::has('register'))
+                                    <flux:button href="{{ route('register') }}" variant="primary" wire:navigate>
+                                        {{ __('Create account') }}
+                                    </flux:button>
+                                @endif
+                                @if (Route::has('login'))
+                                    <flux:link href="{{ route('login') }}" variant="subtle" wire:navigate>
+                                        {{ __('Log in') }}
+                                    </flux:link>
+                                @endif
+                            @else
+                                <flux:button href="{{ route('dashboard') }}" variant="primary" wire:navigate>
+                                    {{ __('Go to dashboard') }}
+                                </flux:button>
+                                @if (Route::has('profile.edit'))
+                                    <flux:link href="{{ route('profile.edit') }}" variant="subtle" wire:navigate>
+                                        {{ __('Settings') }}
+                                    </flux:link>
+                                @endif
+                            @endguest
+                        </div>
+
+                        <flux:text variant="subtle">{{ __('Coverage varies by city and source availability.') }}</flux:text>
+                    </div>
+
+                    <div class="relative">
+                        <div class="absolute -inset-3 rounded-[2rem] bg-[linear-gradient(145deg,_rgba(16,185,129,0.20),_rgba(245,158,11,0.16)_55%,_rgba(255,255,255,0.2))] blur-sm"></div>
+                        <div class="relative overflow-hidden rounded-[1.75rem] border border-zinc-200 bg-white p-2 shadow-2xl shadow-zinc-400/10">
+                            @if ($heroImagePath)
+                                <img
+                                    src="{{ asset($heroImagePath) }}"
+                                    alt="{{ __('People in conversation at a community event') }}"
+                                    class="h-[440px] w-full rounded-[1.25rem] object-cover object-center sm:h-[520px]"
+                                    loading="eager"
+                                />
+                            @else
+                                <div class="flex h-[440px] w-full items-center justify-center rounded-[1.25rem] bg-zinc-100 text-zinc-500 sm:h-[520px]">
+                                    <flux:text variant="subtle">{{ __('Community image unavailable') }}</flux:text>
                                 </div>
+                            @endif
+                            <div class="absolute bottom-6 left-6 right-6 rounded-2xl border border-white/50 bg-white/90 p-4 shadow-lg backdrop-blur">
+                                <flux:text class="text-sm font-semibold text-zinc-800">{{ __('Better Information Improves Local Life') }}</flux:text>
+                                <flux:text variant="subtle" class="mt-1 text-xs">{{ __('When residents have timely, understandable civic information, participation gets stronger.') }}</flux:text>
                             </div>
-                            <div class="flex items-start gap-3 rounded-lg bg-white/90 p-3 shadow-sm dark:bg-zinc-900/80">
-                                <flux:badge color="sky" variant="subtle">{{ __('Event') }}</flux:badge>
-                                <div class="flex flex-col gap-1 text-start">
-                                    <flux:text>{{ __('Neighborhood cleanup') }}</flux:text>
-                                    <flux:text variant="subtle">{{ __('Saturday • Riverfront') }}</flux:text>
-                                </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section>
+                    <flux:heading size="xl" level="2" class="tracking-tight !mb-0">{{ __('What you get') }}</flux:heading>
+                    <flux:text class="mt-2 max-w-3xl text-zinc-700">
+                        {{ __('A practical daily civic brief that helps you track change, spot what is coming up, and know where your input matters.') }}
+                    </flux:text>
+
+                    <flux:card padding="lg" class="mt-6 rounded-2xl border-zinc-200 bg-white/90 shadow-sm">
+                        <flux:heading size="sm" level="3">{{ __('Today in your city') }}</flux:heading>
+
+                        <div class="mt-4 grid gap-3">
+                                <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                    <div class="flex items-start gap-3">
+                                        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 shadow-sm">
+                                            <flux:icon icon="newspaper" class="size-7 text-emerald-700" />
+                                        </div>
+                                        <div class="space-y-1">
+                                            <flux:text class="font-medium text-zinc-900">{{ __('New notices and filings') }}</flux:text>
+                                            <flux:text variant="subtle">{{ __('Track updates with links back to original public sources.') }}</flux:text>
+                                        </div>
+                                    </div>
                             </div>
-                            <div class="flex items-start gap-3 rounded-lg bg-white/90 p-3 shadow-sm dark:bg-zinc-900/80">
-                                <flux:badge color="amber" variant="subtle">{{ __('Update') }}</flux:badge>
-                                <div class="flex flex-col gap-1 text-start">
-                                    <flux:text>{{ __('Transit service changes') }}</flux:text>
-                                    <flux:text variant="subtle">{{ __('New routes start Monday') }}</flux:text>
-                                </div>
+
+                                <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                    <div class="flex items-start gap-3">
+                                        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 shadow-sm">
+                                            <flux:icon icon="calendar-days" class="size-7 text-emerald-700" />
+                                        </div>
+                                        <div class="space-y-1">
+                                            <flux:text class="font-medium text-zinc-900">{{ __('Upcoming meetings and agendas') }}</flux:text>
+                                            <flux:text variant="subtle">{{ __('See dates, deadlines, and participation opportunities in one timeline.') }}</flux:text>
+                                        </div>
+                                    </div>
                             </div>
-                            <div class="flex items-start gap-3 rounded-lg bg-white/90 p-3 shadow-sm dark:bg-zinc-900/80">
-                                <flux:badge color="emerald" variant="subtle">{{ __('Notice') }}</flux:badge>
-                                <div class="flex flex-col gap-1 text-start">
-                                    <flux:text>{{ __('Open comment period') }}</flux:text>
-                                    <flux:text variant="subtle">{{ __('Budget priorities this week') }}</flux:text>
-                                </div>
+
+                                <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                    <div class="flex items-start gap-3">
+                                        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 shadow-sm">
+                                            <flux:icon icon="chat-bubble-left-right" class="size-7 text-emerald-700" />
+                                        </div>
+                                        <div class="space-y-1">
+                                            <flux:text class="font-medium text-zinc-900">{{ __('Ask local questions in plain language') }}</flux:text>
+                                            <flux:text variant="subtle">{{ __('Get quick answers about services, policies, and what is happening nearby.') }}</flux:text>
+                                        </div>
+                                    </div>
                             </div>
                         </div>
                     </flux:card>
 
-                    <div class="flex flex-col gap-4">
-                        <flux:card padding="lg" class="bg-white/80 shadow-lg ring-1 ring-zinc-200/60 dark:bg-zinc-900/70 dark:ring-zinc-700/60">
-                            <flux:heading size="sm" level="2">{{ __('At a glance') }}</flux:heading>
-                            <flux:text variant="subtle" class="mt-2">
-                                {{ __('A quick summary of what’s coming up and what requires attention.') }}
-                            </flux:text>
-
-                            <div class="mt-4 flex flex-col gap-3">
-                                <div class="flex items-center justify-between rounded-lg bg-sky-50/80 p-3 dark:bg-sky-500/10">
-                                    <flux:text>{{ __('Upcoming meeting') }}</flux:text>
-                                    <flux:badge color="sky" variant="subtle">{{ __('Soon') }}</flux:badge>
-                                </div>
-                                <div class="flex items-center justify-between rounded-lg bg-emerald-50/80 p-3 dark:bg-emerald-500/10">
-                                    <flux:text>{{ __('New notices') }}</flux:text>
-                                    <flux:badge color="emerald" variant="subtle">{{ __('—') }}</flux:badge>
-                                </div>
-                                <div class="flex items-center justify-between rounded-lg bg-amber-50/80 p-3 dark:bg-amber-500/10">
-                                    <flux:text>{{ __('Ways to participate') }}</flux:text>
-                                    <flux:badge color="amber" variant="subtle">{{ __('—') }}</flux:badge>
-                                </div>
-                            </div>
+                    <div class="mt-4 grid gap-4 md:grid-cols-2">
+                        <flux:card padding="lg" class="rounded-2xl border-zinc-200 bg-zinc-100/80 shadow-sm">
+                            <flux:heading size="sm" level="3">{{ __('LocAlmanac is Your Local Command Center') }}</flux:heading>
+                            <ul class="mt-3 space-y-2 text-sm text-zinc-700">
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="check-circle" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('Public information resources with smart, personalized access.') }}</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="check-circle" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('AI-enabled updates from local information and meeting proceedings.') }}</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="check-circle" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('Comprehensive event calendar gathered from multiple sources.') }}</span>
+                                </li>
+                            </ul>
                         </flux:card>
 
-                        <div class="grid gap-3 sm:grid-cols-3">
-                            <flux:card size="sm" class="flex flex-col gap-1 bg-white/80 text-center dark:bg-zinc-900/70">
-                                <flux:text class="font-medium">{{ __('Source links') }}</flux:text>
-                                <flux:text variant="subtle">{{ __('When available') }}</flux:text>
-                            </flux:card>
-                            <flux:card size="sm" class="flex flex-col gap-1 bg-white/80 text-center dark:bg-zinc-900/70">
-                                <flux:text class="font-medium">{{ __('Updates') }}</flux:text>
-                                <flux:text variant="subtle">{{ __('As sources change') }}</flux:text>
-                            </flux:card>
-                            <flux:card size="sm" class="flex flex-col gap-1 bg-white/80 text-center dark:bg-zinc-900/70">
-                                <flux:text class="font-medium">{{ __('Calendar') }}</flux:text>
-                                <flux:text variant="subtle">{{ __('Across sources') }}</flux:text>
-                            </flux:card>
-                        </div>
+                        <flux:card padding="lg" class="rounded-2xl border-zinc-200 bg-zinc-100/80 shadow-sm">
+                            <flux:heading size="sm" level="3">{{ __('You Can Ask LocAlmanac Anything') }}</flux:heading>
+                            <ul class="mt-3 space-y-2 text-sm text-zinc-700">
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="sparkles" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('Where is my nearest hazardous waste drop-off?') }}</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="sparkles" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('What new construction is planned for my street?') }}</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="sparkles" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('When is the next city council meeting?') }}</span>
+                                </li>
+                            </ul>
+                        </flux:card>
                     </div>
-                </div>
-            </div>
-        </section>
+                </section>
 
-        <section class="flex flex-col items-center gap-6 text-center">
-            <flux:text class="text-sm uppercase tracking-wide text-zinc-500">
-                {{ __('Built from public sources') }}
-            </flux:text>
-            <div class="flex flex-wrap items-center justify-center gap-3">
-                <flux:badge color="zinc" variant="subtle">{{ __('City halls') }}</flux:badge>
-                <flux:badge color="zinc" variant="subtle">{{ __('Public libraries') }}</flux:badge>
-                <flux:badge color="zinc" variant="subtle">{{ __('Transit agencies') }}</flux:badge>
-                <flux:badge color="zinc" variant="subtle">{{ __('Community boards') }}</flux:badge>
-                <flux:badge color="zinc" variant="subtle">{{ __('Education offices') }}</flux:badge>
-            </div>
-        </section>
+                <section>
+                    <flux:heading size="xl" level="2" class="tracking-tight !mb-0">{{ __('Features') }}</flux:heading>
+                    <flux:text class="mt-2 max-w-3xl text-zinc-700">{{ __('Everything you need to stay connected with your community.') }}</flux:text>
 
-        <section class="flex flex-col gap-8">
-            <div class="flex flex-col gap-2 text-center">
-                <flux:heading size="lg" level="2">{{ __('Features') }}</flux:heading>
-                <flux:text variant="subtle">{{ __('A clean view of local information, pulled into one place.') }}</flux:text>
-            </div>
+                    <flux:card padding="lg" class="mt-6 rounded-2xl border-zinc-200 bg-white/90 shadow-sm">
+                        <flux:heading size="sm" level="3">{{ __('Core capabilities') }}</flux:heading>
 
-            <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                <flux:card padding="lg" class="group flex flex-col gap-4 border-zinc-200/70 bg-white/90 transition hover:-translate-y-1 hover:shadow-lg dark:border-zinc-800/70 dark:bg-zinc-900/70">
-                    <div class="flex items-center gap-3">
-                        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-200">
-                            <flux:icon icon="book-open-text" variant="outline" class="size-4" />
+                        <div class="mt-4 grid gap-3">
+                            <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                <flux:text class="font-medium text-zinc-900">{{ __('Public information resources') }}</flux:text>
+                                <flux:text variant="subtle" class="mt-1">{{ __('Routine filings, legal notices, transactions, and everyday service answers.') }}</flux:text>
+                            </div>
+                            <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                <flux:text class="font-medium text-zinc-900">{{ __('Updates + Event Calendar') }}</flux:text>
+                                <flux:text variant="subtle" class="mt-1">{{ __('Aggregated local updates and AI-gathered events from multiple sources.') }}</flux:text>
+                            </div>
+                            <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                <flux:text class="font-medium text-zinc-900">{{ __('On-Demand local answers') }}</flux:text>
+                                <flux:text variant="subtle" class="mt-1">{{ __('Natural-language search and chatbot answers for specific local questions.') }}</flux:text>
+                            </div>
                         </div>
-                        <flux:heading size="sm" level="3">{{ __("What's happening") }}</flux:heading>
-                    </div>
-                    <flux:text variant="subtle">{{ __('A daily view of civic news, meetings, and public notices.') }}</flux:text>
-                </flux:card>
-
-                <flux:card padding="lg" class="group flex flex-col gap-4 border-zinc-200/70 bg-white/90 transition hover:-translate-y-1 hover:shadow-lg dark:border-zinc-800/70 dark:bg-zinc-900/70">
-                    <div class="flex items-center gap-3">
-                        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-200">
-                            <flux:icon icon="map-pin" variant="outline" class="size-4" />
-                        </div>
-                        <flux:heading size="sm" level="3">{{ __('How to participate') }}</flux:heading>
-                    </div>
-                    <flux:text variant="subtle">{{ __('Clear next steps for hearings, votes, and feedback.') }}</flux:text>
-                </flux:card>
-
-                <flux:card padding="lg" class="group flex flex-col gap-4 border-zinc-200/70 bg-white/90 transition hover:-translate-y-1 hover:shadow-lg dark:border-zinc-800/70 dark:bg-zinc-900/70">
-                    <div class="flex items-center gap-3">
-                        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
-                            <flux:icon icon="calendar-days" variant="outline" class="size-4" />
-                        </div>
-                        <flux:heading size="sm" level="3">{{ __('Events calendar') }}</flux:heading>
-                    </div>
-                    <flux:text variant="subtle">{{ __('Consolidated listings from trusted local sources.') }}</flux:text>
-                </flux:card>
-
-                <flux:card padding="lg" class="group flex flex-col gap-4 border-zinc-200/70 bg-white/90 transition hover:-translate-y-1 hover:shadow-lg dark:border-zinc-800/70 dark:bg-zinc-900/70">
-                    <div class="flex items-center gap-3">
-                        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-200">
-                            <flux:icon icon="building-office-2" variant="outline" class="size-4" />
-                        </div>
-                        <flux:heading size="sm" level="3">{{ __('People & organizations') }}</flux:heading>
-                    </div>
-                    <flux:text variant="subtle">{{ __('Track the groups and agencies shaping decisions.') }}</flux:text>
-                </flux:card>
-
-                <flux:card padding="lg" class="group flex flex-col gap-4 border-zinc-200/70 bg-white/90 transition hover:-translate-y-1 hover:shadow-lg dark:border-zinc-800/70 dark:bg-zinc-900/70">
-                    <div class="flex items-center gap-3">
-                        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-rose-100 text-rose-700 dark:bg-rose-500/10 dark:text-rose-200">
-                            <flux:icon icon="layout-grid" variant="outline" class="size-4" />
-                        </div>
-                        <flux:heading size="sm" level="3">{{ __('Issues & topics') }}</flux:heading>
-                    </div>
-                    <flux:text variant="subtle">{{ __('Follow the themes that matter most in your city.') }}</flux:text>
-                </flux:card>
-
-                <flux:card padding="lg" class="group flex flex-col gap-4 border-zinc-200/70 bg-white/90 transition hover:-translate-y-1 hover:shadow-lg dark:border-zinc-800/70 dark:bg-zinc-900/70">
-                    <div class="flex items-center gap-3">
-                        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100">
-                            <flux:icon icon="folder-git-2" variant="outline" class="size-4" />
-                        </div>
-                        <flux:heading size="sm" level="3">{{ __('Source links & transparency') }}</flux:heading>
-                    </div>
-                    <flux:text variant="subtle">{{ __('See where information comes from with direct source links.') }}</flux:text>
-                </flux:card>
-            </div>
-        </section>
-
-        <section class="grid gap-10 lg:grid-cols-[0.9fr,1.1fr] lg:items-center">
-            <div class="flex flex-col gap-4">
-                <flux:heading size="lg" level="2">{{ __('How it works') }}</flux:heading>
-                <flux:text variant="subtle">{{ __('A simple flow from public data to daily clarity.') }}</flux:text>
-
-                <div class="flex flex-col gap-4">
-                    <flux:card padding="lg" class="flex flex-col gap-3 border-zinc-200/70 bg-white/90 dark:border-zinc-800/70 dark:bg-zinc-900/70">
-                        <div class="flex items-center gap-3">
-                            <div class="flex h-9 w-9 items-center justify-center rounded-full bg-sky-100 text-sky-700 dark:bg-sky-500/10 dark:text-sky-200">1</div>
-                            <flux:heading size="sm" level="3">{{ __('We ingest public sources') }}</flux:heading>
-                        </div>
-                        <flux:text variant="subtle">{{ __('Calendars, notices, and updates are collected from configured sources.') }}</flux:text>
                     </flux:card>
 
-                    <flux:card padding="lg" class="flex flex-col gap-3 border-zinc-200/70 bg-white/90 dark:border-zinc-800/70 dark:bg-zinc-900/70">
-                        <div class="flex items-center gap-3">
-                            <div class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">2</div>
-                            <flux:heading size="sm" level="3">{{ __('We extract civic context') }}</flux:heading>
-                        </div>
-                        <flux:text variant="subtle">{{ __('Key details are extracted and organized into a consistent format.') }}</flux:text>
-                    </flux:card>
+                    <div class="mt-4 grid gap-4 md:grid-cols-2">
+                        <flux:card padding="lg" class="rounded-2xl border-zinc-200 bg-zinc-100/80 shadow-sm">
+                            <flux:heading size="sm" level="3">{{ __('Data + context') }}</flux:heading>
+                            <ul class="mt-3 space-y-2 text-sm text-zinc-700">
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="check-circle" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('Officials, trends, and neighborhood context in one view.') }}</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="check-circle" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('Cross-source summaries that reduce noise and surface relevance.') }}</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="check-circle" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('Information organized around impact, timeline, and participation.') }}</span>
+                                </li>
+                            </ul>
+                        </flux:card>
 
-                    <flux:card padding="lg" class="flex flex-col gap-3 border-zinc-200/70 bg-white/90 dark:border-zinc-800/70 dark:bg-zinc-900/70">
-                        <div class="flex items-center gap-3">
-                            <div class="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-200">3</div>
-                            <flux:heading size="sm" level="3">{{ __('You get a clean daily view + calendar') }}</flux:heading>
-                        </div>
-                        <flux:text variant="subtle">{{ __('Browse upcoming events and recent updates in one view.') }}</flux:text>
-                    </flux:card>
-                </div>
-            </div>
+                        <flux:card padding="lg" class="rounded-2xl border-zinc-200 bg-zinc-100/80 shadow-sm">
+                            <flux:heading size="sm" level="3">{{ __('AI integration') }}</flux:heading>
+                            <ul class="mt-3 space-y-2 text-sm text-zinc-700">
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="sparkles" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('AI curation and summarization to improve speed and clarity.') }}</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="sparkles" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('Built to enhance local journalism and official public communication.') }}</span>
+                                </li>
+                                <li class="flex items-start gap-2">
+                                    <flux:icon icon="sparkles" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
+                                    <span>{{ __('Designed for trustworthy source visibility, not black-box answers.') }}</span>
+                                </li>
+                            </ul>
+                        </flux:card>
+                    </div>
+                </section>
 
-            <flux:card padding="lg" class="relative overflow-hidden border-zinc-200/70 bg-white/90 shadow-xl dark:border-zinc-800/70 dark:bg-zinc-900/70">
-                <div class="absolute -top-20 right-0 h-48 w-48 rounded-full bg-sky-200/50 blur-3xl dark:bg-sky-500/10"></div>
-                <div class="absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-emerald-200/50 blur-3xl dark:bg-emerald-500/10"></div>
-                <div class="relative flex flex-col gap-4">
-                    <flux:heading size="sm" level="2">{{ __('Daily snapshot preview') }}</flux:heading>
-                    <div class="grid gap-3">
-                        <div class="flex items-center justify-between rounded-lg bg-white/90 p-3 shadow-sm dark:bg-zinc-900/80">
-                            <div class="flex flex-col gap-1">
-                                <flux:text>{{ __('Budget hearing') }}</flux:text>
-                                <flux:text variant="subtle">{{ __('City council • 6:30 PM') }}</flux:text>
-                            </div>
-                            <flux:badge color="sky" variant="subtle">{{ __('Today') }}</flux:badge>
+                <section>
+                    <flux:heading size="xl" level="2" class="tracking-tight !mb-0">{{ __('How it works') }}</flux:heading>
+                    <flux:text class="mt-2 max-w-3xl text-zinc-700">{{ __('A simple flow from public data to daily clarity.') }}</flux:text>
+
+                    <flux:card padding="lg" class="mt-6 rounded-2xl border-zinc-200 bg-white/90 shadow-sm">
+                        <ol class="grid gap-3 text-sm lg:grid-cols-3">
+                            <li class="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+                                <span class="font-semibold text-zinc-800">{{ __('1. Gather') }}</span>
+                                <div class="mt-1 text-zinc-600">{{ __('We aggregate local information from government, community, and media sources.') }}</div>
+                            </li>
+                            <li class="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+                                <span class="font-semibold text-zinc-800">{{ __('2. Organize') }}</span>
+                                <div class="mt-1 text-zinc-600">{{ __('AI summarizes complex information and adds useful civic context.') }}</div>
+                            </li>
+                            <li class="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+                                <span class="font-semibold text-zinc-800">{{ __('3. Deliver') }}</span>
+                                <div class="mt-1 text-zinc-600">{{ __('You get clear answers, timely updates, and practical participation pathways.') }}</div>
+                            </li>
+                        </ol>
+                    </flux:card>
+                </section>
+
+                <section class="rounded-3xl border border-emerald-200/60 bg-[linear-gradient(120deg,_rgba(255,255,255,0.95),_rgba(222,245,233,0.88))] p-6 shadow-sm lg:p-8">
+                    <div class="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+                        <div class="space-y-2">
+                            <flux:heading size="md" level="2">{{ __('Get local info in one place.') }}</flux:heading>
+                            <flux:text class="text-zinc-700">{{ __('We are building our pilot in Wichita, KS and expanding city by city.') }}</flux:text>
                         </div>
-                        <div class="flex items-center justify-between rounded-lg bg-white/90 p-3 shadow-sm dark:bg-zinc-900/80">
-                            <div class="flex flex-col gap-1">
-                                <flux:text>{{ __('New zoning notice') }}</flux:text>
-                                <flux:text variant="subtle">{{ __('Open for comments') }}</flux:text>
-                            </div>
-                            <flux:badge color="amber" variant="subtle">{{ __('Open') }}</flux:badge>
-                        </div>
-                        <div class="flex items-center justify-between rounded-lg bg-white/90 p-3 shadow-sm dark:bg-zinc-900/80">
-                            <div class="flex flex-col gap-1">
-                                <flux:text>{{ __('Weekend events') }}</flux:text>
-                                <flux:text variant="subtle">{{ __('12 listings updated') }}</flux:text>
-                            </div>
-                            <flux:badge color="emerald" variant="subtle">{{ __('Updated') }}</flux:badge>
+
+                        <div class="flex flex-wrap items-center gap-3">
+                            @guest
+                                @if (Route::has('register'))
+                                    <flux:button href="{{ route('register') }}" variant="primary" wire:navigate>
+                                        {{ __('Create account') }}
+                                    </flux:button>
+                                @endif
+                                @if (Route::has('login'))
+                                    <flux:link href="{{ route('login') }}" variant="subtle" wire:navigate>
+                                        {{ __('Log in') }}
+                                    </flux:link>
+                                @endif
+                            @else
+                                <flux:button href="{{ route('dashboard') }}" variant="primary" wire:navigate>
+                                    {{ __('Go to dashboard') }}
+                                </flux:button>
+                                @if (Route::has('profile.edit'))
+                                    <flux:link href="{{ route('profile.edit') }}" variant="subtle" wire:navigate>
+                                        {{ __('Settings') }}
+                                    </flux:link>
+                                @endif
+                            @endguest
                         </div>
                     </div>
-                    <flux:text variant="subtle">{{ __('Linked back to the original source when available.') }}</flux:text>
-                </div>
-            </flux:card>
-        </section>
+                </section>
 
-        <section>
-            <flux:card
-                padding="lg"
-                class="flex flex-col gap-6 border-zinc-200/70 bg-gradient-to-r from-white via-sky-50 to-emerald-50 shadow-lg dark:border-zinc-800/70 dark:from-zinc-950 dark:via-slate-900 dark:to-emerald-950"
-            >
-                <div class="flex flex-col gap-2">
-                    <flux:heading size="md" level="2">
-                        {{ __('Get local info in one place.') }}
-                    </flux:heading>
-                    <flux:text variant="subtle">
-                        {{ __('Create an account to follow a city and see what’s coming up.') }}
-                    </flux:text>
-                </div>
-
-                <div class="flex flex-wrap items-center gap-3">
-                    @guest
-                        @if (Route::has('register'))
-                            <flux:button href="{{ route('register') }}" variant="primary" wire:navigate>
-                                {{ __('Create account') }}
-                            </flux:button>
-                        @endif
-                        @if (Route::has('login'))
-                            <flux:link href="{{ route('login') }}" variant="subtle" wire:navigate>
-                                {{ __('Log in') }}
+                <footer class="flex flex-col gap-4 border-t border-zinc-200/80 pt-8 text-sm">
+                    <flux:text variant="subtle">{{ __('Coverage varies by city and source availability.') }}</flux:text>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <flux:text variant="subtle">{{ __('© :year LocAlmanac.', ['year' => date('Y')]) }}</flux:text>
+                        @guest
+                            @if (Route::has('login'))
+                                <flux:link href="{{ route('login') }}" variant="subtle" wire:navigate>
+                                    {{ __('Log in') }}
+                                </flux:link>
+                            @endif
+                            @if (Route::has('register'))
+                                <flux:link href="{{ route('register') }}" variant="subtle" wire:navigate>
+                                    {{ __('Create account') }}
+                                </flux:link>
+                            @endif
+                        @else
+                            <flux:link href="{{ route('dashboard') }}" variant="subtle" wire:navigate>
+                                {{ __('Dashboard') }}
                             </flux:link>
-                        @endif
-                    @else
-                        <flux:button href="{{ route('dashboard') }}" variant="primary" wire:navigate>
-                            {{ __('Go to dashboard') }}
-                        </flux:button>
-                        @if (Route::has('profile.edit'))
-                            <flux:link href="{{ route('profile.edit') }}" variant="subtle" wire:navigate>
-                                {{ __('Settings') }}
-                            </flux:link>
-                        @endif
-                    @endguest
-                </div>
-            </flux:card>
-        </section>
+                        @endguest
+                    </div>
+                </footer>
+            </main>
+        </div>
 
-        <footer class="flex flex-col gap-4 border-t border-zinc-200 pt-8 text-sm dark:border-zinc-800">
-            <flux:text variant="subtle">{{ __('Coverage varies by city and source availability.') }}</flux:text>
-            <div class="flex flex-wrap items-center gap-3">
-                <flux:text variant="subtle">{{ __('© :year LocAlmanac.', ['year' => date('Y')]) }}</flux:text>
-                @guest
-                    @if (Route::has('login'))
-                        <flux:link href="{{ route('login') }}" variant="subtle" wire:navigate>
-                            {{ __('Log in') }}
-                        </flux:link>
-                    @endif
-                    @if (Route::has('register'))
-                        <flux:link href="{{ route('register') }}" variant="subtle" wire:navigate>
-                            {{ __('Create account') }}
-                        </flux:link>
-                    @endif
-                @else
-                    <flux:link href="{{ route('dashboard') }}" variant="subtle" wire:navigate>
-                        {{ __('Dashboard') }}
-                    </flux:link>
-                @endguest
-            </div>
-        </footer>
-    </div>
-@endcomponent
+        @auth
+            <livewire:feedback.widget />
+        @endauth
+
+        @fluxScripts
+    </body>
+</html>

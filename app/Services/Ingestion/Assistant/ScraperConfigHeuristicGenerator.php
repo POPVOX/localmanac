@@ -115,18 +115,101 @@ class ScraperConfigHeuristicGenerator
         return str_contains(mb_strtolower($html), 'docs.google.com');
     }
 
+    private function looksLikeWixBlogProfile(string $html): bool
+    {
+        $htmlLower = mb_strtolower($html);
+
+        return str_contains($htmlLower, 'wix.com website builder')
+            || str_contains($htmlLower, 'wixstatic.com');
+    }
+
     /**
      * @return array{profile: string, config: array<string, mixed>, warnings: array<int, string>, confidence: float}
      */
     private function generateGenericListingConfig(string $sourceUrl, string $html): array
     {
         $crawler = new Crawler($html, $sourceUrl);
+        $htmlLower = mb_strtolower($html);
+
+        if (str_contains($htmlLower, 'fusion-app')) {
+            $arcLinkSelector = $this->firstSelectorWithCount($crawler, [
+                '.flex-feature-feed h4.headline a[href^="/20"]',
+                '.flex-feature-feed .headlines a[href^="/20"]',
+                '.flex-feature-feed h4 a[href^="/20"]',
+                'h4.headline a[href^="/20"]',
+            ], 2);
+
+            if ($arcLinkSelector !== null) {
+                return [
+                    'profile' => 'generic_listing',
+                    'config' => [
+                        'profile' => 'generic_listing',
+                        'list' => [
+                            'link_selector' => trim($arcLinkSelector),
+                            'link_attr' => 'href',
+                            'max_links' => 25,
+                        ],
+                        'article' => [
+                            'content_selector' => '.article-body',
+                            'remove_selectors' => ['script', 'style', 'nav', 'footer'],
+                        ],
+                        'best_effort' => true,
+                    ],
+                    'warnings' => [],
+                    'confidence' => 0.86,
+                ];
+            }
+        }
+
+        if ($this->looksLikeWixBlogProfile($html)) {
+            $wixLinkSelector = $this->firstSelectorWithCount($crawler, [
+                'main a[href*="/post/"]',
+                'a[href*="/post/"]',
+                'main a[href*="/blog/post/"]',
+                'a[href*="/blog/post/"]',
+            ], 2);
+
+            if ($wixLinkSelector !== null) {
+                return [
+                    'profile' => 'generic_listing',
+                    'config' => [
+                        'profile' => 'generic_listing',
+                        'list' => [
+                            'link_selector' => trim($wixLinkSelector),
+                            'link_attr' => 'href',
+                            'max_links' => 25,
+                            'max_pages' => 5,
+                            'pagination_selector' => 'a[href*="/page/"]',
+                            'pagination_attr' => 'href',
+                        ],
+                        'article' => [
+                            'content_selector' => 'main',
+                            'remove_selectors' => ['script', 'style', 'nav', 'footer'],
+                        ],
+                        'best_effort' => true,
+                    ],
+                    'warnings' => [],
+                    'confidence' => 0.84,
+                ];
+            }
+        }
 
         $linkSelectorCandidates = [
+            '.entry-title a',
+            'h2.entry-title a',
+            'main a[href*="/post/"]',
+            'a[href*="/post/"]',
+            '.post-title a',
+            '.article-title a',
+            'article h2 a',
+            'article h3 a',
             'article a',
             'main article a',
             '.entry a',
             '.post a',
+            'h4.headline a',
+            '.headlines a',
+            'h4 a',
             'h2 a',
             'h3 a',
             'main a',
@@ -135,24 +218,28 @@ class ScraperConfigHeuristicGenerator
 
         $linkSelector = $this->firstSelectorWithCount($crawler, $linkSelectorCandidates, 2) ?? 'article a';
         $contentSelector = $this->firstSelectorWithCount($crawler, [
+            '.entry-content',
+            '.article-body',
+            '.article-content',
+            'main article',
             'article',
             'main',
-            '.entry-content',
-            '.article-content',
             '#content',
             '.content',
         ], 1) ?? 'article';
 
         $warnings = [];
         $confidence = 0.72;
+        $broadLinkSelectors = ['article a', 'main article a', 'h2 a', 'h3 a', 'h4 a', 'main a', 'a[href]'];
+        $genericContentSelectors = ['article', 'main', '#content', '.content'];
 
-        if ($linkSelector === 'article a') {
+        if (in_array($linkSelector, $broadLinkSelectors, true)) {
             $warnings[] = 'Link selector confidence is moderate. Verify links in preview results.';
             $confidence = 0.64;
         }
 
-        if ($contentSelector === 'article') {
-            $warnings[] = 'Article content selector used default `article`.';
+        if (in_array($contentSelector, $genericContentSelectors, true)) {
+            $warnings[] = 'Article content selector confidence is moderate. Verify extracted body text in preview.';
             $confidence = min($confidence, 0.61);
         }
 

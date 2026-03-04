@@ -33,7 +33,6 @@ test('authenticated users see dashboard ctas', function () {
 
     $response
         ->assertOk()
-        ->assertSee('Search')
         ->assertSee('Go to dashboard')
         ->assertDontSee('Create account')
         ->assertDontSee('Log in');

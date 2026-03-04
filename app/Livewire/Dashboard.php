@@ -8,13 +8,24 @@ use App\Models\IssueArea;
 use App\Services\Chat\AskService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
+use Livewire\WithPagination;
 use Throwable;
 
 class Dashboard extends Component
 {
+    use WithPagination;
+
+    private const ARTICLE_RESULT_LIMIT = 10;
+
+    private const ARTICLE_SEARCH_CANDIDATE_LIMIT = 250;
+
+    private const ARTICLE_PAGE_NAME = 'articles-page';
+
     public string $question = '';
 
     /**
@@ -116,11 +127,13 @@ class Dashboard extends Component
     public function selectIssueArea(int $issueAreaId): void
     {
         $this->activeIssueAreaId = $issueAreaId;
+        $this->resetArticlePage();
     }
 
     public function clearIssueArea(): void
     {
         $this->activeIssueAreaId = null;
+        $this->resetArticlePage();
     }
 
     public function updatedActiveIssueAreaId(mixed $value): void
@@ -138,6 +151,17 @@ class Dashboard extends Component
     {
         $this->activeIssueAreaId = null;
         $this->articleSearch = trim($chip);
+        $this->resetArticlePage();
+    }
+
+    public function updatingArticleSearch(): void
+    {
+        $this->resetArticlePage();
+    }
+
+    public function updatingCityId(): void
+    {
+        $this->resetArticlePage();
     }
 
     public function render(): View
@@ -149,42 +173,22 @@ class Dashboard extends Component
             ->orderBy('name')
             ->get();
 
-        $promptChips = $issueAreas
-            ->take(4)
-            ->pluck('name')
-            ->filter()
-            ->values()
-            ->all();
-
-        if ($promptChips === []) {
-            $promptChips = [
-                __('Building permits'),
-                __('Council meetings'),
-                __('Local events'),
-                __('Construction updates'),
-            ];
-        }
+        $promptChips = $this->chatPromptChips($city);
+        $articleFallbackChips = $this->articleFallbackChips();
 
         $articleBase = $this->articleQuery($city);
 
         $totalArticles = (clone $articleBase)->count();
         $articlesAddedToday = $this->countArticlesForDate($articleBase, $timezone);
 
-        $articles = $this->applyArticleFilters($this->articleQuery($city))
-            ->with([
-                'scraper.organization',
-                'sources',
-                'articleIssueAreas.issueArea',
-            ])
-            ->orderByDesc(DB::raw('COALESCE(published_at, created_at)'))
-            ->limit(10)
-            ->get();
+        $articles = $this->dashboardArticles($city);
 
         return view('livewire.dashboard', [
             'city' => $city,
             'timezone' => $timezone,
             'issueAreas' => $issueAreas,
             'promptChips' => $promptChips,
+            'articleFallbackChips' => $articleFallbackChips,
             'articles' => $articles,
             'stats' => [
                 'totalArticles' => $totalArticles,
@@ -244,10 +248,129 @@ class Dashboard extends Component
         return $query;
     }
 
+    private function dashboardArticles(?City $city): LengthAwarePaginator
+    {
+        $search = trim($this->articleSearch);
+
+        if ($search === '') {
+            return $this->recentArticles($city);
+        }
+
+        return $this->searchArticles($city, $search);
+    }
+
+    private function recentArticles(?City $city): LengthAwarePaginator
+    {
+        return $this->applyArticleFilters($this->articleQuery($city))
+            ->with($this->articleRelations())
+            ->orderByDesc(DB::raw('COALESCE(published_at, created_at)'))
+            ->paginate(self::ARTICLE_RESULT_LIMIT, ['*'], self::ARTICLE_PAGE_NAME);
+    }
+
+    private function searchArticles(?City $city, string $search): LengthAwarePaginator
+    {
+        try {
+            $searchQuery = Article::search($search);
+
+            if ($city?->id) {
+                $searchQuery->where('city_id', $city->id);
+            }
+
+            $orderedIds = collect($searchQuery
+                ->take(self::ARTICLE_SEARCH_CANDIDATE_LIMIT)
+                ->keys())
+                ->map(fn (int|string $id): int => (int) $id)
+                ->filter(fn (int $id): bool => $id > 0)
+                ->values();
+
+            if ($orderedIds->isEmpty()) {
+                return $this->emptyArticlePaginator();
+            }
+
+            $query = Article::query()
+                ->whereIn('id', $orderedIds->all());
+
+            if ($city?->id) {
+                $query->where('city_id', $city->id);
+            }
+
+            if ($this->activeIssueAreaId) {
+                $query->whereHas('articleIssueAreas', function (Builder $builder): void {
+                    $builder->where('issue_area_id', $this->activeIssueAreaId);
+                });
+            }
+
+            $matchedIds = $query
+                ->pluck('id')
+                ->map(fn (int|string $id): int => (int) $id)
+                ->filter(fn (int $id): bool => $id > 0);
+
+            $matchedIdSet = $matchedIds->flip();
+            $filteredOrderedIds = $orderedIds
+                ->filter(fn (int $id): bool => $matchedIdSet->has($id))
+                ->values();
+
+            $total = $filteredOrderedIds->count();
+
+            if ($total === 0) {
+                return $this->emptyArticlePaginator();
+            }
+
+            $currentPage = max(1, (int) $this->getPage(self::ARTICLE_PAGE_NAME));
+            $lastPage = max(1, (int) ceil($total / self::ARTICLE_RESULT_LIMIT));
+            $currentPage = min($currentPage, $lastPage);
+            $offset = ($currentPage - 1) * self::ARTICLE_RESULT_LIMIT;
+
+            $pageIds = $filteredOrderedIds
+                ->slice($offset, self::ARTICLE_RESULT_LIMIT)
+                ->values();
+
+            if ($pageIds->isEmpty()) {
+                return $this->emptyArticlePaginator();
+            }
+
+            $matched = Article::query()
+                ->whereIn('id', $pageIds->all())
+                ->with($this->articleRelations())
+                ->get()
+                ->keyBy('id');
+
+            $ordered = $pageIds
+                ->map(fn (int $id): ?Article => $matched->get($id))
+                ->filter()
+                ->values();
+
+            return new LengthAwarePaginator(
+                new EloquentCollection($ordered->all()),
+                $total,
+                self::ARTICLE_RESULT_LIMIT,
+                $currentPage,
+                [
+                    'path' => LengthAwarePaginator::resolveCurrentPath(),
+                    'pageName' => self::ARTICLE_PAGE_NAME,
+                ],
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return $this->sqlLikeFallbackArticles($city);
+        }
+    }
+
+    private function sqlLikeFallbackArticles(?City $city): LengthAwarePaginator
+    {
+        return $this->applyArticleFilters($this->articleQuery($city))
+            ->with($this->articleRelations())
+            ->orderByDesc(DB::raw('COALESCE(published_at, created_at)'))
+            ->paginate(self::ARTICLE_RESULT_LIMIT, ['*'], self::ARTICLE_PAGE_NAME);
+    }
+
     private function applyArticleFilters(Builder $query): Builder
     {
-        if ($this->articleSearch !== '') {
-            $search = '%'.addcslashes($this->articleSearch, '%_').'%';
+        $searchTerm = trim($this->articleSearch);
+
+        if ($searchTerm !== '') {
+            $search = '%'.addcslashes($searchTerm, '%_').'%';
 
             $query->where(function (Builder $builder) use ($search): void {
                 $builder->where('title', 'like', $search)
@@ -277,5 +400,76 @@ class Dashboard extends Component
                     });
             })
             ->count();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function articleRelations(): array
+    {
+        return [
+            'scraper.organization',
+            'sources',
+            'articleIssueAreas.issueArea',
+        ];
+    }
+
+    private function emptyArticlePaginator(): LengthAwarePaginator
+    {
+        return new LengthAwarePaginator(
+            new EloquentCollection,
+            0,
+            self::ARTICLE_RESULT_LIMIT,
+            1,
+            [
+                'path' => LengthAwarePaginator::resolveCurrentPath(),
+                'pageName' => self::ARTICLE_PAGE_NAME,
+            ],
+        );
+    }
+
+    private function resetArticlePage(): void
+    {
+        $this->resetPage(self::ARTICLE_PAGE_NAME);
+    }
+
+    /**
+     * @return array<int, array{label: string, prompt: string}>
+     */
+    private function chatPromptChips(?City $city): array
+    {
+        $cityName = $city?->name ?? __('your city');
+
+        return [
+            [
+                'label' => __('What changed this week?'),
+                'prompt' => __('Summarize the most important local updates in :city from the last 7 days. Focus on decisions, projects, and deadlines, and include citations.', ['city' => $cityName]),
+            ],
+            [
+                'label' => __('Upcoming meetings'),
+                'prompt' => __('What city council, board, and public meetings are coming up in :city in the next 14 days? Include dates, times, and where to find the agenda.', ['city' => $cityName]),
+            ],
+            [
+                'label' => __('New permits & projects'),
+                'prompt' => __('What new permits, rezonings, or major development projects were recently filed or approved in :city? Include status and key locations.', ['city' => $cityName]),
+            ],
+            [
+                'label' => __('Service alerts'),
+                'prompt' => __('What active service alerts or disruptions should residents in :city know about right now? Focus on roads, utilities, water, trash, and public services.', ['city' => $cityName]),
+            ],
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function articleFallbackChips(): array
+    {
+        return [
+            __('Building permits'),
+            __('Council meetings'),
+            __('Local events'),
+            __('Construction updates'),
+        ];
     }
 }

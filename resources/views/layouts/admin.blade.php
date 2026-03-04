@@ -3,7 +3,7 @@
     <head>
         @include('partials.head')
     </head>
-    <body class="min-h-screen bg-white dark:bg-zinc-900">
+    <body class="app-shell-bg">
         <flux:sidebar sticky stashable class="border-e border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900">
             <flux:sidebar.toggle class="lg:hidden" icon="x-mark" />
 
@@ -33,6 +33,9 @@
                     </flux:navlist.item>
                     <flux:navlist.item icon="chat-bubble-left-right" :href="route('admin.chat-sources.index')" :current="request()->routeIs('admin.chat-sources.*')" wire:navigate>
                         {{ __('Chat Sources') }}
+                    </flux:navlist.item>
+                    <flux:navlist.item icon="chat-bubble-left-right" :href="route('admin.feedback.index')" :current="request()->routeIs('admin.feedback.*')" wire:navigate>
+                        {{ __('Feedback') }}
                     </flux:navlist.item>
             </flux:navlist.group>
         </flux:navlist>
@@ -85,7 +88,7 @@
             </flux:dropdown>
         </flux:sidebar>
 
-        <flux:header class="lg:hidden">
+        <flux:header class="app-shell-header lg:hidden">
             <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
 
             <flux:spacer />

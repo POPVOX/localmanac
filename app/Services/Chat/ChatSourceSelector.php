@@ -4,6 +4,7 @@ namespace App\Services\Chat;
 
 use App\Models\ChatSource;
 use Illuminate\Support\Collection;
+use Throwable;
 
 class ChatSourceSelector
 {
@@ -18,11 +19,15 @@ class ChatSourceSelector
         $sources = collect();
 
         if ($question !== '') {
-            $sources = ChatSource::search($question)
-                ->where('city_id', $cityId)
-                ->where('is_active', true)
-                ->take($limit)
-                ->get();
+            try {
+                $sources = ChatSource::search($question)
+                    ->where('city_id', $cityId)
+                    ->where('is_active', true)
+                    ->take($limit)
+                    ->get();
+            } catch (Throwable $exception) {
+                report($exception);
+            }
         }
 
         if ($sources->count() < $limit) {

@@ -140,6 +140,10 @@ return [
         'host' => env('MEILISEARCH_HOST', 'http://localhost:7700'),
         'key' => env('MEILISEARCH_KEY'),
         'index-settings' => [
+            App\Models\Article::class => [
+                'filterableAttributes' => ['city_id'],
+                'searchableAttributes' => ['title', 'summary', 'body'],
+            ],
             App\Models\ChatSource::class => [
                 'filterableAttributes' => ['city_id', 'is_active'],
                 'sortableAttributes' => ['priority', 'updated_at'],

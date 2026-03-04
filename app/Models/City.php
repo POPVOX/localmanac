@@ -55,4 +55,9 @@ class City extends Model
     {
         return $this->hasMany(ChatSource::class);
     }
+
+    public function siteFeedbackEntries(): HasMany
+    {
+        return $this->hasMany(SiteFeedback::class);
+    }
 }

@@ -15,14 +15,14 @@ class PageFetcher
     /**
      * @return array{url: string, status_code: int, content_type: string|null, body: string, renderer: string}|null
      */
-    public function fetch(string $url, ?string $rendererOverride = null): ?array
+    public function fetch(string $url, ?string $rendererOverride = null, array $playwrightOptions = []): ?array
     {
         $mode = $rendererOverride && $rendererOverride !== ''
             ? $rendererOverride
             : (string) config('chat.crawl_renderer', 'auto');
 
         if ($mode === 'playwright') {
-            return $this->playwrightFetcher->fetch($url) ?? $this->httpFetcher->fetch($url);
+            return $this->playwrightFetch($url, $playwrightOptions) ?? $this->httpFetcher->fetch($url);
         }
 
         if ($mode === 'http') {
@@ -32,11 +32,11 @@ class PageFetcher
         $httpResult = $this->httpFetcher->fetch($url);
 
         if ($httpResult === null) {
-            return $this->playwrightFetcher->fetch($url);
+            return $this->playwrightFetch($url, $playwrightOptions);
         }
 
         if ($this->shouldUsePlaywright($httpResult['body'], $url)) {
-            $playwrightResult = $this->playwrightFetcher->fetch($url);
+            $playwrightResult = $this->playwrightFetch($url, $playwrightOptions);
 
             if ($playwrightResult !== null) {
                 return $playwrightResult;
@@ -77,6 +77,8 @@ class PageFetcher
             'app-root',
             'enable javascript',
             'please enable javascript',
+            'javascript required',
+            'checking your browser',
         ];
 
         foreach ($markers as $marker) {
@@ -86,5 +88,18 @@ class PageFetcher
         }
 
         return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $playwrightOptions
+     * @return array{url: string, status_code: int, content_type: string|null, body: string, renderer: string}|null
+     */
+    private function playwrightFetch(string $url, array $playwrightOptions): ?array
+    {
+        if ($playwrightOptions === []) {
+            return $this->playwrightFetcher->fetch($url);
+        }
+
+        return $this->playwrightFetcher->fetch($url, $playwrightOptions);
     }
 }

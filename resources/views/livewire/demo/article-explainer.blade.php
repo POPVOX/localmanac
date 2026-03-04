@@ -14,6 +14,10 @@
     $publishedAt = $article->published_at ?? $article->created_at;
     $updatedAt = $article->body?->updated_at;
     $participationActions = $this->participationActions();
+    $showProcessTimelineSection = collect($processTimelineItems)->contains(
+        fn (array $item): bool => ($item['has_date'] ?? false) === true
+            || (is_string($item['note'] ?? null) && trim($item['note']) !== '')
+    );
 @endphp
 
 <div class="mx-auto flex max-w-6xl flex-col gap-10">
@@ -67,14 +71,12 @@
                     @endif
                 </div>
 
-                <div class="flex flex-col gap-4">
-                    <flux:text class="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
-                        {{ __('Where we are in the process') }}
-                    </flux:text>
+                @if ($showProcessTimelineSection)
+                    <div class="flex flex-col gap-4">
+                        <flux:text class="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
+                            {{ __('Where we are in the process') }}
+                        </flux:text>
 
-                    @if ($processTimelineItems === [])
-                        <flux:text variant="subtle">{{ __('Timeline pending.') }}</flux:text>
-                    @else
                         <div class="flex flex-col gap-6">
                             @foreach ($processTimelineItems as $item)
                                 <div class="relative flex gap-4 pb-6 last:pb-0">
@@ -110,8 +112,8 @@
                                 </div>
                             @endforeach
                         </div>
-                    @endif
-                </div>
+                    </div>
+                @endif
 
                 @if ($keyDetails !== [] || $whatToWatch !== [])
                     <flux:separator />
@@ -208,17 +210,19 @@
         </div>
 
         <div class="flex flex-col gap-6">
-            <flux:card padding="lg" class="flex flex-col gap-5 border-2 border-blue-100 bg-blue-50/60 dark:border-blue-900/50 dark:bg-blue-950/30">
-                <div class="flex items-center justify-between gap-3">
-                    <flux:heading size="lg" level="2" class="text-blue-950 dark:text-blue-100">
+            <flux:card padding="lg" class="relative flex flex-col gap-5 overflow-hidden border border-zinc-200 bg-white/90 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/70">
+                <span class="pointer-events-none absolute inset-y-0 start-0 w-1.5 bg-gradient-to-b from-emerald-300 via-emerald-400 to-emerald-500 dark:from-emerald-700 dark:via-emerald-600 dark:to-emerald-500"></span>
+
+                <div class="flex items-center justify-between gap-3 ps-2">
+                    <flux:heading size="lg" level="2">
                         {{ __('How to Participate') }}
                     </flux:heading>
                 </div>
 
-                <div class="flex flex-col gap-5">
+                <div class="flex flex-col gap-5 ps-2">
                     @forelse ($participationActions as $action)
-                        <div class="flex gap-4 pb-5 last:pb-0 last:border-b-0 border-b border-blue-100/70 dark:border-blue-900/50">
-                            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-blue-700 ring-1 ring-blue-100 dark:bg-blue-900/60 dark:text-blue-100 dark:ring-blue-900">
+                        <div class="flex gap-4 border-b border-zinc-200/80 pb-5 last:border-b-0 last:pb-0 dark:border-zinc-700/70">
+                            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100/80 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-200 dark:ring-emerald-800">
                                 <flux:icon :icon="$action['icon']" variant="micro" class="size-5" />
                             </div>
                             <div class="flex flex-1 flex-col gap-2">
@@ -243,7 +247,14 @@
 
                                 <div class="flex flex-wrap items-center gap-3">
                                     @if ($action['cta_url'])
-                                        <flux:button size="sm" variant="ghost" :href="$action['cta_url']" target="_blank" icon:trailing="arrow-right">
+                                        <flux:button
+                                            size="sm"
+                                            variant="ghost"
+                                            :href="$action['cta_url']"
+                                            target="_blank"
+                                            icon:trailing="arrow-right"
+                                            class="text-emerald-700 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
+                                        >
                                             {{ $action['cta_label'] ?? __('View details') }}
                                         </flux:button>
                                     @endif
@@ -266,7 +277,7 @@
                 </div>
 
                 @if ($entitiesByGroup === [])
-                    <flux:text variant="subtle">{{ __('No extracted entities yet.') }}</flux:text>
+                    <flux:text variant="subtle">{{ __('No people or organizations listed yet.') }}</flux:text>
                 @else
                     <div class="flex flex-col gap-4">
                         @foreach ($entitiesByGroup as $groupLabel => $entities)

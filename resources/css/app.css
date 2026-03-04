@@ -24,16 +24,16 @@
 }
 
 @theme {
-    --color-accent: var(--color-amber-400);
-    --color-accent-content: var(--color-amber-600);
-    --color-accent-foreground: var(--color-amber-950);
+    --color-accent: var(--color-green-700);
+    --color-accent-content: var(--color-zinc-800);
+    --color-accent-foreground: var(--color-white);
 }
 
 @layer theme {
     .dark {
-        --color-accent: var(--color-amber-400);
-        --color-accent-content: var(--color-amber-400);
-        --color-accent-foreground: var(--color-amber-950);
+        --color-accent: var(--color-green-600);
+        --color-accent-content: var(--color-zinc-100);
+        --color-accent-foreground: var(--color-white);
     }
 }
 
@@ -45,6 +45,20 @@
     ::backdrop,
     ::file-selector-button {
         border-color: var(--color-gray-200, currentColor);
+    }
+}
+
+@layer components {
+    .app-shell-bg {
+        @apply min-h-screen bg-fixed dark:bg-zinc-900;
+        background-color: #f8f4ee;
+        background-image: radial-gradient(120% 90% at 50% -10%, #fcfcfb 0%, #f8f4ee 52%, #f1ebe2 100%);
+        background-repeat: no-repeat;
+        background-size: 100% 100vh;
+    }
+
+    .app-shell-header {
+        @apply border-b border-zinc-300 bg-white/95 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-900;
     }
 }
 

@@ -24,10 +24,15 @@ class Calendar extends Component
         $this->selectedDate = $this->resolveSelectedDate(request()->query('date'), $timezone)->toDateString();
     }
 
-    public function updatedSelectedDate(string $value): void
+    public function updatedSelectedDate(mixed $value): void
     {
+        if ($value !== null && ! is_string($value)) {
+            return;
+        }
+
         $timezone = $this->resolveTimezone($this->resolveCity());
         $date = $this->resolveSelectedDate($value, $timezone)->toDateString();
+        $this->selectedDate = $date;
 
         $this->redirectRoute('demo.calendar', $this->buildRouteParameters($date));
     }

@@ -3,14 +3,19 @@
 namespace App\Services\Ingestion\Fetchers;
 
 use App\Models\Scraper;
+use App\Services\Chat\Ingestion\PageFetcher;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Symfony\Component\DomCrawler\Crawler;
 
 class DocumentersFetcher
 {
+    public function __construct(
+        private readonly PageFetcher $pageFetcher,
+    ) {}
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -36,24 +41,32 @@ class DocumentersFetcher
 
         $linkAttr = $listConfig['link_attr'] ?? 'href';
         $maxLinks = (int) ($listConfig['max_links'] ?? 50);
+        $renderer = $this->resolveRenderer($scraper->config['fetch']['renderer'] ?? null);
+        $listingPlaywrightOptions = $this->resolvePlaywrightOptions(is_array($scraper->config) ? $scraper->config : []);
+        $detailPlaywrightOptions = $this->resolveDetailPlaywrightOptions($listingPlaywrightOptions);
 
-        $listingResponse = $this->httpClient()->get($sourceUrl);
-
-        if (! $listingResponse->successful()) {
-            throw new InvalidArgumentException('Failed to fetch listing page');
-        }
-
-        $links = $this->extractDocLinks($listingResponse->body(), $linkSelector, $linkAttr, $maxLinks);
+        $listingHtml = $this->fetchPageHtml($sourceUrl, $renderer, true, $listingPlaywrightOptions);
+        $links = $this->extractDocLinks($listingHtml, $linkSelector, $linkAttr, $maxLinks);
         $items = [];
+        $blockedDetailCount = 0;
 
         foreach ($links as $url) {
-            $docResponse = $this->httpClient()->get($url);
+            try {
+                $rawHtml = $this->fetchPageHtml($url, $renderer, false, $detailPlaywrightOptions, true);
+            } catch (InvalidArgumentException $exception) {
+                if ($this->isAntiBotException($exception)) {
+                    $blockedDetailCount++;
 
-            if (! $docResponse->successful()) {
+                    continue;
+                }
+
+                throw $exception;
+            }
+
+            if ($rawHtml === null) {
                 continue;
             }
 
-            $rawHtml = $docResponse->body();
             $cleanedText = $this->extractCleanedText($rawHtml);
 
             if ($cleanedText === '') {
@@ -76,6 +89,10 @@ class DocumentersFetcher
                 ],
                 'content_hash' => sha1($cleanedText),
             ];
+        }
+
+        if ($items === [] && $blockedDetailCount > 0) {
+            throw new InvalidArgumentException('Detail pages are blocked by anti-bot protection. Consider using Playwright renderer with a persistent session or a source feed URL.');
         }
 
         return $items;
@@ -242,10 +259,194 @@ class DocumentersFetcher
         return $url;
     }
 
-    private function httpClient()
+    private function resolveRenderer(mixed $value): string
     {
-        return Http::timeout(20)
-            ->retry(2, 250)
-            ->withHeaders(['User-Agent' => 'LocalmanacBot/1.0']);
+        if (! is_string($value)) {
+            return 'http';
+        }
+
+        $normalized = mb_strtolower(trim($value));
+
+        if (! in_array($normalized, ['auto', 'http', 'playwright'], true)) {
+            return 'http';
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<string, mixed>  $playwrightOptions
+     */
+    private function fetchPageHtml(string $url, string $renderer, bool $required, array $playwrightOptions, bool $throwOnBlocked = false): ?string
+    {
+        $result = $playwrightOptions === []
+            ? $this->pageFetcher->fetch($url, $renderer)
+            : $this->pageFetcher->fetch($url, $renderer, $playwrightOptions);
+        $html = $result['body'] ?? null;
+        $playwrightHtml = null;
+
+        if (is_string($html) && ! $this->looksLikeBotChallengePage($html)) {
+            return $html;
+        }
+
+        if ($renderer !== 'playwright') {
+            $playwrightResult = $playwrightOptions === []
+                ? $this->pageFetcher->fetch($url, 'playwright')
+                : $this->pageFetcher->fetch($url, 'playwright', $playwrightOptions);
+            $playwrightHtml = $playwrightResult['body'] ?? null;
+
+            if (is_string($playwrightHtml) && ! $this->looksLikeBotChallengePage($playwrightHtml)) {
+                return $playwrightHtml;
+            }
+        }
+
+        $blockedByAntiBot = (
+            (is_string($html) && $this->looksLikeBotChallengePage($html))
+            || (is_string($playwrightHtml) && $this->looksLikeBotChallengePage($playwrightHtml))
+        );
+
+        if ($blockedByAntiBot && ($required || $throwOnBlocked)) {
+            $message = $required
+                ? 'Listing page is blocked by anti-bot protection. Consider using Playwright renderer with a persistent session or a source feed URL.'
+                : 'Detail pages are blocked by anti-bot protection. Consider using Playwright renderer with a persistent session or a source feed URL.';
+
+            throw new InvalidArgumentException($message);
+        }
+
+        if ($required) {
+            throw new InvalidArgumentException('Failed to fetch listing page');
+        }
+
+        return null;
+    }
+
+    private function looksLikeBotChallengePage(string $html): bool
+    {
+        $lower = mb_strtolower($html);
+        $markers = [
+            'px-captcha',
+            'access to this page has been denied',
+            'before we continue',
+            'cf-chl-',
+            'checking your browser',
+            'javascript required',
+            'verify you are human',
+        ];
+
+        foreach ($markers as $marker) {
+            if (str_contains($lower, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isAntiBotException(InvalidArgumentException $exception): bool
+    {
+        return str_contains(mb_strtolower($exception->getMessage()), 'anti-bot protection');
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     * @return array<string, mixed>
+     */
+    private function resolvePlaywrightOptions(array $config): array
+    {
+        $playwrightConfig = Arr::get($config, 'fetch.playwright');
+
+        if (! is_array($playwrightConfig)) {
+            return [];
+        }
+
+        $options = [];
+
+        $timeoutValue = $playwrightConfig['timeout_ms'] ?? null;
+        if (is_numeric($timeoutValue)) {
+            $options['timeout_ms'] = (int) $timeoutValue;
+        }
+
+        $waitSelectorValue = $playwrightConfig['wait_selector'] ?? null;
+        if (is_string($waitSelectorValue) && trim($waitSelectorValue) !== '') {
+            $options['wait_selector'] = trim($waitSelectorValue);
+        }
+
+        $userAgentValue = $playwrightConfig['user_agent'] ?? null;
+        if (is_string($userAgentValue) && trim($userAgentValue) !== '') {
+            $options['user_agent'] = trim($userAgentValue);
+        }
+
+        $storagePathValue = $playwrightConfig['storage_state_path'] ?? null;
+        if (is_string($storagePathValue) && trim($storagePathValue) !== '') {
+            $options['storage_state_path'] = trim($storagePathValue);
+        }
+
+        $refreshOnBlockedValue = $playwrightConfig['refresh_on_blocked'] ?? null;
+        if (is_bool($refreshOnBlockedValue)) {
+            $options['refresh_on_blocked'] = $refreshOnBlockedValue;
+        }
+
+        $refreshAttemptsValue = $playwrightConfig['refresh_attempts'] ?? null;
+        if (is_numeric($refreshAttemptsValue)) {
+            $options['refresh_attempts'] = (int) $refreshAttemptsValue;
+        }
+
+        $autoScrollValue = $playwrightConfig['auto_scroll'] ?? null;
+        if (is_bool($autoScrollValue)) {
+            $options['auto_scroll'] = $autoScrollValue;
+        }
+
+        $maxScrollStepsValue = $playwrightConfig['max_scroll_steps'] ?? null;
+        if (is_numeric($maxScrollStepsValue)) {
+            $options['max_scroll_steps'] = (int) $maxScrollStepsValue;
+        }
+
+        $scrollPauseMsValue = $playwrightConfig['scroll_pause_ms'] ?? null;
+        if (is_numeric($scrollPauseMsValue)) {
+            $options['scroll_pause_ms'] = (int) $scrollPauseMsValue;
+        }
+
+        $proxyValue = $playwrightConfig['proxy'] ?? null;
+
+        if (is_array($proxyValue)) {
+            $proxy = [];
+
+            $serverValue = $proxyValue['server'] ?? null;
+            if (is_string($serverValue) && trim($serverValue) !== '') {
+                $proxy['server'] = trim($serverValue);
+            }
+
+            $usernameValue = $proxyValue['username'] ?? null;
+            if (is_string($usernameValue) && trim($usernameValue) !== '') {
+                $proxy['username'] = trim($usernameValue);
+            }
+
+            $passwordValue = $proxyValue['password'] ?? null;
+            if (is_string($passwordValue) && trim($passwordValue) !== '') {
+                $proxy['password'] = trim($passwordValue);
+            }
+
+            $bypassValue = $proxyValue['bypass'] ?? null;
+            if (is_string($bypassValue) && trim($bypassValue) !== '') {
+                $proxy['bypass'] = trim($bypassValue);
+            }
+
+            if (array_key_exists('server', $proxy)) {
+                $options['proxy'] = $proxy;
+            }
+        }
+
+        return $options;
+    }
+
+    /**
+     * @param  array<string, mixed>  $listingPlaywrightOptions
+     * @return array<string, mixed>
+     */
+    private function resolveDetailPlaywrightOptions(array $listingPlaywrightOptions): array
+    {
+        unset($listingPlaywrightOptions['auto_scroll'], $listingPlaywrightOptions['max_scroll_steps'], $listingPlaywrightOptions['scroll_pause_ms']);
+
+        return $listingPlaywrightOptions;
     }
 }

@@ -13,6 +13,7 @@ use App\Livewire\Admin\Events\Show as EventsShow;
 use App\Livewire\Admin\EventSources\Form as EventSourcesForm;
 use App\Livewire\Admin\EventSources\Index as EventSourcesIndex;
 use App\Livewire\Admin\EventSources\Show as EventSourcesShow;
+use App\Livewire\Admin\Feedback\Index as FeedbackIndex;
 use App\Livewire\Admin\Organizations\Form as OrganizationsForm;
 use App\Livewire\Admin\Organizations\Index as OrganizationsIndex;
 use App\Livewire\Admin\Scrapers\Form as ScrapersForm;
@@ -84,5 +85,7 @@ Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
         Route::get('chat-sources', ChatSourcesIndex::class)->name('chat-sources.index');
         Route::get('chat-sources/create', ChatSourcesForm::class)->name('chat-sources.create');
         Route::get('chat-sources/{source}/edit', ChatSourcesForm::class)->name('chat-sources.edit');
+
+        Route::get('feedback', FeedbackIndex::class)->name('feedback.index');
     });
 });

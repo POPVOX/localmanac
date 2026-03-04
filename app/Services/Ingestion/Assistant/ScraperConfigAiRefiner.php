@@ -78,6 +78,9 @@ class ScraperConfigAiRefiner
             'Generate a valid scraper config for the supported profiles only.',
             'Supported profiles: rss, wichitadocumenters, generic_listing, wichita_archive_pdf_list.',
             'Do not invent new keys outside schema.',
+            'For html profiles, prefer robust configs with specific selectors and fetch.playwright settings.',
+            'For infinite-scroll or lazy-loaded listings, set fetch.playwright.auto_scroll to true.',
+            'Avoid broad selectors like `article a` when more specific title-link selectors exist.',
             'Prefer retaining the heuristic draft unless clear evidence suggests improvement.',
             '',
             'Scraper type:',
@@ -214,12 +217,22 @@ class ScraperConfigAiRefiner
         $config = $this->mergeRecursive($heuristicConfig, $refinedConfig);
 
         if ($type === 'rss' || $profile === 'rss') {
-            unset($config['profile'], $config['list'], $config['article'], $config['pdf']);
+            unset($config['profile'], $config['list'], $config['article'], $config['fetch'], $config['pdf']);
 
             return $config;
         }
 
+        unset($config['feed_url'], $config['lang'], $config['max_items']);
         $config['profile'] = $profile;
+
+        if (in_array($profile, ['generic_listing', 'wichitadocumenters'], true)) {
+            unset($config['pdf']);
+        }
+
+        $proxy = Arr::get($config, 'fetch.playwright.proxy');
+        if (! is_array($proxy) || $proxy === [] || ! is_string($proxy['server'] ?? null) || trim((string) $proxy['server']) === '') {
+            Arr::forget($config, 'fetch.playwright.proxy');
+        }
 
         return $config;
     }

@@ -68,7 +68,7 @@ class Questions extends Component
 
         return view('livewire.demo.questions', [
             'city' => $city,
-        ])->layout('layouts.demo');
+        ])->layout('layouts.app-dashboard');
     }
 
     private function resolveCity(): ?City

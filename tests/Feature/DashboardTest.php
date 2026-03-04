@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\City;
+use App\Models\IssueArea;
 use App\Models\User;
 
 test('guests are redirected to the login page', function () {
@@ -24,6 +26,19 @@ test('verified users can visit the dashboard', function () {
     $response->assertOk()
         ->assertSee('data-testid="assistant-typing-indicator"', false)
         ->assertDontSee('data-testid="new-conversation-button"', false);
+});
+
+test('dashboard shows task-oriented chat prompt chips', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $response = $this->get(route('dashboard'));
+
+    $response->assertOk()
+        ->assertSee('What changed this week?')
+        ->assertSee('Upcoming meetings')
+        ->assertSee('New permits & projects')
+        ->assertSee('Service alerts');
 });
 
 test('regular users do not see admin dashboard link in dropdown', function () {
@@ -51,4 +66,29 @@ test('super admins can visit the scrapers admin page', function () {
 
     $response = $this->get(route('admin.scrapers.index'));
     $response->assertOk();
+});
+
+test('browse by category renders interactive filter controls', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $issueArea = IssueArea::create([
+        'city_id' => $city->id,
+        'name' => 'Budget & Taxes',
+        'slug' => 'budget-taxes',
+    ]);
+
+    $response = $this->get(route('dashboard'));
+
+    $response->assertOk()
+        ->assertSee('Browse by Category')
+        ->assertSee('All categories')
+        ->assertSee($issueArea->name)
+        ->assertSee('wire:click="clearIssueArea"', false)
+        ->assertSee('wire:click="selectIssueArea('.$issueArea->id.')"', false);
 });

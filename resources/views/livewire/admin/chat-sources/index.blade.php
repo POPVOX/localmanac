@@ -37,7 +37,7 @@
         </flux:field>
     </div>
 
-    <flux:card padding="lg" variant="subtle" class="space-y-4">
+    <flux:card padding="lg" variant="subtle" class="space-y-4 bg-zinc-100/60 dark:bg-zinc-800/45">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <flux:heading size="lg">{{ __('Ingestion Summary') }}</flux:heading>
             <flux:text variant="subtle">{{ __('Last 24 hours') }}</flux:text>
@@ -111,7 +111,7 @@
         </div>
     </flux:card>
 
-    <flux:card padding="lg" variant="subtle">
+    <flux:card padding="lg" variant="subtle" class="bg-zinc-100/60 dark:bg-zinc-800/45">
         <flux:table :paginate="$sources">
             <flux:table.columns sticky>
                 <flux:table.column>

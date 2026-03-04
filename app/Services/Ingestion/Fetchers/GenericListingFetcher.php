@@ -3,15 +3,19 @@
 namespace App\Services\Ingestion\Fetchers;
 
 use App\Models\Scraper;
+use App\Services\Chat\Ingestion\PageFetcher;
 use Carbon\Carbon;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Symfony\Component\DomCrawler\Crawler;
 
 class GenericListingFetcher
 {
+    public function __construct(
+        private readonly PageFetcher $pageFetcher,
+    ) {}
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -60,29 +64,52 @@ class GenericListingFetcher
         $removeSelectors = is_array($removeSelectors) ? $removeSelectors : [];
 
         $bestEffort = (bool) Arr::get($config, 'best_effort', true);
+        $renderer = $this->resolveRenderer(Arr::get($config, 'fetch.renderer'));
+        $listingPlaywrightOptions = $this->resolvePlaywrightOptions($config);
+        $articlePlaywrightOptions = $this->resolveArticlePlaywrightOptions($listingPlaywrightOptions);
 
-        $listingResponse = $this->httpClient()->get($sourceUrl);
+        $listingHtml = $this->fetchPageHtml($sourceUrl, $renderer, true, $listingPlaywrightOptions);
+        $maxPages = max(1, (int) Arr::get($listConfig, 'max_pages', 1));
+        $paginationSelector = Arr::get($listConfig, 'pagination_selector');
+        $paginationAttr = Arr::get($listConfig, 'pagination_attr', 'href');
 
-        if (! $listingResponse->successful()) {
-            throw new InvalidArgumentException('Failed to fetch listing page');
-        }
-
-        $links = $this->extractLinks($listingResponse->body(), $sourceUrl, $linkSelector, $linkAttr, $maxLinks);
+        $links = $this->extractListingLinks(
+            listingHtml: $listingHtml,
+            listingUrl: $sourceUrl,
+            renderer: $renderer,
+            playwrightOptions: $listingPlaywrightOptions,
+            linkSelector: $linkSelector,
+            linkAttr: $linkAttr,
+            maxLinks: $maxLinks,
+            maxPages: $maxPages,
+            paginationSelector: is_string($paginationSelector) ? $paginationSelector : null,
+            paginationAttr: is_string($paginationAttr) && trim($paginationAttr) !== '' ? $paginationAttr : 'href',
+        );
 
         $items = [];
+        $blockedArticleCount = 0;
         $accessedAt = now();
 
         foreach ($links as $link) {
             $url = $link['url'];
             $titleHint = $link['title'] ?? '';
 
-            $articleResponse = $this->httpClient()->get($url);
+            try {
+                $articleHtml = $this->fetchPageHtml($url, $renderer, false, $articlePlaywrightOptions, true);
+            } catch (InvalidArgumentException $exception) {
+                if ($this->isAntiBotException($exception)) {
+                    $blockedArticleCount++;
 
-            if (! $articleResponse->successful()) {
+                    continue;
+                }
+
+                throw $exception;
+            }
+
+            if ($articleHtml === null) {
                 continue;
             }
 
-            $articleHtml = $articleResponse->body();
             $crawler = new Crawler($articleHtml, $url);
 
             $canonicalUrl = $this->extractCanonicalUrl($crawler, $url);
@@ -124,6 +151,10 @@ class GenericListingFetcher
             ];
         }
 
+        if ($items === [] && $blockedArticleCount > 0) {
+            throw new InvalidArgumentException('Article pages are blocked by anti-bot protection. Consider using Playwright renderer with a persistent session or a source feed URL.');
+        }
+
         return $items;
     }
 
@@ -139,6 +170,10 @@ class GenericListingFetcher
             $resolved = $this->resolveUrl($href, $baseUrl);
 
             if (! $resolved) {
+                return null;
+            }
+
+            if ($this->isLikelyProfileUrl($resolved)) {
                 return null;
             }
 
@@ -167,6 +202,251 @@ class GenericListingFetcher
         }
 
         return $deduped;
+    }
+
+    /**
+     * @param  array<string, mixed>  $playwrightOptions
+     * @return array<int, array{url: string, title: string}>
+     */
+    private function extractListingLinks(
+        string $listingHtml,
+        string $listingUrl,
+        string $renderer,
+        array $playwrightOptions,
+        string $linkSelector,
+        string $linkAttr,
+        int $maxLinks,
+        int $maxPages,
+        ?string $paginationSelector,
+        string $paginationAttr,
+    ): array {
+        $pages = [
+            ['url' => $listingUrl, 'html' => $listingHtml],
+        ];
+        $queuedListingPages = [$listingUrl => true];
+
+        $results = [];
+        $seen = [];
+
+        for ($index = 0; $index < count($pages); $index++) {
+            if ($index >= $maxPages) {
+                break;
+            }
+
+            $page = $pages[$index];
+            $batch = $this->extractLinks(
+                html: $page['html'],
+                baseUrl: $page['url'],
+                selector: $linkSelector,
+                linkAttr: $linkAttr,
+                maxLinks: 0,
+            );
+
+            foreach ($batch as $link) {
+                if (isset($seen[$link['url']])) {
+                    continue;
+                }
+
+                $seen[$link['url']] = true;
+                $results[] = $link;
+
+                if ($maxLinks > 0 && count($results) >= $maxLinks) {
+                    return $results;
+                }
+            }
+
+            if (count($pages) >= $maxPages) {
+                continue;
+            }
+
+            $paginationUrls = $this->extractPaginationUrls(
+                html: $page['html'],
+                baseUrl: $page['url'],
+                selector: $paginationSelector,
+                attr: $paginationAttr,
+                maxPages: $maxPages,
+            );
+
+            foreach ($paginationUrls as $paginationUrl) {
+                if (isset($queuedListingPages[$paginationUrl])) {
+                    continue;
+                }
+
+                $queuedListingPages[$paginationUrl] = true;
+
+                if (count($pages) >= $maxPages) {
+                    break;
+                }
+
+                try {
+                    $pageHtml = $this->fetchPageHtml($paginationUrl, $renderer, false, $playwrightOptions, true);
+                } catch (InvalidArgumentException $exception) {
+                    if ($this->isAntiBotException($exception)) {
+                        continue;
+                    }
+
+                    throw $exception;
+                }
+
+                if ($pageHtml === null) {
+                    continue;
+                }
+
+                $pages[] = [
+                    'url' => $paginationUrl,
+                    'html' => $pageHtml,
+                ];
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractPaginationUrls(string $html, string $baseUrl, ?string $selector, string $attr, int $maxPages): array
+    {
+        $crawler = new Crawler($html, $baseUrl);
+        $candidateSelectors = [];
+
+        if (is_string($selector) && trim($selector) !== '') {
+            $candidateSelectors[] = trim($selector);
+        }
+
+        $candidateSelectors = [
+            ...$candidateSelectors,
+            'a[rel="next"]',
+            'a[href*="/page/"]',
+        ];
+
+        $urls = [];
+
+        foreach ($candidateSelectors as $candidateSelector) {
+            try {
+                $nodes = $crawler->filter($candidateSelector);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if ($nodes->count() === 0) {
+                continue;
+            }
+
+            $items = $nodes->each(function (Crawler $node) use ($attr, $baseUrl) {
+                $href = $node->attr($attr) ?? '';
+
+                return $this->resolveUrl($href, $baseUrl);
+            });
+
+            foreach ($items as $item) {
+                if (! is_string($item) || trim($item) === '') {
+                    continue;
+                }
+
+                $resolved = trim($item);
+
+                if ($resolved === $baseUrl || ! $this->isSameHost($resolved, $baseUrl)) {
+                    continue;
+                }
+
+                $urls[] = $resolved;
+            }
+        }
+
+        if ($urls === []) {
+            $urls = array_merge($urls, $this->extractPaginationUrlsFromHtml($html, $baseUrl));
+        }
+
+        $urls = array_values(array_unique($urls));
+
+        if ($maxPages <= 1 || $urls === []) {
+            return [];
+        }
+
+        return $urls;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractPaginationUrlsFromHtml(string $html, string $baseUrl): array
+    {
+        $pattern = '#(?:https?://[^\s"\'<>]+|/[^\s"\'<>]+?)/page/\d+/?#i';
+
+        if (! preg_match_all($pattern, $html, $matches)) {
+            return [];
+        }
+
+        $basePath = parse_url($baseUrl, PHP_URL_PATH);
+        $normalizedBasePath = $this->normalizePaginationBasePath(is_string($basePath) ? $basePath : null);
+        $candidates = [];
+
+        foreach ($matches[0] as $match) {
+            if (! is_string($match) || trim($match) === '') {
+                continue;
+            }
+
+            $resolved = $this->resolveUrl($match, $baseUrl);
+
+            if (! is_string($resolved) || trim($resolved) === '') {
+                continue;
+            }
+
+            if (! $this->isSameHost($resolved, $baseUrl)) {
+                continue;
+            }
+
+            $resolvedPath = parse_url($resolved, PHP_URL_PATH);
+            if (! is_string($resolvedPath)) {
+                continue;
+            }
+
+            if (
+                $normalizedBasePath !== ''
+                && ! str_contains(rtrim($resolvedPath, '/'), $normalizedBasePath.'/page/')
+            ) {
+                continue;
+            }
+
+            $candidates[] = $resolved;
+        }
+
+        $candidates = array_values(array_unique($candidates));
+
+        usort($candidates, function (string $left, string $right): int {
+            $leftPage = $this->extractPageNumberFromUrl($left);
+            $rightPage = $this->extractPageNumberFromUrl($right);
+
+            if ($leftPage === $rightPage) {
+                return strcmp($left, $right);
+            }
+
+            return $leftPage <=> $rightPage;
+        });
+
+        return $candidates;
+    }
+
+    private function extractPageNumberFromUrl(string $url): int
+    {
+        if (! preg_match('#/page/(\d+)#i', $url, $matches)) {
+            return PHP_INT_MAX;
+        }
+
+        return (int) ($matches[1] ?? PHP_INT_MAX);
+    }
+
+    private function normalizePaginationBasePath(?string $path): string
+    {
+        if (! is_string($path) || trim($path) === '') {
+            return '';
+        }
+
+        $normalized = rtrim($path, '/');
+        $normalized = preg_replace('#/page/\d+$#i', '', $normalized) ?? $normalized;
+
+        return rtrim($normalized, '/');
     }
 
     private function resolveUrl(string $url, string $baseUrl): ?string
@@ -471,6 +751,37 @@ class GenericListingFetcher
         return trim(preg_replace('/\s+/', ' ', $value) ?? '');
     }
 
+    private function isSameHost(string $url, string $baseUrl): bool
+    {
+        $urlHost = parse_url($url, PHP_URL_HOST);
+        $baseHost = parse_url($baseUrl, PHP_URL_HOST);
+
+        if (! is_string($urlHost) || ! is_string($baseHost)) {
+            return false;
+        }
+
+        return mb_strtolower($urlHost) === mb_strtolower($baseHost);
+    }
+
+    private function isLikelyProfileUrl(string $url): bool
+    {
+        $path = parse_url($url, PHP_URL_PATH);
+
+        if (! is_string($path) || trim($path) === '') {
+            return false;
+        }
+
+        $normalizedPath = '/'.trim(mb_strtolower($path), '/').'/';
+
+        foreach (['staff_profile', 'staff_name', 'author', 'staff', 'category', 'tag'] as $segment) {
+            if (str_contains($normalizedPath, '/'.$segment.'/')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function parseDate(string $value): ?Carbon
     {
         try {
@@ -480,10 +791,194 @@ class GenericListingFetcher
         }
     }
 
-    private function httpClient()
+    private function resolveRenderer(mixed $value): string
     {
-        return Http::timeout(20)
-            ->retry(2, 250)
-            ->withHeaders(['User-Agent' => 'LocalmanacBot/1.0']);
+        if (! is_string($value)) {
+            return 'http';
+        }
+
+        $normalized = mb_strtolower(trim($value));
+
+        if (! in_array($normalized, ['auto', 'http', 'playwright'], true)) {
+            return 'http';
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param  array<string, mixed>  $playwrightOptions
+     */
+    private function fetchPageHtml(string $url, string $renderer, bool $required, array $playwrightOptions, bool $throwOnBlocked = false): ?string
+    {
+        $result = $playwrightOptions === []
+            ? $this->pageFetcher->fetch($url, $renderer)
+            : $this->pageFetcher->fetch($url, $renderer, $playwrightOptions);
+        $html = $result['body'] ?? null;
+        $playwrightHtml = null;
+
+        if (is_string($html) && ! $this->looksLikeBotChallengePage($html)) {
+            return $html;
+        }
+
+        if ($renderer !== 'playwright') {
+            $playwrightResult = $playwrightOptions === []
+                ? $this->pageFetcher->fetch($url, 'playwright')
+                : $this->pageFetcher->fetch($url, 'playwright', $playwrightOptions);
+            $playwrightHtml = $playwrightResult['body'] ?? null;
+
+            if (is_string($playwrightHtml) && ! $this->looksLikeBotChallengePage($playwrightHtml)) {
+                return $playwrightHtml;
+            }
+        }
+
+        $blockedByAntiBot = (
+            (is_string($html) && $this->looksLikeBotChallengePage($html))
+            || (is_string($playwrightHtml) && $this->looksLikeBotChallengePage($playwrightHtml))
+        );
+
+        if ($blockedByAntiBot && ($required || $throwOnBlocked)) {
+            $message = $required
+                ? 'Listing page is blocked by anti-bot protection. Consider using Playwright renderer with a persistent session or a source feed URL.'
+                : 'Article pages are blocked by anti-bot protection. Consider using Playwright renderer with a persistent session or a source feed URL.';
+
+            throw new InvalidArgumentException($message);
+        }
+
+        if ($required) {
+            throw new InvalidArgumentException('Failed to fetch listing page');
+        }
+
+        return null;
+    }
+
+    private function looksLikeBotChallengePage(string $html): bool
+    {
+        $lower = mb_strtolower($html);
+        $markers = [
+            'px-captcha',
+            'access to this page has been denied',
+            'before we continue',
+            'cf-chl-',
+            'checking your browser',
+            'javascript required',
+            'verify you are human',
+        ];
+
+        foreach ($markers as $marker) {
+            if (str_contains($lower, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isAntiBotException(InvalidArgumentException $exception): bool
+    {
+        return str_contains(mb_strtolower($exception->getMessage()), 'anti-bot protection');
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     * @return array<string, mixed>
+     */
+    private function resolvePlaywrightOptions(array $config): array
+    {
+        $playwrightConfig = Arr::get($config, 'fetch.playwright');
+
+        if (! is_array($playwrightConfig)) {
+            return [];
+        }
+
+        $options = [];
+
+        $timeoutValue = $playwrightConfig['timeout_ms'] ?? null;
+        if (is_numeric($timeoutValue)) {
+            $options['timeout_ms'] = (int) $timeoutValue;
+        }
+
+        $waitSelectorValue = $playwrightConfig['wait_selector'] ?? null;
+        if (is_string($waitSelectorValue) && trim($waitSelectorValue) !== '') {
+            $options['wait_selector'] = trim($waitSelectorValue);
+        }
+
+        $userAgentValue = $playwrightConfig['user_agent'] ?? null;
+        if (is_string($userAgentValue) && trim($userAgentValue) !== '') {
+            $options['user_agent'] = trim($userAgentValue);
+        }
+
+        $storagePathValue = $playwrightConfig['storage_state_path'] ?? null;
+        if (is_string($storagePathValue) && trim($storagePathValue) !== '') {
+            $options['storage_state_path'] = trim($storagePathValue);
+        }
+
+        $refreshOnBlockedValue = $playwrightConfig['refresh_on_blocked'] ?? null;
+        if (is_bool($refreshOnBlockedValue)) {
+            $options['refresh_on_blocked'] = $refreshOnBlockedValue;
+        }
+
+        $refreshAttemptsValue = $playwrightConfig['refresh_attempts'] ?? null;
+        if (is_numeric($refreshAttemptsValue)) {
+            $options['refresh_attempts'] = (int) $refreshAttemptsValue;
+        }
+
+        $autoScrollValue = $playwrightConfig['auto_scroll'] ?? null;
+        if (is_bool($autoScrollValue)) {
+            $options['auto_scroll'] = $autoScrollValue;
+        }
+
+        $maxScrollStepsValue = $playwrightConfig['max_scroll_steps'] ?? null;
+        if (is_numeric($maxScrollStepsValue)) {
+            $options['max_scroll_steps'] = (int) $maxScrollStepsValue;
+        }
+
+        $scrollPauseMsValue = $playwrightConfig['scroll_pause_ms'] ?? null;
+        if (is_numeric($scrollPauseMsValue)) {
+            $options['scroll_pause_ms'] = (int) $scrollPauseMsValue;
+        }
+
+        $proxyValue = $playwrightConfig['proxy'] ?? null;
+
+        if (is_array($proxyValue)) {
+            $proxy = [];
+
+            $serverValue = $proxyValue['server'] ?? null;
+            if (is_string($serverValue) && trim($serverValue) !== '') {
+                $proxy['server'] = trim($serverValue);
+            }
+
+            $usernameValue = $proxyValue['username'] ?? null;
+            if (is_string($usernameValue) && trim($usernameValue) !== '') {
+                $proxy['username'] = trim($usernameValue);
+            }
+
+            $passwordValue = $proxyValue['password'] ?? null;
+            if (is_string($passwordValue) && trim($passwordValue) !== '') {
+                $proxy['password'] = trim($passwordValue);
+            }
+
+            $bypassValue = $proxyValue['bypass'] ?? null;
+            if (is_string($bypassValue) && trim($bypassValue) !== '') {
+                $proxy['bypass'] = trim($bypassValue);
+            }
+
+            if (array_key_exists('server', $proxy)) {
+                $options['proxy'] = $proxy;
+            }
+        }
+
+        return $options;
+    }
+
+    /**
+     * @param  array<string, mixed>  $listingPlaywrightOptions
+     * @return array<string, mixed>
+     */
+    private function resolveArticlePlaywrightOptions(array $listingPlaywrightOptions): array
+    {
+        unset($listingPlaywrightOptions['auto_scroll'], $listingPlaywrightOptions['max_scroll_steps'], $listingPlaywrightOptions['scroll_pause_ms']);
+
+        return $listingPlaywrightOptions;
     }
 }

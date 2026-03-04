@@ -51,7 +51,7 @@
         </flux:field>
     </div>
 
-    <flux:card padding="lg" variant="subtle">
+    <flux:card padding="lg" variant="subtle" class="bg-zinc-100/60 dark:bg-zinc-800/45">
         <flux:table :paginate="$scrapers">
             <flux:table.columns sticky>
                 <flux:table.column sticky>
@@ -120,7 +120,11 @@
                         </flux:table.cell>
                         <flux:table.cell>
                             @if ($scraper->source_url)
-                                <flux:link href="{{ $scraper->source_url }}" target="_blank">
+                                <flux:link
+                                    href="{{ $scraper->source_url }}"
+                                    target="_blank"
+                                    class="text-sky-700 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200"
+                                >
                                     {{ \Illuminate\Support\Str::limit($scraper->source_url, 40) }}
                                 </flux:link>
                             @else

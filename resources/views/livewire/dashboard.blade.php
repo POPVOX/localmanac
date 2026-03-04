@@ -182,9 +182,9 @@
                             <button
                                 type="button"
                                 class="h-9 rounded-full border px-4 text-xs font-semibold transition hover:-translate-y-0.5 hover:shadow-sm {{ $chipStyles[$index % count($chipStyles)] }}"
-                                wire:click="applyPrompt(@js($chip))"
+                                wire:click="applyPrompt(@js($chip['prompt']))"
                             >
-                                {{ $chip }}
+                                {{ $chip['label'] }}
                             </button>
                         @endforeach
                     </div>
@@ -298,7 +298,7 @@
                     </div>
                 @else
                     <div class="flex flex-wrap items-center gap-2">
-                        @foreach ($promptChips as $chip)
+                        @foreach ($articleFallbackChips as $chip)
                             <button
                                 type="button"
                                 class="h-10 rounded-full border px-5 text-sm font-semibold transition {{ strcasecmp(trim($articleSearch), trim($chip)) === 0 ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm' : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100' }}"
@@ -314,7 +314,7 @@
     </flux:card>
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <flux:card padding="xl" class="space-y-6 rounded-2xl border border-zinc-200 bg-white shadow-sm">
+        <flux:card id="dashboard-feed" padding="xl" class="space-y-6 rounded-2xl border border-zinc-200 bg-white shadow-sm">
             <div class="flex items-center justify-between">
                 <flux:heading size="lg">
                     {{ __('Your :city Feed', ['city' => $city?->name ?? __('City')]) }}
@@ -361,6 +361,12 @@
                     <flux:text variant="subtle">{{ __('No articles yet.') }}</flux:text>
                 @endforelse
             </div>
+
+            @if ($articles->hasPages())
+                <div class="pt-2">
+                    <flux:pagination :paginator="$articles" scroll-to="#dashboard-feed" />
+                </div>
+            @endif
         </flux:card>
 
         <div class="space-y-6">
@@ -377,12 +383,30 @@
 
             <flux:card padding="lg" class="space-y-4 rounded-2xl border border-zinc-200 bg-white shadow-sm">
                 <flux:heading size="lg">{{ __('Browse by Category') }}</flux:heading>
+                <flux:text class="text-sm text-zinc-600">
+                    {{ __('Select a category to filter the article feed.') }}
+                </flux:text>
                 <div class="space-y-2">
+                    <button
+                        type="button"
+                        class="flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm font-medium transition {{ $activeIssueAreaId === null ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm' : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100' }}"
+                        wire:click="clearIssueArea"
+                        aria-pressed="{{ $activeIssueAreaId === null ? 'true' : 'false' }}"
+                    >
+                        <span class="text-base leading-none">{{ $activeIssueAreaId === null ? '•' : '◦' }}</span>
+                        <span>{{ __('All categories') }}</span>
+                    </button>
+
                     @forelse ($issueAreas as $issueArea)
-                        <div class="flex items-center gap-2 text-sm text-zinc-700">
-                            <span class="text-emerald-600">•</span>
+                        <button
+                            type="button"
+                            class="flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm font-medium transition {{ $activeIssueAreaId === $issueArea->id ? 'border-emerald-600 bg-emerald-600 text-white shadow-sm' : 'border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100' }}"
+                            wire:click="selectIssueArea({{ $issueArea->id }})"
+                            aria-pressed="{{ $activeIssueAreaId === $issueArea->id ? 'true' : 'false' }}"
+                        >
+                            <span class="text-base leading-none {{ $activeIssueAreaId === $issueArea->id ? 'text-white' : 'text-emerald-600' }}">•</span>
                             <span>{{ $issueArea->name }}</span>
-                        </div>
+                        </button>
                     @empty
                         <flux:text variant="subtle">{{ __('No categories yet.') }}</flux:text>
                     @endforelse

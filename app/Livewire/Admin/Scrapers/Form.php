@@ -222,6 +222,13 @@ class Form extends Component
             $this->assistantConfigNotice = null;
             $this->config = $this->prettyPrintConfig($this->assistantDraftConfig);
 
+            if ($this->assistantInputMode === 'paste') {
+                $this->assistantSourceHtml = '';
+            }
+
+            // Avoid carrying large HTML payloads in Livewire component state.
+            $this->assistantFetchedHtml = '';
+
             $this->invalidateAssistantPreview();
 
             $this->dispatchToast(__('Draft generated'), __('Review and preview the generated scraper config before saving.'));
@@ -230,7 +237,11 @@ class Form extends Component
         } catch (Throwable $exception) {
             report($exception);
 
-            $this->dispatchToast(__('Draft generation failed'), __('We could not generate a scraper config draft.'), 'danger');
+            $message = trim($exception->getMessage()) !== ''
+                ? $exception->getMessage()
+                : __('We could not generate a scraper config draft.');
+
+            $this->dispatchToast(__('Draft generation failed'), $message, 'danger');
         }
     }
 
@@ -281,7 +292,11 @@ class Form extends Component
             $this->assistantPreviewItems = [];
             $this->assistantPreviewHash = null;
 
-            $this->dispatchToast(__('Preview failed'), __('We could not run a config preview for this draft.'), 'danger');
+            $message = trim($exception->getMessage()) !== ''
+                ? $exception->getMessage()
+                : __('We could not run a config preview for this draft.');
+
+            $this->dispatchToast(__('Preview failed'), $message, 'danger');
         }
     }
 
@@ -468,7 +483,8 @@ class Form extends Component
 
         $fetched = $sourceFetcher->fetch($this->sourceUrl);
 
-        $this->assistantFetchedHtml = $fetched['html'];
+        // Keep only renderer metadata in component state; raw HTML can exceed Livewire payload limits.
+        $this->assistantFetchedHtml = '';
         $this->assistantFetchRenderer = $fetched['renderer'];
         $this->assistantWarnings = array_merge($this->assistantWarnings, $fetched['warnings']);
 

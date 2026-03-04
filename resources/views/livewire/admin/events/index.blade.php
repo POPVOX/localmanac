@@ -41,7 +41,7 @@
         />
     </div>
 
-    <flux:card padding="lg" variant="subtle">
+    <flux:card padding="lg" variant="subtle" class="bg-zinc-100/60 dark:bg-zinc-800/45">
         <flux:table :paginate="$events">
             <flux:table.columns sticky>
                 <flux:table.column sticky class="w-[320px]">

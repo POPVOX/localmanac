@@ -385,7 +385,7 @@ class ArticleExplainer extends Component
     public function render(): View
     {
         return view('livewire.demo.article-explainer')
-            ->layout('layouts.demo', [
+            ->layout('layouts.app-dashboard', [
                 'title' => $this->article->title ?? __('Article explainer'),
             ]);
     }

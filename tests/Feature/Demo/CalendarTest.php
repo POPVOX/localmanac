@@ -1,8 +1,11 @@
 <?php
 
+use App\Livewire\Demo\Calendar as CalendarComponent;
 use App\Models\City;
 use App\Models\Event;
+use App\Models\User;
 use Illuminate\Support\Carbon;
+use Livewire\Livewire;
 
 test('shows events for the selected date only', function () {
     $city = City::factory()->create([
@@ -64,4 +67,35 @@ test('shows empty state when no events exist for the selected date', function ()
     $response
         ->assertSuccessful()
         ->assertSee('No events scheduled for this day.');
+});
+
+test('authenticated users see dashboard link before calendar link in demo navigation', function () {
+    $response = $this->actingAs(User::factory()->create())->get(route('demo.calendar'));
+
+    $response
+        ->assertSuccessful()
+        ->assertSeeInOrder([
+            'Dashboard',
+            'Calendar',
+        ]);
+});
+
+test('calendar date updates gracefully when the picker emits null', function () {
+    Carbon::setTestNow('2026-03-03 09:00:00');
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    Livewire::test(CalendarComponent::class)
+        ->set('cityId', $city->id)
+        ->set('selectedDate', null)
+        ->assertRedirect(route('demo.calendar', [
+            'date' => '2026-03-03',
+            'city_id' => $city->id,
+        ]));
+
+    Carbon::setTestNow();
 });

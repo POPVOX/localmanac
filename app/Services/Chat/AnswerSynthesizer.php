@@ -291,6 +291,9 @@ class AnswerSynthesizer
             'City:',
             $city->name,
             '',
+            'Time context:',
+            ...$this->temporalContextLines($city),
+            '',
             'Question:',
             $question,
         ];
@@ -351,6 +354,9 @@ class AnswerSynthesizer
             'City:',
             $city->name,
             '',
+            'Time context:',
+            ...$this->temporalContextLines($city),
+            '',
             'Question:',
             $question,
         ];
@@ -398,6 +404,9 @@ class AnswerSynthesizer
             '',
             'City:',
             $city->name,
+            '',
+            'Time context:',
+            ...$this->temporalContextLines($city),
             '',
             'Question:',
             $question,
@@ -1012,6 +1021,9 @@ class AnswerSynthesizer
             'City:',
             $city->name,
             '',
+            'Time context:',
+            ...$this->temporalContextLines($city),
+            '',
             'Question:',
             $question,
             '',
@@ -1261,6 +1273,23 @@ class AnswerSynthesizer
         }
 
         return "I could not find any events in {$city->name} for {$label}. Try asking about the next 7 days or next weekend.";
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function temporalContextLines(City $city): array
+    {
+        $timezone = $city->timezone ?: config('app.timezone', 'UTC');
+        $localNow = Carbon::now($timezone);
+
+        return [
+            'City timezone: '.$timezone,
+            'Current local datetime: '.$localNow->toIso8601String(),
+            'Current local date: '.$localNow->toDateString().' ('.$localNow->format('l').')',
+            'Interpret relative date phrases (today, yesterday, tomorrow, this week, last week, next week, this month) using this local time unless the user provides explicit dates.',
+            'When useful, include concrete calendar dates in the answer instead of only relative phrasing.',
+        ];
     }
 
     /**

@@ -51,7 +51,9 @@ it('detects the documenters profile from google docs links', function () {
 
     expect($draft['profile'])->toBe('wichitadocumenters')
         ->and($draft['config']['profile'])->toBe('wichitadocumenters')
-        ->and($draft['config']['list']['link_selector'])->toBe('a[href*="docs.google.com"]');
+        ->and($draft['config']['list']['link_selector'])->toBe('a[href*="docs.google.com"]')
+        ->and($draft['config']['fetch']['renderer'])->toBe('auto')
+        ->and($draft['config']['fetch']['playwright']['storage_state_path'])->toBe('storage/app/playwright/example.com.json');
 });
 
 it('falls back to generic listing profile when no specific pattern is detected', function () {
@@ -70,5 +72,9 @@ it('falls back to generic listing profile when no specific pattern is detected',
     expect($draft['profile'])->toBe('generic_listing')
         ->and($draft['config']['profile'])->toBe('generic_listing')
         ->and($draft['config']['list']['link_selector'])->toBeString()
-        ->and($draft['config']['article']['content_selector'])->toBeString();
+        ->and($draft['config']['article']['content_selector'])->toBeString()
+        ->and($draft['config']['fetch']['renderer'])->toBe('auto')
+        ->and($draft['config']['fetch']['playwright']['auto_scroll'])->toBeTrue()
+        ->and($draft['config']['fetch']['playwright']['max_scroll_steps'])->toBe(12)
+        ->and($draft['config']['fetch']['playwright']['storage_state_path'])->toBe('storage/app/playwright/example.com.json');
 });

@@ -22,6 +22,7 @@ class ScrapeRunner
         private readonly ArticleWriter $writer,
         private readonly RssFetcher $rssFetcher,
         private readonly ?PostgresSequenceSynchronizer $sequenceSynchronizer = null,
+        private readonly ?ArticleQualityGuard $qualityGuard = null,
     ) {}
 
     public function run(Scraper $scraper): ScraperRun
@@ -94,6 +95,15 @@ class ScrapeRunner
                 if (! ($item['city_id'] ?? null) || ! ($item['title'] ?? null) || ! ($source['source_url'] ?? null)) {
                     $skipped++;
                     $skippedReasons['missing_required']++;
+
+                    continue;
+                }
+
+                $qualityRejectionReason = $this->qualityRejectionReason($item);
+
+                if ($qualityRejectionReason !== null) {
+                    $skipped++;
+                    $skippedReasons[$qualityRejectionReason] = ($skippedReasons[$qualityRejectionReason] ?? 0) + 1;
 
                     continue;
                 }
@@ -291,5 +301,15 @@ class ScrapeRunner
         $synchronizer = $this->sequenceSynchronizer ?? new PostgresSequenceSynchronizer;
 
         return $synchronizer->syncTables(['scraper_runs']);
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function qualityRejectionReason(array $item): ?string
+    {
+        $guard = $this->qualityGuard ?? app(ArticleQualityGuard::class);
+
+        return $guard->rejectionReason($item);
     }
 }
