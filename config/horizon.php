@@ -99,6 +99,8 @@ return [
     'waits' => [
         'redis:default' => 60,
         'redis:scraping' => 60,
+        'redis:analysis' => 300,
+        'redis:enrichment' => 300,
         'redis:calendar' => 60,
         'redis:ingestion' => 300,
         'redis:embedding' => 300,
@@ -214,6 +216,19 @@ return [
             'timeout' => 60,
             'nice' => 0,
         ],
+        'supervisor-enrichment' => [
+            'connection' => 'redis',
+            'queue' => ['enrichment'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 256,
+            'tries' => 1,
+            'timeout' => 180,
+            'nice' => 0,
+        ],
         'supervisor-ingestion' => [
             'connection' => 'redis',
             'queue' => ['ingestion'],
@@ -249,6 +264,9 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
+            'supervisor-enrichment' => [
+                'maxProcesses' => 4,
+            ],
             'supervisor-ingestion' => [
                 'maxProcesses' => 2,
             ],
@@ -259,6 +277,9 @@ return [
 
         'local' => [
             'supervisor-1' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-enrichment' => [
                 'maxProcesses' => 1,
             ],
             'supervisor-ingestion' => [

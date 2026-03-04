@@ -34,7 +34,9 @@ class EnrichArticle implements ShouldQueue
      */
     public function __construct(public int $articleId)
     {
-        $this->onQueue('analysis');
+        $queue = trim((string) config('enrichment.queue', 'analysis'));
+
+        $this->onQueue($queue !== '' ? $queue : 'analysis');
     }
 
     /**

@@ -121,7 +121,7 @@ it('dispatches enrichment after successful pdf extraction', function () {
 
     $job->handle();
 
-    Queue::assertPushedOn('analysis', EnrichArticle::class);
+    Queue::assertPushedOn((string) config('enrichment.queue', 'analysis'), EnrichArticle::class);
 });
 
 it('writes analysis and civic relevance after heuristics scoring', function () {

@@ -63,7 +63,7 @@ it('dispatches enrichment when article writer saves cleaned text', function () {
         ],
     ]);
 
-    Queue::assertPushedOn('analysis', EnrichArticle::class);
+    Queue::assertPushedOn((string) config('enrichment.queue', 'analysis'), EnrichArticle::class);
 });
 
 it('dispatches enrichment after pdf extraction', function () {
@@ -110,5 +110,5 @@ it('dispatches enrichment after pdf extraction', function () {
 
     $job->handle();
 
-    Queue::assertPushedOn('analysis', EnrichArticle::class);
+    Queue::assertPushedOn((string) config('enrichment.queue', 'analysis'), EnrichArticle::class);
 });

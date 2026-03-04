@@ -21,6 +21,14 @@ use App\Services\Extraction\Enricher;
 use App\Services\Extraction\ProjectionWriter;
 use App\Services\Ingestion\PostgresSequenceSynchronizer;
 
+it('uses configured enrichment queue when dispatched', function () {
+    config()->set('enrichment.queue', 'enrichment');
+
+    $job = new EnrichArticle(1);
+
+    expect($job->queue)->toBe('enrichment');
+});
+
 it('writes claims and projections when enrichment job runs', function () {
     config()->set('enrichment.enabled', true);
     config()->set('enrichment.model', 'test-model');
