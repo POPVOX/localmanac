@@ -188,7 +188,7 @@ class Index extends Component
                     'scrapers.id',
                     'organization_name',
                     'scrapers.type',
-                    'scrapers.source_url',
+                    'scrapers.name',
                     'scrapers.is_enabled',
                     'scrapers.updated_at',
                 ];

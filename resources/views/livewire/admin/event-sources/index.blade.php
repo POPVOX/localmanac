@@ -48,7 +48,7 @@
         </flux:field>
     </div>
 
-    <flux:card padding="lg" variant="subtle" class="bg-zinc-100/60 dark:bg-zinc-800/45">
+    <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
         <flux:table :paginate="$sources">
             <flux:table.columns sticky>
                 <flux:table.column sticky>{{ __('Name') }}</flux:table.column>

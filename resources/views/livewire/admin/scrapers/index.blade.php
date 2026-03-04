@@ -51,7 +51,7 @@
         </flux:field>
     </div>
 
-    <flux:card padding="lg" variant="subtle" class="bg-zinc-100/60 dark:bg-zinc-800/45">
+    <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
         <flux:table :paginate="$scrapers">
             <flux:table.columns sticky>
                 <flux:table.column sticky>
@@ -84,11 +84,11 @@
                 <flux:table.column class="w-[112px]">{{ __('Active') }}</flux:table.column>
                 <flux:table.column>
                     <flux:table.sortable
-                        :sorted="$sortField === 'scrapers.source_url'"
+                        :sorted="$sortField === 'scrapers.name'"
                         :direction="$sortDirection"
-                        wire:click="sortBy('scrapers.source_url')"
+                        wire:click="sortBy('scrapers.name')"
                     >
-                        <div>{{ __('Source URL') }}</div>
+                        <div>{{ __('Scraper') }}</div>
                     </flux:table.sortable>
                 </flux:table.column>
                 <flux:table.column>{{ __('Last scraped') }}</flux:table.column>
@@ -119,14 +119,8 @@
                             />
                         </flux:table.cell>
                         <flux:table.cell>
-                            @if ($scraper->source_url)
-                                <flux:link
-                                    href="{{ $scraper->source_url }}"
-                                    target="_blank"
-                                    class="text-sky-700 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200"
-                                >
-                                    {{ \Illuminate\Support\Str::limit($scraper->source_url, 40) }}
-                                </flux:link>
+                            @if ($scraper->name)
+                                <flux:text>{{ $scraper->name }}</flux:text>
                             @else
                                 <flux:text variant="subtle">{{ __('—') }}</flux:text>
                             @endif
