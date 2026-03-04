@@ -72,43 +72,50 @@
             </flux:card>
         </div>
 
-        <div class="space-y-2">
-            <flux:heading size="sm">{{ __('Slowest Sources (avg fetch)') }}</flux:heading>
+        <details class="group rounded-lg border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-700 dark:bg-zinc-900/30">
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-zinc-700 marker:content-none dark:text-zinc-200">
+                <span class="group-open:hidden">{{ __('Show slowest sources') }}</span>
+                <span class="hidden group-open:inline">{{ __('Hide slowest sources') }}</span>
+            </summary>
 
-            <flux:table>
-                <flux:table.columns>
-                    <flux:table.column>{{ __('Source') }}</flux:table.column>
-                    <flux:table.column align="center">{{ __('Avg') }}</flux:table.column>
-                    <flux:table.column align="center">{{ __('Pages') }}</flux:table.column>
-                    <flux:table.column align="center">{{ __('Playwright') }}</flux:table.column>
-                    <flux:table.column align="end">{{ __('Last fetched') }}</flux:table.column>
-                </flux:table.columns>
+            <div class="mt-3 space-y-2">
+                <flux:heading size="sm">{{ __('Slowest Sources (avg fetch)') }}</flux:heading>
 
-                <flux:table.rows>
-                    @forelse ($slowSources as $source)
-                        <flux:table.row :key="$source['id']">
-                            <flux:table.cell variant="strong">
-                                {{ $source['name'] }}
-                            </flux:table.cell>
-                            <flux:table.cell align="center">
-                                {{ $source['avg_fetch_ms'] ? number_format($source['avg_fetch_ms']).' ms' : '—' }}
-                            </flux:table.cell>
-                            <flux:table.cell align="center">{{ number_format($source['page_count']) }}</flux:table.cell>
-                            <flux:table.cell align="center">{{ number_format($source['playwright_pages']) }}</flux:table.cell>
-                            <flux:table.cell align="end">
-                                {{ $source['last_fetched_at']?->diffForHumans() ?? '—' }}
-                            </flux:table.cell>
-                        </flux:table.row>
-                    @empty
-                        <flux:table.row>
-                            <flux:table.cell colspan="5">
-                                <flux:text variant="subtle">{{ __('No ingestion metrics yet.') }}</flux:text>
-                            </flux:table.cell>
-                        </flux:table.row>
-                    @endforelse
-                </flux:table.rows>
-            </flux:table>
-        </div>
+                <flux:table>
+                    <flux:table.columns>
+                        <flux:table.column>{{ __('Source') }}</flux:table.column>
+                        <flux:table.column align="center">{{ __('Avg') }}</flux:table.column>
+                        <flux:table.column align="center">{{ __('Pages') }}</flux:table.column>
+                        <flux:table.column align="center">{{ __('Playwright') }}</flux:table.column>
+                        <flux:table.column align="end">{{ __('Last fetched') }}</flux:table.column>
+                    </flux:table.columns>
+
+                    <flux:table.rows>
+                        @forelse ($slowSources as $source)
+                            <flux:table.row :key="$source['id']">
+                                <flux:table.cell variant="strong">
+                                    {{ $source['name'] }}
+                                </flux:table.cell>
+                                <flux:table.cell align="center">
+                                    {{ $source['avg_fetch_ms'] ? number_format($source['avg_fetch_ms']).' ms' : '—' }}
+                                </flux:table.cell>
+                                <flux:table.cell align="center">{{ number_format($source['page_count']) }}</flux:table.cell>
+                                <flux:table.cell align="center">{{ number_format($source['playwright_pages']) }}</flux:table.cell>
+                                <flux:table.cell align="end">
+                                    {{ $source['last_fetched_at']?->diffForHumans() ?? '—' }}
+                                </flux:table.cell>
+                            </flux:table.row>
+                        @empty
+                            <flux:table.row>
+                                <flux:table.cell colspan="5">
+                                    <flux:text variant="subtle">{{ __('No ingestion metrics yet.') }}</flux:text>
+                                </flux:table.cell>
+                            </flux:table.row>
+                        @endforelse
+                    </flux:table.rows>
+                </flux:table>
+            </div>
+        </details>
     </flux:card>
 
     <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
