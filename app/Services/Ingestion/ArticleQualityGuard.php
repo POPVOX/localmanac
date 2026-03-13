@@ -6,6 +6,8 @@ use Illuminate\Support\Arr;
 
 class ArticleQualityGuard
 {
+    public const REASON_BOT_CHALLENGE = 'bot_challenge';
+
     public const REASON_BLOCKED_URL_PATH = 'blocked_url_path';
 
     public const REASON_MIN_CONTENT = 'min_content';
@@ -22,6 +24,10 @@ class ArticleQualityGuard
         }
 
         $sourceUrl = $this->sourceUrl($item);
+
+        if ($this->containsBotChallengeMarkers($item)) {
+            return self::REASON_BOT_CHALLENGE;
+        }
 
         if ($sourceUrl !== null && $this->matchesBlockedUrlPath($sourceUrl)) {
             return self::REASON_BLOCKED_URL_PATH;
@@ -44,6 +50,7 @@ class ArticleQualityGuard
     public function knownReasons(): array
     {
         return [
+            self::REASON_BOT_CHALLENGE,
             self::REASON_BLOCKED_URL_PATH,
             self::REASON_MIN_CONTENT,
             self::REASON_PROFILE_TITLE,
@@ -219,6 +226,47 @@ class ArticleQualityGuard
         }
 
         return count($words);
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function containsBotChallengeMarkers(array $item): bool
+    {
+        $candidates = [
+            Arr::get($item, 'title'),
+            Arr::get($item, 'summary'),
+            Arr::get($item, 'body.cleaned_text'),
+            Arr::get($item, 'body.raw_html'),
+        ];
+
+        $markers = [
+            'px-captcha',
+            'access to this page has been denied',
+            'before we continue',
+            'cf-chl-',
+            'checking your browser',
+            'javascript required',
+            'verify you are human',
+            "window['ppconfig']",
+            'periodicreportingratemillis',
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (! is_string($candidate) || trim($candidate) === '') {
+                continue;
+            }
+
+            $lowerCandidate = mb_strtolower($candidate);
+
+            foreach ($markers as $marker) {
+                if (str_contains($lowerCandidate, $marker)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**

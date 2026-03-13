@@ -21,6 +21,28 @@ it('rejects items whose source url matches blocked path segments', function () {
     expect($reason)->toBe(ArticleQualityGuard::REASON_BLOCKED_URL_PATH);
 });
 
+it('rejects bot-challenge pages before any other quality checks', function () {
+    config()->set('ingestion.quality_guard.enabled', true);
+    config()->set('ingestion.quality_guard.blocked_url_segments', []);
+    config()->set('ingestion.quality_guard.min_words', 0);
+    config()->set('ingestion.quality_guard.min_chars', 0);
+
+    $reason = app(ArticleQualityGuard::class)->rejectionReason([
+        'title' => 'Wichita City Council — Notes',
+        'source' => [
+            'source_url' => 'https://docs.google.com/document/d/example/preview',
+            'source_type' => 'html',
+        ],
+        'content_type' => 'html',
+        'body' => [
+            'cleaned_text' => "window['ppConfig'] = { periodicReportingRateMillis: 60000.0 };",
+            'raw_html' => '<html><body>Before we continue...</body></html>',
+        ],
+    ]);
+
+    expect($reason)->toBe(ArticleQualityGuard::REASON_BOT_CHALLENGE);
+});
+
 it('rejects low-content items for min content', function () {
     config()->set('ingestion.quality_guard.enabled', true);
     config()->set('ingestion.quality_guard.blocked_url_segments', []);
@@ -61,6 +83,28 @@ it('does not reject document-like items for min content', function () {
     ]);
 
     expect($reason)->toBeNull();
+});
+
+it('still rejects document-like bot-challenge items', function () {
+    config()->set('ingestion.quality_guard.enabled', true);
+    config()->set('ingestion.quality_guard.blocked_url_segments', []);
+    config()->set('ingestion.quality_guard.min_words', 50);
+    config()->set('ingestion.quality_guard.min_chars', 300);
+
+    $reason = app(ArticleQualityGuard::class)->rejectionReason([
+        'title' => 'Agenda Packet',
+        'source' => [
+            'source_url' => 'https://example.com/files/agenda.pdf',
+            'source_type' => 'pdf',
+        ],
+        'content_type' => 'pdf',
+        'body' => [
+            'cleaned_text' => 'Checking your browser before we continue.',
+            'raw_html' => '<html><head><meta name="description" content="px-captcha"></head></html>',
+        ],
+    ]);
+
+    expect($reason)->toBe(ArticleQualityGuard::REASON_BOT_CHALLENGE);
 });
 
 it('rejects likely profile-title items with role-like short content', function () {
