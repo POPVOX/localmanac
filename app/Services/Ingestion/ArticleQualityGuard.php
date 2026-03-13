@@ -12,6 +12,8 @@ class ArticleQualityGuard
 
     public const REASON_MIN_CONTENT = 'min_content';
 
+    public const REASON_OPINION_CONTENT = 'opinion_content';
+
     public const REASON_PROFILE_TITLE = 'profile_title';
 
     /**
@@ -31,6 +33,10 @@ class ArticleQualityGuard
 
         if ($sourceUrl !== null && $this->matchesBlockedUrlPath($sourceUrl)) {
             return self::REASON_BLOCKED_URL_PATH;
+        }
+
+        if ($this->isOpinionLikeItem($item, $sourceUrl)) {
+            return self::REASON_OPINION_CONTENT;
         }
 
         if (! $this->isLikelyDocumentItem($item) && $this->isBelowMinimumContent($item)) {
@@ -53,8 +59,51 @@ class ArticleQualityGuard
             self::REASON_BOT_CHALLENGE,
             self::REASON_BLOCKED_URL_PATH,
             self::REASON_MIN_CONTENT,
+            self::REASON_OPINION_CONTENT,
             self::REASON_PROFILE_TITLE,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function isOpinionLikeItem(array $item, ?string $sourceUrl): bool
+    {
+        if (! (bool) config('ingestion.quality_guard.opinion_guard.enabled', true)) {
+            return false;
+        }
+
+        if ($sourceUrl !== null && $this->matchesOpinionUrlPath($sourceUrl)) {
+            return true;
+        }
+
+        $title = Arr::get($item, 'title');
+
+        if (! is_string($title) || trim($title) === '') {
+            return false;
+        }
+
+        $titlePrefixes = config('ingestion.quality_guard.opinion_guard.title_prefixes', []);
+
+        if (! is_array($titlePrefixes) || $titlePrefixes === []) {
+            return false;
+        }
+
+        $normalizedTitle = mb_strtolower(trim($title));
+
+        foreach ($titlePrefixes as $prefix) {
+            if (! is_string($prefix) || trim($prefix) === '') {
+                continue;
+            }
+
+            $normalizedPrefix = preg_quote(mb_strtolower(trim($prefix)), '/');
+
+            if (preg_match('/^'.$normalizedPrefix.'(?:\s*[:\-\|]\s*|\s+)/u', $normalizedTitle) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -84,6 +133,37 @@ class ArticleQualityGuard
         }
 
         $segments = config('ingestion.quality_guard.blocked_url_segments', []);
+
+        if (! is_array($segments) || $segments === []) {
+            return false;
+        }
+
+        $normalizedPath = '/'.trim(mb_strtolower($path), '/').'/';
+
+        foreach ($segments as $segment) {
+            if (! is_string($segment) || trim($segment) === '') {
+                continue;
+            }
+
+            $normalizedSegment = trim(mb_strtolower($segment));
+
+            if (str_contains($normalizedPath, '/'.$normalizedSegment.'/')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function matchesOpinionUrlPath(string $url): bool
+    {
+        $path = parse_url($url, PHP_URL_PATH);
+
+        if (! is_string($path) || trim($path) === '') {
+            return false;
+        }
+
+        $segments = config('ingestion.quality_guard.opinion_guard.url_segments', []);
 
         if (! is_array($segments) || $segments === []) {
             return false;

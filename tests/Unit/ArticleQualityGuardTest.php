@@ -43,6 +43,78 @@ it('rejects bot-challenge pages before any other quality checks', function () {
     expect($reason)->toBe(ArticleQualityGuard::REASON_BOT_CHALLENGE);
 });
 
+it('rejects opinion-like items by title prefix', function () {
+    config()->set('ingestion.quality_guard.enabled', true);
+    config()->set('ingestion.quality_guard.blocked_url_segments', []);
+    config()->set('ingestion.quality_guard.min_words', 0);
+    config()->set('ingestion.quality_guard.min_chars', 0);
+    config()->set('ingestion.quality_guard.opinion_guard.enabled', true);
+    config()->set('ingestion.quality_guard.opinion_guard.title_prefixes', ['opinion', 'editorial', 'review']);
+    config()->set('ingestion.quality_guard.opinion_guard.url_segments', []);
+
+    $reason = app(ArticleQualityGuard::class)->rejectionReason([
+        'title' => 'OPINION: The need for gender neutral bathrooms extends to everyone',
+        'source' => [
+            'source_url' => 'https://example.com/2026/03/13/gender-neutral-bathrooms',
+            'source_type' => 'html',
+        ],
+        'content_type' => 'news',
+        'body' => [
+            'cleaned_text' => 'Kansas lawmakers passed Senate Bill 244, revoking rights to gender-neutral bathrooms.',
+        ],
+    ]);
+
+    expect($reason)->toBe(ArticleQualityGuard::REASON_OPINION_CONTENT);
+});
+
+it('rejects opinion-like items by source url segment', function () {
+    config()->set('ingestion.quality_guard.enabled', true);
+    config()->set('ingestion.quality_guard.blocked_url_segments', []);
+    config()->set('ingestion.quality_guard.min_words', 0);
+    config()->set('ingestion.quality_guard.min_chars', 0);
+    config()->set('ingestion.quality_guard.opinion_guard.enabled', true);
+    config()->set('ingestion.quality_guard.opinion_guard.title_prefixes', []);
+    config()->set('ingestion.quality_guard.opinion_guard.url_segments', ['opinion']);
+
+    $reason = app(ArticleQualityGuard::class)->rejectionReason([
+        'title' => 'Campus bathrooms debate',
+        'source' => [
+            'source_url' => 'https://example.com/opinion/campus-bathrooms-debate',
+            'source_type' => 'html',
+        ],
+        'content_type' => 'news',
+        'body' => [
+            'cleaned_text' => 'An opinion piece on bathrooms policy.',
+        ],
+    ]);
+
+    expect($reason)->toBe(ArticleQualityGuard::REASON_OPINION_CONTENT);
+});
+
+it('does not reject hard-news items that merely use review as a verb', function () {
+    config()->set('ingestion.quality_guard.enabled', true);
+    config()->set('ingestion.quality_guard.blocked_url_segments', []);
+    config()->set('ingestion.quality_guard.min_words', 0);
+    config()->set('ingestion.quality_guard.min_chars', 0);
+    config()->set('ingestion.quality_guard.opinion_guard.enabled', true);
+    config()->set('ingestion.quality_guard.opinion_guard.title_prefixes', ['opinion', 'editorial', 'review']);
+    config()->set('ingestion.quality_guard.opinion_guard.url_segments', ['opinion', 'review']);
+
+    $reason = app(ArticleQualityGuard::class)->rejectionReason([
+        'title' => 'Board to review proposed budget changes next week',
+        'source' => [
+            'source_url' => 'https://example.com/news/board-to-review-budget',
+            'source_type' => 'html',
+        ],
+        'content_type' => 'news',
+        'body' => [
+            'cleaned_text' => 'Board members will review the proposed budget changes during next week’s meeting.',
+        ],
+    ]);
+
+    expect($reason)->toBeNull();
+});
+
 it('rejects low-content items for min content', function () {
     config()->set('ingestion.quality_guard.enabled', true);
     config()->set('ingestion.quality_guard.blocked_url_segments', []);

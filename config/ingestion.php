@@ -29,5 +29,28 @@ return [
                 )
             ))),
         ],
+        'opinion_guard' => [
+            'enabled' => (bool) env('INGESTION_QUALITY_GUARD_OPINION_ENABLED', true),
+            'title_prefixes' => array_values(array_filter(array_map(
+                'trim',
+                explode(
+                    ',',
+                    (string) env(
+                        'INGESTION_QUALITY_GUARD_OPINION_TITLE_PREFIXES',
+                        'opinion,editorial,review,op-ed,oped,commentary,column'
+                    )
+                )
+            ))),
+            'url_segments' => array_values(array_filter(array_map(
+                'trim',
+                explode(
+                    ',',
+                    (string) env(
+                        'INGESTION_QUALITY_GUARD_OPINION_URL_SEGMENTS',
+                        'opinion,opinions,editorial,editorials,review,reviews,op-ed,op-eds,commentary,column'
+                    )
+                )
+            ))),
+        ],
     ],
 ];
