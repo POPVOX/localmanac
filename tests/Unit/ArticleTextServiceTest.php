@@ -201,3 +201,84 @@ it('does not keep city website publication boilerplate as title', function () {
         ->toBe('L.W. Clapp Memorial Park Cross-Country Course Improvements')
         ->and($article->title)->not->toContain('Published on the City');
 });
+
+it('treats legal publish boilerplate titles as weak and replaces them from summary text', function () {
+    $city = City::create([
+        'name' => 'Publish City',
+        'slug' => 'publish-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => '448-2024-009668 LegalPublish',
+        'summary' => 'City plans water and sewer service extension for the Bridger at Central Addition development.',
+        'status' => 'published',
+        'content_type' => 'pdf',
+    ]);
+
+    $service = new ArticleTextService;
+    $service->refresh($article->fresh());
+
+    $article->refresh();
+
+    expect($article->title)
+        ->toBe('City plans water and sewer service extension');
+});
+
+it('treats publish note boilerplate titles as weak and replaces them from cleaned text', function () {
+    $city = City::create([
+        'name' => 'Notice City',
+        'slug' => 'notice-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'GilMo Publish Note November 2023',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => 'Notice concerning Gilbert Mosley site certificate and release for environmental conditions.',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $service = new ArticleTextService;
+    $service->refresh($article->fresh());
+
+    $article->refresh();
+
+    expect($article->title)
+        ->toBe('Notice concerning Gilbert Mosley site certificate and release for environmental conditions');
+});
+
+it('uses configured weak title patterns during refresh', function () {
+    config()->set('articles.text_refresh.weak_title_patterns', [
+        '/^custom boilerplate\b/i',
+    ]);
+    config()->set('articles.text_refresh.weak_title_source_patterns', []);
+
+    $city = City::create([
+        'name' => 'Config City',
+        'slug' => 'config-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Custom Boilerplate Title',
+        'summary' => 'City announces a new neighborhood sidewalk project.',
+        'status' => 'published',
+        'content_type' => 'pdf',
+    ]);
+
+    $service = new ArticleTextService;
+    $service->refresh($article->fresh());
+
+    $article->refresh();
+
+    expect($article->title)
+        ->toBe('City announces a new neighborhood sidewalk project');
+});

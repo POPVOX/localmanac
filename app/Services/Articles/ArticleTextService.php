@@ -214,28 +214,12 @@ class ArticleTextService
             return true;
         }
 
-        if (preg_match('/^event date:/i', $title)) {
-            return true;
-        }
+        foreach ($this->weakTitlePatterns() as $pattern) {
+            $subject = $pattern === '/^[A-Z0-9._-]{10,}$/' ? str_replace(' ', '', $title) : $title;
 
-        if (preg_match('/^\d+\s+[nsew]\b/i', $title)) {
-            return true;
-        }
-
-        if (preg_match('/published on the city\'?s website/i', $title)) {
-            return true;
-        }
-
-        if (preg_match('/\.(pdf|docx?|txt)$/i', $title)) {
-            return true;
-        }
-
-        if (preg_match('/\blegalnotice\b/i', $title)) {
-            return true;
-        }
-
-        if (preg_match('/^[A-Z0-9._-]{10,}$/', str_replace(' ', '', $title))) {
-            return true;
+            if (preg_match($pattern, $subject) === 1) {
+                return true;
+            }
         }
 
         return false;
@@ -352,7 +336,33 @@ class ArticleTextService
 
     private function isWeakTitleSource(string $source): bool
     {
-        return preg_match('/(^event date:|published on the city\'?s website|_legalnotice|\.pdf\b)/i', $source) === 1;
+        foreach ($this->weakTitleSourcePatterns() as $pattern) {
+            if (preg_match($pattern, $source) === 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function weakTitlePatterns(): array
+    {
+        $patterns = config('articles.text_refresh.weak_title_patterns', []);
+
+        return is_array($patterns) ? array_values(array_filter($patterns, 'is_string')) : [];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function weakTitleSourcePatterns(): array
+    {
+        $patterns = config('articles.text_refresh.weak_title_source_patterns', []);
+
+        return is_array($patterns) ? array_values(array_filter($patterns, 'is_string')) : [];
     }
 
     private function extractDocumentHeadline(string $text): ?string
