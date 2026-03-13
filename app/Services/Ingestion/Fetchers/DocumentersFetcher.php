@@ -12,6 +12,8 @@ use Symfony\Component\DomCrawler\Crawler;
 
 class DocumentersFetcher
 {
+    private const DOCUMENTERS_DATE_PATTERN = '/Date:\s*((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i';
+
     public function __construct(
         private readonly PageFetcher $pageFetcher,
     ) {}
@@ -218,27 +220,67 @@ class DocumentersFetcher
 
     private function extractPublishedAt(string $html): ?Carbon
     {
-        $candidate = null;
+        $candidate = $this->matchPublishedAtCandidate($html);
 
-        if (preg_match('/Date:\s*([A-Z][a-z]+\s+\d{1,2},\s+\d{4})/', $html, $matches)) {
-            $candidate = $matches[1];
-        } else {
-            // Sometimes the visible text contains the Date label but the raw HTML is structured differently.
-            $text = $this->fallbackHtmlToText($html);
-            if (preg_match('/Date:\s*([A-Z][a-z]+\s+\d{1,2},\s+\d{4})/', $text, $m)) {
-                $candidate = $m[1];
-            }
+        if ($candidate === null) {
+            $candidate = $this->matchPublishedAtCandidate($this->fallbackHtmlToText($html));
         }
 
-        if (! $candidate) {
+        if ($candidate === null) {
+            $candidate = $this->matchTitleBannerDateCandidate($html);
+        }
+
+        if ($candidate === null) {
             return null;
         }
 
         try {
-            return Carbon::parse($candidate);
+            return Carbon::parse($this->normalizePublishedAtCandidate($candidate));
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    private function matchPublishedAtCandidate(string $content): ?string
+    {
+        if (preg_match(self::DOCUMENTERS_DATE_PATTERN, $content, $matches) !== 1) {
+            return null;
+        }
+
+        $candidate = trim((string) ($matches[1] ?? ''));
+
+        return $candidate === '' ? null : $candidate;
+    }
+
+    private function normalizePublishedAtCandidate(string $candidate): string
+    {
+        $normalized = str_replace('.', '', trim($candidate));
+
+        return str_ireplace(
+            ['Jan ', 'Feb ', 'Mar ', 'Apr ', 'Jun ', 'Jul ', 'Aug ', 'Sep ', 'Sept ', 'Oct ', 'Nov ', 'Dec '],
+            ['January ', 'February ', 'March ', 'April ', 'June ', 'July ', 'August ', 'September ', 'September ', 'October ', 'November ', 'December '],
+            $normalized,
+        );
+    }
+
+    private function matchTitleBannerDateCandidate(string $html): ?string
+    {
+        $patterns = [
+            '/<title>[^<]*?Meeting\s+(\d{1,2}\/\d{1,2}\/\d{4})<\/title>/i',
+            '/id="title"[^>]*>[^<]*?Meeting\s+(\d{1,2}\/\d{1,2}\/\d{4})</i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $html, $matches) === 1) {
+                $candidate = trim((string) ($matches[1] ?? ''));
+
+                if ($candidate !== '') {
+                    return $candidate;
+                }
+            }
+        }
+
+        return null;
     }
 
     private function normalizeWhitespace(string $value): string

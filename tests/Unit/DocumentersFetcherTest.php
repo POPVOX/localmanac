@@ -188,6 +188,151 @@ it('passes configured playwright options for documenters profile', function () {
         ->and($items[0]['source']['source_url'])->toBe('https://docs.google.com/document/d/demo/pub');
 });
 
+it('extracts abbreviated documenters dates as published_at', function () {
+    $city = City::create([
+        'name' => 'Abbreviated City',
+        'slug' => 'abbreviated-city',
+    ]);
+
+    $scraper = Scraper::create([
+        'city_id' => $city->id,
+        'name' => 'Documenters Abbreviated Date',
+        'slug' => 'documenters-abbreviated-date',
+        'type' => 'html',
+        'is_enabled' => true,
+        'source_url' => 'https://example.com/documenters',
+        'config' => [
+            'profile' => 'wichitadocumenters',
+            'list' => [
+                'link_selector' => '.story-link',
+                'link_attr' => 'href',
+                'max_links' => 1,
+            ],
+        ],
+    ]);
+
+    $listingHtml = <<<'HTML'
+    <html>
+        <body>
+            <a class="story-link" href="https://docs.google.com/document/d/demo/pub">Meeting Notes</a>
+        </body>
+    </html>
+    HTML;
+
+    $docHtml = <<<'HTML'
+    <html>
+        <body>
+            <div id="contents">
+                <h1>City Council</h1>
+                <p>Date: Sept. 16, 2025</p>
+                <p>Budget discussion and public comment.</p>
+            </div>
+        </body>
+    </html>
+    HTML;
+
+    $pageFetcher = Mockery::mock(PageFetcher::class);
+    $pageFetcher->shouldReceive('fetch')
+        ->once()
+        ->with('https://example.com/documenters', 'http')
+        ->andReturn([
+            'url' => 'https://example.com/documenters',
+            'status_code' => 200,
+            'content_type' => 'text/html',
+            'body' => $listingHtml,
+            'renderer' => 'http',
+        ]);
+    $pageFetcher->shouldReceive('fetch')
+        ->once()
+        ->with('https://docs.google.com/document/d/demo/pub', 'http')
+        ->andReturn([
+            'url' => 'https://docs.google.com/document/d/demo/pub',
+            'status_code' => 200,
+            'content_type' => 'text/html',
+            'body' => $docHtml,
+            'renderer' => 'http',
+        ]);
+
+    $items = (new DocumentersFetcher($pageFetcher))->fetch($scraper);
+
+    expect($items)->toHaveCount(1)
+        ->and($items[0]['published_at']?->toDateString())->toBe('2025-09-16');
+});
+
+it('falls back to the document title banner date when the date label is missing', function () {
+    $city = City::create([
+        'name' => 'Title Date City',
+        'slug' => 'title-date-city',
+    ]);
+
+    $scraper = Scraper::create([
+        'city_id' => $city->id,
+        'name' => 'Documenters Title Date',
+        'slug' => 'documenters-title-date',
+        'type' => 'html',
+        'is_enabled' => true,
+        'source_url' => 'https://example.com/documenters',
+        'config' => [
+            'profile' => 'wichitadocumenters',
+            'list' => [
+                'link_selector' => '.story-link',
+                'link_attr' => 'href',
+                'max_links' => 1,
+            ],
+        ],
+    ]);
+
+    $listingHtml = <<<'HTML'
+    <html>
+        <body>
+            <a class="story-link" href="https://docs.google.com/document/d/demo/pub">Meeting Notes</a>
+        </body>
+    </html>
+    HTML;
+
+    $docHtml = <<<'HTML'
+    <html>
+        <head>
+            <title>Wichita City - Affordable Housing Review Board - Affordable Housing Review Board Meeting 06/24/2024</title>
+        </head>
+        <body>
+            <div id="title">Wichita City - Affordable Housing Review Board - Affordable Housing Review Board Meeting 06/24/2024</div>
+            <div id="contents">
+                <h1>Affordable Housing Review Board Meeting</h1>
+                <p>The June meeting was canceled and moved to July 29, 2024.</p>
+            </div>
+        </body>
+    </html>
+    HTML;
+
+    $pageFetcher = Mockery::mock(PageFetcher::class);
+    $pageFetcher->shouldReceive('fetch')
+        ->once()
+        ->with('https://example.com/documenters', 'http')
+        ->andReturn([
+            'url' => 'https://example.com/documenters',
+            'status_code' => 200,
+            'content_type' => 'text/html',
+            'body' => $listingHtml,
+            'renderer' => 'http',
+        ]);
+    $pageFetcher->shouldReceive('fetch')
+        ->once()
+        ->with('https://docs.google.com/document/d/demo/pub', 'http')
+        ->andReturn([
+            'url' => 'https://docs.google.com/document/d/demo/pub',
+            'status_code' => 200,
+            'content_type' => 'text/html',
+            'body' => $docHtml,
+            'renderer' => 'http',
+        ]);
+
+    $items = (new DocumentersFetcher($pageFetcher))->fetch($scraper);
+
+    expect($items)->toHaveCount(1)
+        ->and($items[0]['published_at']?->toDateString())->toBe('2024-06-24');
+});
+
 it('applies auto-scroll options to documenters listing fetch only', function () {
     $city = City::create([
         'name' => 'Documenters Scroll City',
