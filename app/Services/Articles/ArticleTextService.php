@@ -386,12 +386,19 @@ class ArticleTextService
 
             if (preg_match('/^abatement of the property\b/i', $line) === 1) {
                 $line = $this->trimAfterPhrase($line, ' remove ');
+                $headline = $this->documentHeadlineFromLine($line);
 
-                return $this->headlineFromSentence($line);
+                if ($headline !== null) {
+                    return $headline;
+                }
             }
 
             if (preg_match('/^notice of public hearing\b/i', $line) === 1) {
-                return $this->headlineFromSentence($line);
+                $headline = $this->documentHeadlineFromLine($line);
+
+                if ($headline !== null) {
+                    return $headline;
+                }
             }
         }
 
@@ -404,7 +411,11 @@ class ArticleTextService
                 continue;
             }
 
-            return $this->headlineFromSentence($line);
+            $headline = $this->documentHeadlineFromLine($line);
+
+            if ($headline !== null) {
+                return $headline;
+            }
         }
 
         return null;
@@ -425,9 +436,9 @@ class ArticleTextService
             $inlineProject = trim(substr($line, $projectMarker + mb_strlen('for the following project:')));
 
             if ($inlineProject !== '' && ! $this->isCodeOnlyLine($inlineProject)) {
-                $inlineHeadline = $this->headlineFromSentence($inlineProject);
+                $inlineHeadline = $this->documentHeadlineFromLine($inlineProject);
 
-                if (mb_strlen($inlineHeadline) >= 10) {
+                if ($inlineHeadline !== null && mb_strlen($inlineHeadline) >= 10) {
                     return $inlineHeadline;
                 }
             }
@@ -453,14 +464,44 @@ class ArticleTextService
                 continue;
             }
 
-            $headline = $this->headlineFromSentence($candidate);
+            $headline = $this->documentHeadlineFromLine($candidate);
 
-            if (mb_strlen($headline) >= 10) {
+            if ($headline !== null && mb_strlen($headline) >= 10) {
                 return $headline;
             }
         }
 
         return null;
+    }
+
+    private function documentHeadlineFromLine(string $line): ?string
+    {
+        $candidate = $this->normalizeWhitespace($line);
+
+        if ($candidate === '') {
+            return null;
+        }
+
+        $wasShouting = $this->isMostlyUppercase($candidate);
+        $candidate = $this->applyDocumentHeadlineRewriteRules($candidate);
+
+        if ($this->isRejectedDocumentHeadline($candidate)) {
+            return null;
+        }
+
+        $headline = $this->headlineFromSentence($candidate);
+
+        if ($wasShouting) {
+            $headline = Str::headline(mb_strtolower($headline));
+        } else {
+            $headline = $this->normalizeShoutingHeadline($headline);
+        }
+
+        if ($headline === '' || mb_strlen($headline) < 10) {
+            return null;
+        }
+
+        return $headline;
     }
 
     /**
@@ -507,13 +548,91 @@ class ArticleTextService
         return false;
     }
 
-    private function isCodeOnlyLine(string $line): bool
+    private function applyDocumentHeadlineRewriteRules(string $candidate): string
     {
-        if (preg_match('/^[\dA-Z.\-\/#]+$/', str_replace(' ', '', $line)) === 1) {
-            return true;
+        $rules = config('articles.text_refresh.document_headline.rewrite_rules', []);
+
+        if (! is_array($rules)) {
+            return $candidate;
+        }
+
+        foreach ($rules as $rule) {
+            if (! is_array($rule)) {
+                continue;
+            }
+
+            $pattern = $rule['pattern'] ?? null;
+            $replacement = $rule['replacement'] ?? null;
+
+            if (! is_string($pattern) || ! is_string($replacement) || trim($pattern) === '') {
+                continue;
+            }
+
+            $rewritten = preg_replace($pattern, $replacement, $candidate);
+
+            if (is_string($rewritten) && $rewritten !== $candidate) {
+                $candidate = $rewritten;
+            }
+        }
+
+        return $candidate;
+    }
+
+    private function isRejectedDocumentHeadline(string $candidate): bool
+    {
+        $patterns = config('articles.text_refresh.document_headline.reject_patterns', []);
+
+        if (! is_array($patterns)) {
+            return false;
+        }
+
+        foreach ($patterns as $pattern) {
+            if (! is_string($pattern) || trim($pattern) === '') {
+                continue;
+            }
+
+            if (preg_match($pattern, $candidate) === 1) {
+                return true;
+            }
         }
 
         return false;
+    }
+
+    private function normalizeShoutingHeadline(string $headline): string
+    {
+        if ($this->isMostlyUppercase($headline)) {
+            return Str::headline(mb_strtolower($headline));
+        }
+
+        return $headline;
+    }
+
+    private function isCodeOnlyLine(string $line): bool
+    {
+        $compact = str_replace(' ', '', $line);
+
+        if ($compact === '' || preg_match('/^[\dA-Z.\-\/#]+$/', $compact) !== 1) {
+            return false;
+        }
+
+        $tokens = preg_split('/\s+/', trim($line)) ?: [];
+        $digitCount = preg_match_all('/\d/', $compact) ?: 0;
+        $hasSeparator = preg_match('/[#\/.-]/', $compact) === 1;
+
+        if ($digitCount === 0 && ! $hasSeparator && count($tokens) >= 4) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private function isMostlyUppercase(string $text): bool
+    {
+        $letters = preg_match_all('/[A-Za-z]/', $text) ?: 0;
+        $uppercase = preg_match_all('/[A-Z]/', $text) ?: 0;
+
+        return $letters >= 10 && $uppercase / max(1, $letters) > 0.7;
     }
 
     private function isLikelyTruncated(string $summary): bool

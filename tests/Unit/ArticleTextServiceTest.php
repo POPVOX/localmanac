@@ -252,7 +252,7 @@ it('treats publish note boilerplate titles as weak and replaces them from cleane
     $article->refresh();
 
     expect($article->title)
-        ->toBe('Notice concerning Gilbert Mosley site certificate and release for environmental conditions');
+        ->toBe('Environmental conditions notice for Gilbert Mosley site certificate and release');
 });
 
 it('uses configured weak title patterns during refresh', function () {
@@ -281,4 +281,94 @@ it('uses configured weak title patterns during refresh', function () {
 
     expect($article->title)
         ->toBe('City announces a new neighborhood sidewalk project');
+});
+
+it('rewrites bid boilerplate into a concise document title', function () {
+    $city = City::create([
+        'name' => 'Bid City',
+        'slug' => 'bid-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => '472-2023-085936 LegalPublish',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => 'Bids for the Storm Water Drain #521 Improvements in Cottonwood Creek Estates will be accepted until 10:00 a.m. on October 4, 2024.',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $service = new ArticleTextService;
+    $service->refresh($article->fresh());
+
+    $article->refresh();
+
+    expect($article->title)
+        ->toBe('Bids sought for the Storm Water Drain #521 Improvements in Cottonwood Creek Estates');
+});
+
+it('rewrites environmental condition notices into concise document titles', function () {
+    $city = City::create([
+        'name' => 'Environmental City',
+        'slug' => 'environmental-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => '02 GilMo Publish',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => 'NOTICE CONCERNING GILBERT MOSLEY SITE CERTIFICATE AND RELEASE FOR ENVIRONMENTAL CONDITIONS',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $service = new ArticleTextService;
+    $service->refresh($article->fresh());
+
+    $article->refresh();
+
+    expect($article->title)
+        ->toBe('Environmental Conditions Notice For Gilbert Mosley Site Certificate And Release');
+});
+
+it('rewrites abbreviated service boilerplate into a readable title', function () {
+    $city = City::create([
+        'name' => 'Service City',
+        'slug' => 'service-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => '448-2024-009668 LegalPublish',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => 'WDS t/w SS t/w SWD to serve Bridger at Central Addition',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $service = new ArticleTextService;
+    $service->refresh($article->fresh());
+
+    $article->refresh();
+
+    expect($article->title)
+        ->toBe('Water and sewer service for Bridger at Central Addition');
 });
