@@ -785,10 +785,21 @@ class GenericListingFetcher
     private function parseDate(string $value): ?Carbon
     {
         try {
-            return Carbon::parse($value);
+            $date = Carbon::parse($value);
+
+            if (! $this->valueContainsExplicitTime($value)) {
+                return $date->startOfDay();
+            }
+
+            return $date;
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    private function valueContainsExplicitTime(string $value): bool
+    {
+        return preg_match('/\b\d{1,2}:\d{2}(?::\d{2})?\b/', $value) === 1;
     }
 
     private function resolveRenderer(mixed $value): string

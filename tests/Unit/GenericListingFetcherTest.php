@@ -90,6 +90,48 @@ it('extracts links and ingests article content in best-effort mode', function ()
         ->and($snippet['source']['source_url'])->toBe('https://example.com/stories/beta');
 });
 
+it('normalizes date-only article timestamps to the start of day', function () {
+    $city = makeGenericListingCity();
+    $scraper = makeGenericListingScraper($city, maxLinks: 1);
+
+    $listingHtml = <<<'HTML'
+    <html>
+        <body>
+            <div class="listing">
+                <a class="story-link" href="https://example.com/stories/date-only">Date-only article</a>
+            </div>
+        </body>
+    </html>
+    HTML;
+
+    $articleHtml = <<<'HTML'
+    <html>
+        <head>
+            <title>Date-only article</title>
+            <link rel="canonical" href="https://example.com/stories/date-only">
+        </head>
+        <body>
+            <time>March 13, 2026</time>
+            <main class="article-content">
+                <p>This article only exposes a calendar date without a publish time.</p>
+                <p>The ingester should not synthesize the current scrape time for it.</p>
+            </main>
+        </body>
+    </html>
+    HTML;
+
+    Http::fake([
+        'https://example.com/listing' => Http::response($listingHtml, 200),
+        'https://example.com/stories/date-only' => Http::response($articleHtml, 200),
+    ]);
+
+    $items = app(GenericListingFetcher::class)->fetch($scraper);
+
+    expect($items)->toHaveCount(1)
+        ->and($items[0]['published_at'])->toBeInstanceOf(Carbon::class)
+        ->and($items[0]['published_at']?->toDateTimeString())->toBe('2026-03-13 00:00:00');
+});
+
 it('skips profile pages that are mixed into listing links', function () {
     $city = makeGenericListingCity();
     $scraper = makeGenericListingScraper($city, maxLinks: 5);

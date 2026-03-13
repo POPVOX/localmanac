@@ -230,6 +230,42 @@ it('paginates dashboard feed results', function () {
         ->assertDontSee('Feed Entry 11');
 });
 
+it('renders dashboard feed dates as absolute labels', function () {
+    config()->set('scout.driver', 'collection');
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    Article::create([
+        'city_id' => $city->id,
+        'title' => 'Date Only Article',
+        'summary' => 'A date-only article.',
+        'status' => 'published',
+        'content_type' => 'html',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    Article::create([
+        'city_id' => $city->id,
+        'title' => 'Timed Article',
+        'summary' => 'An article with a specific publish time.',
+        'status' => 'published',
+        'content_type' => 'html',
+        'published_at' => '2026-03-13 20:45:00',
+    ]);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->assertSee('Date Only Article')
+        ->assertSee('Mar 13, 2026')
+        ->assertSee('Timed Article')
+        ->assertSee('Mar 13, 2026 3:45 PM')
+        ->assertDontSee('hours ago');
+});
+
 function registerFailingScoutEngine(): void
 {
     config()->set('scout.driver', 'fake');

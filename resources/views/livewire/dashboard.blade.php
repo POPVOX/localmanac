@@ -362,7 +362,10 @@
                 @forelse ($articles as $article)
                     @php
                         $articleTime = $article->published_at ?? $article->created_at;
-                        $articleTimeLabel = $articleTime?->clone()->tz($timezone)->diffForHumans();
+                        $articleDisplayTime = $articleTime?->clone()->tz($timezone);
+                        $articleTimeLabel = $articleDisplayTime?->isStartOfDay()
+                            ? $articleDisplayTime->format('M j, Y')
+                            : $articleDisplayTime?->format('M j, Y g:i A');
                         $sourceLabel = $article->scraper?->organization?->name
                             ?? parse_url($article->primarySourceUrl() ?? '', PHP_URL_HOST)
                             ?? __('Source');
