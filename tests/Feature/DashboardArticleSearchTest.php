@@ -267,6 +267,30 @@ it('renders dashboard feed dates as absolute labels', function () {
         ->assertDontSee('hours ago');
 });
 
+it('renders the dashboard when there are no upcoming events', function () {
+    config()->set('scout.driver', 'collection');
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    Article::create([
+        'city_id' => $city->id,
+        'title' => 'Article Without Events',
+        'summary' => 'Dashboard should still render.',
+        'status' => 'published',
+        'content_type' => 'html',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->assertSee('Article Without Events')
+        ->assertSee('No upcoming events.');
+});
+
 function registerFailingScoutEngine(): void
 {
     config()->set('scout.driver', 'fake');

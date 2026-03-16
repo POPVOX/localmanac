@@ -2,6 +2,7 @@
     {{-- ── Chat + Welcome row ────────────────────────────────────── --}}
     @php
         $hasConversation = $conversationId || count($messages) > 0;
+        $upcomingEvents = $upcomingEvents ?? collect();
     @endphp
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
