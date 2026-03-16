@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ArticlePublishedPrecision;
 use App\Models\City;
 use App\Models\Scraper;
 use App\Services\Chat\Ingestion\PageFetcher;
@@ -130,6 +131,7 @@ it('normalizes date-only article timestamps to the start of day', function () {
 
     expect($items)->toHaveCount(1)
         ->and($items[0]['published_at'])->toBeInstanceOf(Carbon::class)
+        ->and($items[0]['published_precision'])->toBe(ArticlePublishedPrecision::Date->value)
         ->and($items[0]['published_at']?->copy()->setTimezone('America/Chicago')->toDateTimeString())->toBe('2026-03-13 00:00:00')
         ->and($items[0]['published_at']?->copy()->setTimezone('UTC')->toDateTimeString())->toBe('2026-03-13 05:00:00');
 });
@@ -180,6 +182,7 @@ it('extracts article dates from byline wrappers before generic time tags', funct
 
     expect($items)->toHaveCount(1)
         ->and($items[0]['published_at'])->toBeInstanceOf(Carbon::class)
+        ->and($items[0]['published_precision'])->toBe(ArticlePublishedPrecision::Date->value)
         ->and($items[0]['published_at']?->copy()->setTimezone('America/Chicago')->toDateTimeString())->toBe('2026-03-09 00:00:00')
         ->and($items[0]['published_at']?->copy()->setTimezone('UTC')->toDateTimeString())->toBe('2026-03-09 05:00:00');
 });

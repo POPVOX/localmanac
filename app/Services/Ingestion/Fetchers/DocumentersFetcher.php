@@ -2,6 +2,7 @@
 
 namespace App\Services\Ingestion\Fetchers;
 
+use App\Enums\ArticlePublishedPrecision;
 use App\Models\Scraper;
 use App\Services\Chat\Ingestion\PageFetcher;
 use Carbon\Carbon;
@@ -80,6 +81,7 @@ class DocumentersFetcher
                 'scraper_id' => $scraper->id,
                 'title' => $scraper->name.' — Notes',
                 'published_at' => $this->extractPublishedAt($rawHtml),
+                'published_precision' => ArticlePublishedPrecision::Date->value,
                 'summary' => null,
                 'body' => [
                     'raw_html' => $rawHtml,

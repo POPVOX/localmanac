@@ -180,7 +180,7 @@ class Index extends Component
             return [$end, $start];
         }
 
-        return [$start, $end];
+        return [$start->copy()->setTimezone('UTC'), $end->copy()->setTimezone('UTC')];
     }
 
     private function parseDate(?string $value, string $timezone): Carbon

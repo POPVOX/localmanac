@@ -354,7 +354,7 @@ class AskService
     private function recentDigestArticles(City $city, int $windowDays, array $keywords, bool $allowAllFallback): Collection
     {
         $timezone = $city->timezone ?: config('app.timezone', 'UTC');
-        $since = Carbon::now($timezone)->subDays($windowDays)->startOfDay();
+        $since = Carbon::now($timezone)->subDays($windowDays)->startOfDay()->setTimezone('UTC');
 
         $articles = Article::query()
             ->where('city_id', $city->id)

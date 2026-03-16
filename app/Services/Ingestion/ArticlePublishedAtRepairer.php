@@ -2,6 +2,7 @@
 
 namespace App\Services\Ingestion;
 
+use App\Enums\ArticlePublishedPrecision;
 use App\Models\Article;
 use App\Models\Scraper;
 use Carbon\Carbon;
@@ -141,6 +142,7 @@ class ArticlePublishedAtRepairer
 
                 $article->forceFill([
                     'published_at' => $resolvedPublishedAt,
+                    'published_precision' => ArticlePublishedPrecision::DateTime->value,
                 ])->save();
 
                 $updated++;

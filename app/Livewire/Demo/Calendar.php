@@ -69,8 +69,8 @@ class Calendar extends Component
             return [collect(), collect()];
         }
 
-        $dayStart = $selectedDate->copy()->startOfDay();
-        $dayEnd = $selectedDate->copy()->endOfDay();
+        $dayStart = $selectedDate->copy()->startOfDay()->setTimezone('UTC');
+        $dayEnd = $selectedDate->copy()->endOfDay()->setTimezone('UTC');
 
         $events = Event::query()
             ->where('city_id', $city->id)
@@ -87,7 +87,7 @@ class Calendar extends Component
         $timedEvents = $events->reject(fn (Event $event) => $event->all_day);
 
         $groupedTimedEvents = $timedEvents
-            ->groupBy(fn (Event $event) => $event->starts_at?->copy()->shiftTimezone($timezone)->format('H:i') ?? 'tbd')
+            ->groupBy(fn (Event $event) => $event->starts_at?->copy()->setTimezone($timezone)->format('H:i') ?? 'tbd')
             ->sortKeys();
 
         return [$allDayEvents, $groupedTimedEvents];

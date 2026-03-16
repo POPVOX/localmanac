@@ -69,8 +69,8 @@ class Form extends Component
             $endsAt = $this->parseDateTime($payload['endsAt'] ?? null, $timezone, 'endsAt');
 
             $payload['city_id'] = $city->id;
-            $payload['starts_at'] = $startsAt?->shiftTimezone('UTC');
-            $payload['ends_at'] = $endsAt?->shiftTimezone('UTC');
+            $payload['starts_at'] = $startsAt?->setTimezone('UTC');
+            $payload['ends_at'] = $endsAt?->setTimezone('UTC');
             $payload['all_day'] = (bool) $payload['allDay'];
             $payload['location_name'] = $this->nullIfBlank($payload['locationName'] ?? null);
             $payload['location_address'] = $this->nullIfBlank($payload['locationAddress'] ?? null);
@@ -168,7 +168,7 @@ class Form extends Component
             return null;
         }
 
-        return CarbonImmutable::instance($value)->shiftTimezone($timezone)->format('Y-m-d\\TH:i');
+        return CarbonImmutable::instance($value)->setTimezone($timezone)->format('Y-m-d\\TH:i');
     }
 
     private function parseDateTime(?string $value, string $timezone, string $field): ?CarbonImmutable

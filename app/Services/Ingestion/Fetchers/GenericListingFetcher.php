@@ -2,6 +2,7 @@
 
 namespace App\Services\Ingestion\Fetchers;
 
+use App\Enums\ArticlePublishedPrecision;
 use App\Models\Scraper;
 use App\Services\Chat\Ingestion\PageFetcher;
 use Carbon\Carbon;
@@ -118,7 +119,7 @@ class GenericListingFetcher
             $canonicalUrl = $this->extractCanonicalUrl($crawler, $url);
             $title = $this->extractTitle($crawler);
             $title = $title ?: ($titleHint ?: $canonicalUrl);
-            $publishedAt = $this->extractPublishedAt($crawler, $timezone);
+            $publishedAtData = $this->extractPublishedAt($crawler, $timezone);
             $metaDescription = $this->extractMetaDescription($crawler);
 
             [$bodyHtml, $cleanedText] = $this->extractBody($crawler, $contentSelector, $removeSelectors);
@@ -137,7 +138,8 @@ class GenericListingFetcher
                 'city_id' => $scraper->city_id,
                 'scraper_id' => $scraper->id,
                 'title' => $title,
-                'published_at' => $publishedAt,
+                'published_at' => $publishedAtData['published_at'],
+                'published_precision' => $publishedAtData['published_precision']?->value,
                 'summary' => $metaDescription ?: null,
                 'content_type' => $contentType,
                 'canonical_url' => $canonicalUrl,
@@ -540,7 +542,10 @@ class GenericListingFetcher
         return '';
     }
 
-    private function extractPublishedAt(Crawler $crawler, string $timezone): ?Carbon
+    /**
+     * @return array{published_at: ?Carbon, published_precision: ?ArticlePublishedPrecision}
+     */
+    private function extractPublishedAt(Crawler $crawler, string $timezone): array
     {
         $metaSelectors = [
             'meta[property="article:published_time"]',
@@ -557,7 +562,7 @@ class GenericListingFetcher
             if ($value) {
                 $date = $this->parseDate($value, $timezone);
 
-                if ($date) {
+                if ($date !== null) {
                     return $date;
                 }
             }
@@ -598,13 +603,16 @@ class GenericListingFetcher
                 $date = $this->parseDate($candidate, $timezone)
                     ?? $this->extractDateFromText($candidate, $timezone);
 
-                if ($date) {
+                if ($date !== null) {
                     return $date;
                 }
             }
         }
 
-        return null;
+        return [
+            'published_at' => null,
+            'published_precision' => null,
+        ];
     }
 
     private function extractMetaDescription(Crawler $crawler): string
@@ -825,22 +833,34 @@ class GenericListingFetcher
         return false;
     }
 
-    private function parseDate(string $value, string $timezone): ?Carbon
+    /**
+     * @return array{published_at: Carbon, published_precision: ArticlePublishedPrecision}|null
+     */
+    private function parseDate(string $value, string $timezone): ?array
     {
         try {
             $date = Carbon::parse($value, $timezone);
 
             if (! $this->valueContainsExplicitTime($value)) {
-                return $date->startOfDay();
+                return [
+                    'published_at' => $date->startOfDay(),
+                    'published_precision' => ArticlePublishedPrecision::Date,
+                ];
             }
 
-            return $date;
+            return [
+                'published_at' => $date,
+                'published_precision' => ArticlePublishedPrecision::DateTime,
+            ];
         } catch (\Throwable) {
             return null;
         }
     }
 
-    private function extractDateFromText(string $value, string $timezone): ?Carbon
+    /**
+     * @return array{published_at: Carbon, published_precision: ArticlePublishedPrecision}|null
+     */
+    private function extractDateFromText(string $value, string $timezone): ?array
     {
         $patterns = [
             '/\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4}(?:\s+\d{1,2}:\d{2}(?:\s?[AP]M)?)?/i',

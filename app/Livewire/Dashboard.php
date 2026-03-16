@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\Article;
 use App\Models\City;
+use App\Models\Event;
 use App\Models\IssueArea;
 use App\Services\Chat\AskService;
 use Illuminate\Contracts\View\View;
@@ -190,6 +191,7 @@ class Dashboard extends Component
             'promptChips' => $promptChips,
             'articleFallbackChips' => $articleFallbackChips,
             'articles' => $articles,
+            'upcomingEvents' => $this->upcomingEvents($city, $timezone),
             'stats' => [
                 'totalArticles' => $totalArticles,
                 'addedToday' => $articlesAddedToday,
@@ -389,14 +391,15 @@ class Dashboard extends Component
 
     private function countArticlesForDate(Builder $baseQuery, string $timezone): int
     {
-        $today = Carbon::now($timezone)->toDateString();
+        $windowStartUtc = Carbon::now($timezone)->startOfDay()->setTimezone('UTC');
+        $windowEndUtc = Carbon::now($timezone)->endOfDay()->setTimezone('UTC');
 
         return (clone $baseQuery)
-            ->where(function (Builder $query) use ($today): void {
-                $query->whereDate('published_at', $today)
-                    ->orWhere(function (Builder $nested) use ($today): void {
+            ->where(function (Builder $query) use ($windowStartUtc, $windowEndUtc): void {
+                $query->whereBetween('published_at', [$windowStartUtc, $windowEndUtc])
+                    ->orWhere(function (Builder $nested) use ($windowStartUtc, $windowEndUtc): void {
                         $nested->whereNull('published_at')
-                            ->whereDate('created_at', $today);
+                            ->whereBetween('created_at', [$windowStartUtc, $windowEndUtc]);
                     });
             })
             ->count();
@@ -471,5 +474,27 @@ class Dashboard extends Component
             __('Local events'),
             __('Construction updates'),
         ];
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, Event>
+     */
+    private function upcomingEvents(?City $city, string $timezone): \Illuminate\Support\Collection
+    {
+        if (! $city) {
+            return collect();
+        }
+
+        $windowStartUtc = Carbon::now($timezone)->startOfDay()->setTimezone('UTC');
+        $windowEndUtc = Carbon::now($timezone)->addDays(7)->endOfDay()->setTimezone('UTC');
+
+        return Event::query()
+            ->where('city_id', $city->id)
+            ->whereNotNull('starts_at')
+            ->where('starts_at', '>=', $windowStartUtc)
+            ->where('starts_at', '<=', $windowEndUtc)
+            ->orderBy('starts_at')
+            ->limit(5)
+            ->get();
     }
 }

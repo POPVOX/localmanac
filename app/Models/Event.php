@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\NormalizesTimestampsToUtc;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -11,6 +13,8 @@ class Event extends Model
 {
     /** @use HasFactory<\Database\Factories\EventFactory> */
     use HasFactory;
+
+    use NormalizesTimestampsToUtc;
 
     /**
      * @var list<string>
@@ -36,6 +40,16 @@ class Event extends Model
         'ends_at' => 'datetime',
         'all_day' => 'boolean',
     ];
+
+    protected function startsAt(): Attribute
+    {
+        return $this->utcTimestampAttribute();
+    }
+
+    protected function endsAt(): Attribute
+    {
+        return $this->utcTimestampAttribute();
+    }
 
     public function city(): BelongsTo
     {

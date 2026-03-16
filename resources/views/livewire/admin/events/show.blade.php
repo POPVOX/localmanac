@@ -2,8 +2,8 @@
     $tz = $event->city?->timezone ?? config('app.timezone', 'UTC');
     $sourceItem = $event->sourceItems->first();
     $source = $sourceItem?->eventSource;
-    $startsAt = $event->starts_at?->clone()->shiftTimezone($tz);
-    $endsAt = $event->ends_at?->clone()->shiftTimezone($tz);
+    $startsAt = $event->starts_at?->clone()->setTimezone($tz);
+    $endsAt = $event->ends_at?->clone()->setTimezone($tz);
 @endphp
 
 <div class="space-y-6">

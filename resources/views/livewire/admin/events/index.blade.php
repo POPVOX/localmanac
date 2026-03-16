@@ -74,7 +74,7 @@
                         $tz = $event->city?->timezone ?? config('app.timezone', 'UTC');
                         $sourceItem = $event->sourceItems->first();
                         $source = $sourceItem?->eventSource;
-                        $startLabel = $event->starts_at ? $event->starts_at->clone()->shiftTimezone($tz)->format('M j, Y') : null;
+                        $startLabel = $event->starts_at ? $event->starts_at->clone()->setTimezone($tz)->format('M j, Y') : null;
                     @endphp
                     <flux:table.row :key="$event->id">
                         <flux:table.cell variant="strong" sticky class="w-[320px]">

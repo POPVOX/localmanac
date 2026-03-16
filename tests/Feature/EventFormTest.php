@@ -5,6 +5,7 @@ use App\Models\City;
 use App\Models\Event;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 it('updates event details', function () {
@@ -47,12 +48,15 @@ it('updates event details', function () {
 
     expect($event->title)->toBe('Updated Title')
         ->and($event->all_day)->toBeTrue()
-        ->and($event->starts_at?->shiftTimezone($city->timezone)->format('Y-m-d H:i'))->toBe('2025-01-12 10:30')
-        ->and($event->ends_at?->shiftTimezone($city->timezone)->format('Y-m-d H:i'))->toBe('2025-01-12 12:00')
+        ->and($event->starts_at?->setTimezone($city->timezone)->format('Y-m-d H:i'))->toBe('2025-01-12 10:30')
+        ->and($event->ends_at?->setTimezone($city->timezone)->format('Y-m-d H:i'))->toBe('2025-01-12 12:00')
         ->and($event->location_name)->toBe('New Location')
         ->and($event->location_address)->toBe('New Address')
         ->and($event->description)->toBe('New description')
         ->and($event->event_url)->toBe('https://new.example.com');
+
+    expect(CarbonImmutable::parse((string) DB::table('events')->where('id', $event->id)->value('starts_at'), 'UTC')->toAtomString())->toBe('2025-01-12T17:30:00+00:00')
+        ->and(CarbonImmutable::parse((string) DB::table('events')->where('id', $event->id)->value('ends_at'), 'UTC')->toAtomString())->toBe('2025-01-12T19:00:00+00:00');
 });
 
 it('validates start time format', function () {

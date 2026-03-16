@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\ArticlePublishedPrecision;
+use App\Models\Concerns\NormalizesTimestampsToUtc;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -13,6 +16,7 @@ use Laravel\Scout\Searchable;
 class Article extends Model
 {
     use HasFactory;
+    use NormalizesTimestampsToUtc;
     use Searchable;
 
     /**
@@ -24,6 +28,7 @@ class Article extends Model
         'title',
         'summary',
         'published_at',
+        'published_precision',
         'content_type',
         'status',
         'canonical_url',
@@ -37,7 +42,13 @@ class Article extends Model
     {
         return [
             'published_at' => 'datetime',
+            'published_precision' => ArticlePublishedPrecision::class,
         ];
+    }
+
+    protected function publishedAt(): Attribute
+    {
+        return $this->utcTimestampAttribute();
     }
 
     public function body(): HasOne

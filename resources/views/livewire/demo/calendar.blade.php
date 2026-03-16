@@ -113,15 +113,15 @@
 
                         @foreach ($timedEventGroups as $timeKey => $events)
                             @php
-                                $groupTime = $events->first()?->starts_at?->copy()->shiftTimezone($timezone);
+                                $groupTime = $events->first()?->starts_at?->copy()->setTimezone($timezone);
                                 $groupLabel = $groupTime?->format('g:i A') ?? $timeKey;
                             @endphp
                             <div class="space-y-3">
                                 <div class="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">{{ $groupLabel }}</div>
                                 @foreach ($events as $event)
                                     @php
-                                        $startsAt = $event->starts_at?->copy()->shiftTimezone($timezone);
-                                        $endsAt = $event->ends_at?->copy()->shiftTimezone($timezone);
+                                        $startsAt = $event->starts_at?->copy()->setTimezone($timezone);
+                                        $endsAt = $event->ends_at?->copy()->setTimezone($timezone);
                                         $timeLabel = trim(($startsAt?->format('g:i A') ?? '') . ($endsAt ? ' – ' . $endsAt->format('g:i A') : ''));
                                         $sourceName = $event->sourceItems->first()?->eventSource?->name;
                                         $titleText = $normalizeText($event->title);

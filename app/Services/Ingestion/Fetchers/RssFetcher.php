@@ -2,6 +2,7 @@
 
 namespace App\Services\Ingestion\Fetchers;
 
+use App\Enums\ArticlePublishedPrecision;
 use App\Models\Scraper;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
@@ -62,14 +63,15 @@ class RssFetcher
             $cleanedText = $this->normalizeWhitespace(strip_tags($rawHtml ?? ''));
             $summary = $this->normalizeWhitespace(strip_tags($description));
             $rawText = $rawHtml ? $this->normalizeWhitespace(strip_tags($rawHtml)) : '';
-            $publishedAt = $this->parseDate($this->stringValue($item->pubDate));
+            $publishedAtData = $this->parseDate($this->stringValue($item->pubDate));
 
             $items[] = [
                 'city_id' => $scraper->city_id,
                 'scraper_id' => $scraper->id,
                 'title' => $title,
                 'summary' => $summary ?: null,
-                'published_at' => $publishedAt,
+                'published_at' => $publishedAtData['published_at'],
+                'published_precision' => $publishedAtData['published_precision']?->value,
                 'content_type' => $defaultContentType,
                 'status' => 'published',
                 'canonical_url' => $link,
@@ -116,16 +118,35 @@ class RssFetcher
         return $encoded !== '' ? $encoded : null;
     }
 
-    private function parseDate(?string $value): ?Carbon
+    /**
+     * @return array{published_at: ?Carbon, published_precision: ?ArticlePublishedPrecision}
+     */
+    private function parseDate(?string $value): array
     {
         if (! $value) {
-            return null;
+            return [
+                'published_at' => null,
+                'published_precision' => null,
+            ];
         }
 
         try {
-            return Carbon::parse($value);
+            return [
+                'published_at' => Carbon::parse($value),
+                'published_precision' => $this->valueContainsExplicitTime($value)
+                    ? ArticlePublishedPrecision::DateTime
+                    : ArticlePublishedPrecision::Date,
+            ];
         } catch (\Throwable) {
-            return null;
+            return [
+                'published_at' => null,
+                'published_precision' => null,
+            ];
         }
+    }
+
+    private function valueContainsExplicitTime(string $value): bool
+    {
+        return preg_match('/\b\d{1,2}:\d{2}(?::\d{2})?\b/', $value) === 1;
     }
 }

@@ -5,6 +5,7 @@ use App\Models\Article;
 use App\Models\ArticleBody;
 use App\Models\ArticleIssueArea;
 use App\Models\City;
+use App\Models\Event;
 use App\Models\IssueArea;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
@@ -289,6 +290,26 @@ it('renders the dashboard when there are no upcoming events', function () {
         ->set('cityId', $city->id)
         ->assertSee('Article Without Events')
         ->assertSee('No upcoming events.');
+});
+
+it('renders upcoming events on the dashboard when they exist', function () {
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Board Meeting',
+        'starts_at' => now()->addDays(2)->setTime(18, 0),
+        'ends_at' => now()->addDays(2)->setTime(19, 0),
+        'all_day' => false,
+    ]);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->assertSee('Board Meeting');
 });
 
 function registerFailingScoutEngine(): void

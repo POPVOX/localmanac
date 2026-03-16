@@ -2,11 +2,15 @@
 
 namespace App\Services\Ingestion;
 
+use App\Enums\ArticlePublishedPrecision;
 use App\Jobs\EnrichArticle;
 use App\Models\Article;
 use App\Models\ArticleBody;
 use App\Models\ArticleSource;
+use App\Models\City;
 use App\Services\Articles\ArticleTextService;
+use Carbon\CarbonInterface;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -28,6 +32,11 @@ class ArticleWriter
             $shouldReindex = false;
             $shouldAnalyze = false;
             $shouldRefreshFromExistingBody = false;
+            $publishedAt = array_key_exists('published_at', $item)
+                ? $item['published_at']
+                : $article->published_at;
+            $publishedPrecision = $this->resolvePublishedPrecision($item, $cityId);
+            $publishedPrecisionToPersist = $publishedPrecision ?? $article->published_precision;
 
             $incomingSummary = $this->stringValue($item['summary'] ?? null);
             $existingSummary = $this->stringValue($article->summary);
@@ -48,7 +57,8 @@ class ArticleWriter
                 'scraper_id' => $item['scraper_id'] ?? null,
                 'title' => $titleToPersist,
                 'summary' => $summaryToPersist, // may be filled below from cleaned_text
-                'published_at' => $item['published_at'] ?? null,
+                'published_at' => $publishedAt,
+                'published_precision' => $publishedPrecisionToPersist?->value,
                 'content_type' => $item['content_type'] ?? 'unknown',
                 'status' => $item['status'] ?? 'published',
                 'canonical_url' => $item['canonical_url'] ?? null,
@@ -166,5 +176,62 @@ class ArticleWriter
         }
 
         return $value;
+    }
+
+    private function resolvePublishedPrecision(array $item, int $cityId): ?ArticlePublishedPrecision
+    {
+        $incomingPrecision = $item['published_precision'] ?? null;
+
+        if ($incomingPrecision instanceof ArticlePublishedPrecision) {
+            return $incomingPrecision;
+        }
+
+        if (is_string($incomingPrecision)) {
+            return ArticlePublishedPrecision::tryFrom(trim($incomingPrecision));
+        }
+
+        $publishedAt = $item['published_at'] ?? null;
+
+        if (! is_string($publishedAt)) {
+            return null;
+        }
+
+        $trimmed = trim($publishedAt);
+
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if ($this->stringContainsExplicitTime($trimmed)) {
+            return ArticlePublishedPrecision::DateTime;
+        }
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $trimmed) === 1) {
+            return ArticlePublishedPrecision::Date;
+        }
+
+        $timezone = City::query()->whereKey($cityId)->value('timezone') ?? config('app.timezone', 'UTC');
+
+        try {
+            $parsed = Carbon::parse($trimmed, $timezone);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (
+            $parsed instanceof CarbonInterface
+            && $parsed->hour === 0
+            && $parsed->minute === 0
+            && $parsed->second === 0
+        ) {
+            return ArticlePublishedPrecision::Date;
+        }
+
+        return ArticlePublishedPrecision::DateTime;
+    }
+
+    private function stringContainsExplicitTime(string $value): bool
+    {
+        return preg_match('/\b\d{1,2}:\d{2}(?::\d{2})?\b/', $value) === 1;
     }
 }
