@@ -15,6 +15,7 @@ function makeGenericListingCity(): City
     return City::create([
         'name' => 'Example City',
         'slug' => 'example-city',
+        'timezone' => 'America/Chicago',
     ]);
 }
 
@@ -129,7 +130,58 @@ it('normalizes date-only article timestamps to the start of day', function () {
 
     expect($items)->toHaveCount(1)
         ->and($items[0]['published_at'])->toBeInstanceOf(Carbon::class)
-        ->and($items[0]['published_at']?->toDateTimeString())->toBe('2026-03-13 00:00:00');
+        ->and($items[0]['published_at']?->copy()->setTimezone('America/Chicago')->toDateTimeString())->toBe('2026-03-13 00:00:00')
+        ->and($items[0]['published_at']?->copy()->setTimezone('UTC')->toDateTimeString())->toBe('2026-03-13 05:00:00');
+});
+
+it('extracts article dates from byline wrappers before generic time tags', function () {
+    $city = makeGenericListingCity();
+    $scraper = makeGenericListingScraper($city, maxLinks: 1);
+
+    $listingHtml = <<<'HTML'
+    <html>
+        <body>
+            <div class="listing">
+                <a class="story-link" href="https://example.com/stories/byline-date">Byline date article</a>
+            </div>
+        </body>
+    </html>
+    HTML;
+
+    $articleHtml = <<<'HTML'
+    <html>
+        <head>
+            <title>Byline date article</title>
+            <link rel="canonical" href="https://example.com/stories/byline-date">
+        </head>
+        <body>
+            <header>
+                <time></time>
+            </header>
+            <div class="sno-story-byline">
+                <div class="byline-inner-container">
+                    Reporter Name &bull;
+                    <span class="time-wrapper">March 9, 2026</span>
+                </div>
+            </div>
+            <main class="article-content">
+                <p>This article exposes the publish date in the byline wrapper.</p>
+            </main>
+        </body>
+    </html>
+    HTML;
+
+    Http::fake([
+        'https://example.com/listing' => Http::response($listingHtml, 200),
+        'https://example.com/stories/byline-date' => Http::response($articleHtml, 200),
+    ]);
+
+    $items = app(GenericListingFetcher::class)->fetch($scraper);
+
+    expect($items)->toHaveCount(1)
+        ->and($items[0]['published_at'])->toBeInstanceOf(Carbon::class)
+        ->and($items[0]['published_at']?->copy()->setTimezone('America/Chicago')->toDateTimeString())->toBe('2026-03-09 00:00:00')
+        ->and($items[0]['published_at']?->copy()->setTimezone('UTC')->toDateTimeString())->toBe('2026-03-09 05:00:00');
 });
 
 it('skips profile pages that are mixed into listing links', function () {

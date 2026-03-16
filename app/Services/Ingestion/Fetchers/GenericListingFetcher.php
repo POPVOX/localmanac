@@ -25,6 +25,8 @@ class GenericListingFetcher
             throw new InvalidArgumentException('Scraper type must be html');
         }
 
+        $scraper->loadMissing('city');
+
         $config = $scraper->config ?? [];
         $profile = Arr::get($config, 'profile');
 
@@ -72,6 +74,7 @@ class GenericListingFetcher
         $maxPages = max(1, (int) Arr::get($listConfig, 'max_pages', 1));
         $paginationSelector = Arr::get($listConfig, 'pagination_selector');
         $paginationAttr = Arr::get($listConfig, 'pagination_attr', 'href');
+        $timezone = $scraper->city?->timezone ?? config('app.timezone', 'UTC');
 
         $links = $this->extractListingLinks(
             listingHtml: $listingHtml,
@@ -115,7 +118,7 @@ class GenericListingFetcher
             $canonicalUrl = $this->extractCanonicalUrl($crawler, $url);
             $title = $this->extractTitle($crawler);
             $title = $title ?: ($titleHint ?: $canonicalUrl);
-            $publishedAt = $this->extractPublishedAt($crawler);
+            $publishedAt = $this->extractPublishedAt($crawler, $timezone);
             $metaDescription = $this->extractMetaDescription($crawler);
 
             [$bodyHtml, $cleanedText] = $this->extractBody($crawler, $contentSelector, $removeSelectors);
@@ -537,7 +540,7 @@ class GenericListingFetcher
         return '';
     }
 
-    private function extractPublishedAt(Crawler $crawler): ?Carbon
+    private function extractPublishedAt(Crawler $crawler, string $timezone): ?Carbon
     {
         $metaSelectors = [
             'meta[property="article:published_time"]',
@@ -552,7 +555,7 @@ class GenericListingFetcher
             $value = $this->firstAttr($crawler, $selector, 'content');
 
             if ($value) {
-                $date = $this->parseDate($value);
+                $date = $this->parseDate($value, $timezone);
 
                 if ($date) {
                     return $date;
@@ -560,17 +563,44 @@ class GenericListingFetcher
             }
         }
 
+        $textSelectors = [
+            '.sno-story-byline .time-wrapper',
+            '.byline-inner-container .time-wrapper',
+            '.sno-story-byline',
+            '.entry-date',
+            '.posted-on',
+            '.post-date',
+        ];
+
+        foreach ($textSelectors as $selector) {
+            $value = $this->firstText($crawler, $selector);
+
+            if ($value === null) {
+                continue;
+            }
+
+            $date = $this->extractDateFromText($value, $timezone);
+
+            if ($date !== null) {
+                return $date;
+            }
+        }
+
         $timeTag = $crawler->filter('time');
 
         if ($timeTag->count() > 0) {
-            $attr = $timeTag->first()->attr('datetime') ?? '';
-            $text = $timeTag->first()->text('');
-            $candidate = $attr !== '' ? $attr : $text;
+            foreach ($timeTag as $node) {
+                $nodeCrawler = new Crawler($node);
+                $attr = $nodeCrawler->attr('datetime') ?? '';
+                $text = $nodeCrawler->text('');
+                $candidate = $attr !== '' ? $attr : $text;
 
-            $date = $this->parseDate($candidate);
+                $date = $this->parseDate($candidate, $timezone)
+                    ?? $this->extractDateFromText($candidate, $timezone);
 
-            if ($date) {
-                return $date;
+                if ($date) {
+                    return $date;
+                }
             }
         }
 
@@ -746,6 +776,19 @@ class GenericListingFetcher
         return $value ? $this->normalizeWhitespace($value) : null;
     }
 
+    private function firstText(Crawler $crawler, string $selector): ?string
+    {
+        $node = $crawler->filter($selector);
+
+        if ($node->count() === 0) {
+            return null;
+        }
+
+        $value = $this->normalizeWhitespace($node->first()->text(''));
+
+        return $value !== '' ? $value : null;
+    }
+
     private function normalizeWhitespace(string $value): string
     {
         return trim(preg_replace('/\s+/', ' ', $value) ?? '');
@@ -782,10 +825,10 @@ class GenericListingFetcher
         return false;
     }
 
-    private function parseDate(string $value): ?Carbon
+    private function parseDate(string $value, string $timezone): ?Carbon
     {
         try {
-            $date = Carbon::parse($value);
+            $date = Carbon::parse($value, $timezone);
 
             if (! $this->valueContainsExplicitTime($value)) {
                 return $date->startOfDay();
@@ -795,6 +838,33 @@ class GenericListingFetcher
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    private function extractDateFromText(string $value, string $timezone): ?Carbon
+    {
+        $patterns = [
+            '/\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4}(?:\s+\d{1,2}:\d{2}(?:\s?[AP]M)?)?/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $value, $matches) !== 1) {
+                continue;
+            }
+
+            $candidate = $matches[0] ?? null;
+
+            if (! is_string($candidate) || trim($candidate) === '') {
+                continue;
+            }
+
+            $date = $this->parseDate($candidate, $timezone);
+
+            if ($date !== null) {
+                return $date;
+            }
+        }
+
+        return null;
     }
 
     private function valueContainsExplicitTime(string $value): bool

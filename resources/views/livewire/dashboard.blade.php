@@ -1,210 +1,215 @@
 <div class="space-y-8">
-    {{-- ── Chat area ─────────────────────────────────────────────── --}}
+    {{-- ── Chat + Welcome row ────────────────────────────────────── --}}
     @php
         $hasConversation = $conversationId || count($messages) > 0;
     @endphp
 
-    <div class="overflow-hidden rounded-3xl border border-zinc-200/60 bg-white shadow-lg">
-        {{-- Header strip --}}
-        <div class="flex flex-col gap-4 border-b border-zinc-100 bg-zinc-50/60 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
-            <div class="space-y-0.5">
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        {{-- Query box (left) --}}
+        <div class="overflow-hidden rounded-3xl border border-zinc-200/60 bg-white shadow-lg">
+            {{-- Header --}}
+            <div class="px-6 pt-5 pb-4">
                 <flux:heading size="lg" level="1">
                     {{ __('Ask LocAlmanac About :city', ['city' => $city?->name ?? __('your city')]) }}
                 </flux:heading>
-                <flux:subheading>
+                <flux:subheading class="mt-0.5">
                     {{ __('Get answers on local services, meetings, and community updates.') }}
                 </flux:subheading>
             </div>
 
-            <div class="flex items-center gap-2 text-xs font-medium text-emerald-700">
-                <span class="relative flex size-2">
-                    <span class="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-60"></span>
-                    <span class="relative inline-flex size-2 rounded-full bg-emerald-500"></span>
-                </span>
-                {{ __('Powered by verified sources') }}
-            </div>
-        </div>
-
-        {{-- Conversation body --}}
-        <div
-            x-data="{
-                pendingQuestion: '',
-                hasMessages: @js(count($messages) > 0),
-                scrollTimers: [],
-                scrollToBottom() {
-                    this.$nextTick(() => {
-                        const container = this.$refs.chatScroll;
-                        if (container) {
-                            container.scrollTop = container.scrollHeight;
-                        }
-                    });
-                },
-                queueScrollToBottom() {
-                    this.scrollTimers.forEach((timer) => clearTimeout(timer));
-                    this.scrollTimers = [];
-                    [0, 60, 140, 260, 420].forEach((delay) => {
-                        this.scrollTimers.push(setTimeout(() => this.scrollToBottom(), delay));
-                    });
-                },
-            }"
-            x-init="scrollToBottom()"
-            class="flex flex-col"
-        >
-            {{-- Empty state — shown before any messages --}}
+            {{-- Conversation body --}}
             <div
-                x-show="!hasMessages && !pendingQuestion"
-                x-transition:leave.opacity.duration.150ms
-                class="flex flex-col items-center justify-center px-6 py-12 text-center"
+                x-data="{
+                    pendingQuestion: '',
+                    hasMessages: @js(count($messages) > 0),
+                    scrollTimers: [],
+                    scrollToBottom() {
+                        this.$nextTick(() => {
+                            const container = this.$refs.chatScroll;
+                            if (container) {
+                                container.scrollTop = container.scrollHeight;
+                            }
+                        });
+                    },
+                    queueScrollToBottom() {
+                        this.scrollTimers.forEach((timer) => clearTimeout(timer));
+                        this.scrollTimers = [];
+                        [0, 60, 140, 260, 420].forEach((delay) => {
+                            this.scrollTimers.push(setTimeout(() => this.scrollToBottom(), delay));
+                        });
+                    },
+                }"
+                x-init="scrollToBottom()"
+                class="flex flex-col"
             >
-                <div class="mx-auto mb-6 grid size-16 place-items-center rounded-2xl bg-emerald-50 text-emerald-600">
-                    <flux:icon icon="chat-bubble-left-right" class="size-8" />
-                </div>
-                <p class="text-base font-medium text-zinc-800">{{ __('What would you like to know?') }}</p>
-                <p class="mt-1 max-w-sm text-sm text-zinc-500">
-                    {{ __('Ask about permits, meetings, city services, or anything happening in :city.', ['city' => $city?->name ?? __('your city')]) }}
-                </p>
-            </div>
 
-            {{-- Message thread --}}
-            <div
-                x-ref="chatScroll"
-                x-show="hasMessages || pendingQuestion"
-                x-cloak
-                class="max-h-[420px] space-y-1 overflow-y-auto px-6 py-5"
-                x-on:chat-updated.window="hasMessages = true; pendingQuestion = ''; queueScrollToBottom()"
-                x-on:chat-reset.window="hasMessages = false; pendingQuestion = ''"
-            >
-                @foreach ($messages as $message)
-                    @php
-                        $isUser = $message['role'] === 'user';
-                    @endphp
-                    <div class="flex w-full {{ $isUser ? 'justify-end' : 'justify-start' }} py-1.5">
-                        <div @class([
-                            'max-w-[85%] space-y-2 rounded-2xl px-4 py-3',
-                            'bg-emerald-600 text-white' => $isUser,
-                            'bg-zinc-100 text-zinc-900' => ! $isUser,
-                        ])>
-                            <div class="whitespace-pre-wrap text-sm leading-relaxed">{{ $message['content'] }}</div>
+                {{-- Message thread --}}
+                <div
+                    x-ref="chatScroll"
+                    x-show="hasMessages || pendingQuestion"
+                    x-cloak
+                    class="max-h-[320px] space-y-1 overflow-y-auto px-6 py-5"
+                    x-on:chat-updated.window="hasMessages = true; pendingQuestion = ''; queueScrollToBottom()"
+                    x-on:chat-reset.window="hasMessages = false; pendingQuestion = ''"
+                >
+                    @foreach ($messages as $message)
+                        @php
+                            $isUser = $message['role'] === 'user';
+                        @endphp
+                        <div class="flex w-full {{ $isUser ? 'justify-end' : 'justify-start' }} py-1.5">
+                            <div @class([
+                                'max-w-[85%] space-y-2 rounded-2xl px-4 py-3',
+                                'bg-emerald-600 text-white' => $isUser,
+                                'bg-zinc-100 text-zinc-900' => ! $isUser,
+                            ])>
+                                <div class="whitespace-pre-wrap text-sm leading-relaxed">{{ $message['content'] }}</div>
 
-                            @if (! empty($message['citations']))
-                                <div @class([
-                                    'flex flex-wrap items-center gap-1.5 border-t pt-2',
-                                    'border-emerald-500/40' => $isUser,
-                                    'border-zinc-200' => ! $isUser,
-                                ])>
-                                    @foreach ($message['citations'] as $citation)
-                                        <a
-                                            href="{{ $citation['source_url'] }}"
-                                            target="_blank"
-                                            @class([
-                                                'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium transition',
-                                                'bg-emerald-500/30 text-emerald-50 hover:bg-emerald-500/50' => $isUser,
-                                                'bg-white border border-zinc-200 text-zinc-500 hover:text-zinc-700 hover:border-zinc-300' => ! $isUser,
-                                            ])
-                                        >
-                                            <flux:icon icon="arrow-top-right-on-square" class="size-3" />
-                                            <span>{{ \Illuminate\Support\Str::limit($citation['title'], 36) }}</span>
-                                        </a>
-                                    @endforeach
+                                @if (! empty($message['citations']))
+                                    <div @class([
+                                        'flex flex-wrap items-center gap-1.5 border-t pt-2',
+                                        'border-emerald-500/40' => $isUser,
+                                        'border-zinc-200' => ! $isUser,
+                                    ])>
+                                        @foreach ($message['citations'] as $citation)
+                                            <a
+                                                href="{{ $citation['source_url'] }}"
+                                                target="_blank"
+                                                @class([
+                                                    'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium transition',
+                                                    'bg-emerald-500/30 text-emerald-50 hover:bg-emerald-500/50' => $isUser,
+                                                    'bg-white border border-zinc-200 text-zinc-500 hover:text-zinc-700 hover:border-zinc-300' => ! $isUser,
+                                                ])
+                                            >
+                                                <flux:icon icon="arrow-top-right-on-square" class="size-3" />
+                                                <span>{{ \Illuminate\Support\Str::limit($citation['title'], 36) }}</span>
+                                            </a>
+                                        @endforeach
+                                    </div>
+                                @endif
+                            </div>
+                        </div>
+                    @endforeach
+
+                    {{-- Loading / pending state --}}
+                    <div wire:loading.block wire:target="ask" class="w-full space-y-1">
+                        <div x-show="pendingQuestion" x-cloak class="flex w-full justify-end py-1.5">
+                            <div class="max-w-[85%] rounded-2xl bg-emerald-600 px-4 py-3 text-white">
+                                <div class="whitespace-pre-wrap text-sm leading-relaxed" x-text="pendingQuestion"></div>
+                            </div>
+                        </div>
+
+                        <div class="flex w-full justify-start py-1.5">
+                            <div class="rounded-2xl bg-zinc-100 px-4 py-3">
+                                <div
+                                    role="status"
+                                    aria-live="polite"
+                                    data-testid="assistant-typing-indicator"
+                                    class="flex items-center gap-2 text-xs font-medium text-zinc-500"
+                                >
+                                    <span class="sr-only">{{ __('Assistant is thinking') }}</span>
+                                    <span class="inline-flex items-center gap-1">
+                                        <span class="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-bounce [animation-delay:0ms]"></span>
+                                        <span class="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-bounce [animation-delay:120ms]"></span>
+                                        <span class="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-bounce [animation-delay:240ms]"></span>
+                                    </span>
+                                    <span>{{ __('Thinking…') }}</span>
                                 </div>
-                            @endif
-                        </div>
-                    </div>
-                @endforeach
-
-                {{-- Loading / pending state --}}
-                <div wire:loading.block wire:target="ask" class="w-full space-y-1">
-                    <div x-show="pendingQuestion" x-cloak class="flex w-full justify-end py-1.5">
-                        <div class="max-w-[85%] rounded-2xl bg-emerald-600 px-4 py-3 text-white">
-                            <div class="whitespace-pre-wrap text-sm leading-relaxed" x-text="pendingQuestion"></div>
-                        </div>
-                    </div>
-
-                    <div class="flex w-full justify-start py-1.5">
-                        <div class="rounded-2xl bg-zinc-100 px-4 py-3">
-                            <div
-                                role="status"
-                                aria-live="polite"
-                                data-testid="assistant-typing-indicator"
-                                class="flex items-center gap-2 text-xs font-medium text-zinc-500"
-                            >
-                                <span class="sr-only">{{ __('Assistant is thinking') }}</span>
-                                <span class="inline-flex items-center gap-1">
-                                    <span class="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-bounce [animation-delay:0ms]"></span>
-                                    <span class="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-bounce [animation-delay:120ms]"></span>
-                                    <span class="size-1.5 rounded-full bg-emerald-500 motion-safe:animate-bounce [animation-delay:240ms]"></span>
-                                </span>
-                                <span>{{ __('Thinking…') }}</span>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            {{-- Composer --}}
-            <div class="border-t border-zinc-100 px-6 pb-5 pt-4">
-                <form
-                    wire:submit.prevent="ask"
-                    x-on:submit="pendingQuestion = ($refs.chatComposer?.querySelector('textarea')?.value ?? '').trim(); if (pendingQuestion) { hasMessages = true; setTimeout(() => { const input = $refs.chatComposer?.querySelector('textarea'); if (input) { input.value = ''; } }, 0); } queueScrollToBottom();"
-                    class="space-y-3"
-                >
-                    <flux:composer
-                        x-ref="chatComposer"
-                        wire:model.defer="question"
-                        placeholder="{{ __('Type your question here') }}"
-                        rows="1"
-                        max-rows="2"
-                        submit="enter"
-                        class="rounded-xl border-zinc-200 bg-zinc-50 [&_textarea]:px-4 [&_textarea]:py-3 [&_textarea]:text-sm"
+                {{-- Composer --}}
+                <div class="border-t border-zinc-100 px-6 pb-5 pt-4">
+                    <form
+                        wire:submit.prevent="ask"
+                        x-on:submit="pendingQuestion = ($refs.chatComposer?.querySelector('textarea')?.value ?? '').trim(); if (pendingQuestion) { hasMessages = true; setTimeout(() => { const input = $refs.chatComposer?.querySelector('textarea'); if (input) { input.value = ''; } }, 0); } queueScrollToBottom();"
+                        class="space-y-3"
                     >
-                        <x-slot name="actionsTrailing" class="flex items-center justify-end gap-2">
-                            @if ($hasConversation)
+                        <flux:composer
+                            x-ref="chatComposer"
+                            wire:model.defer="question"
+                            placeholder="{{ __('Type your question here') }}"
+                            rows="2"
+                            max-rows="5"
+                            submit="enter"
+                            class="rounded-xl border-zinc-200 bg-zinc-50 [&_textarea]:px-4 [&_textarea]:py-3 [&_textarea]:text-sm"
+                        >
+                            <x-slot name="actionsTrailing" class="flex items-center justify-end gap-2">
+                                @if ($hasConversation)
+                                    <button
+                                        type="button"
+                                        wire:click="startNewConversation"
+                                        data-testid="new-conversation-button"
+                                        class="inline-grid size-9 place-items-center rounded-full text-zinc-400 transition hover:bg-zinc-200 hover:text-zinc-600"
+                                        aria-label="{{ __('Start a new conversation') }}"
+                                        title="{{ __('Start a new conversation') }}"
+                                    >
+                                        <flux:icon icon="arrow-path-rounded-square" class="size-4" />
+                                    </button>
+                                @endif
+
+                                <flux:button
+                                    type="submit"
+                                    size="sm"
+                                    variant="primary"
+                                    :loading="false"
+                                    class="inline-grid size-9 place-items-center rounded-full bg-emerald-600 p-0 text-white hover:bg-emerald-500"
+                                    aria-label="{{ __('Send question') }}"
+                                >
+                                    <flux:icon icon="paper-airplane" class="size-4" />
+                                </flux:button>
+                            </x-slot>
+                        </flux:composer>
+
+                        <div class="flex flex-wrap gap-2">
+                            @php
+                                $chipColors = [
+                                    'text-emerald-700 bg-emerald-50 hover:bg-emerald-100',
+                                    'text-sky-700 bg-sky-50 hover:bg-sky-100',
+                                    'text-purple-700 bg-purple-50 hover:bg-purple-100',
+                                    'text-orange-700 bg-orange-50 hover:bg-orange-100',
+                                ];
+                            @endphp
+                            @foreach ($promptChips as $index => $chip)
                                 <button
                                     type="button"
-                                    wire:click="startNewConversation"
-                                    data-testid="new-conversation-button"
-                                    class="inline-grid size-9 place-items-center rounded-full text-zinc-400 transition hover:bg-zinc-200 hover:text-zinc-600"
-                                    aria-label="{{ __('Start a new conversation') }}"
-                                    title="{{ __('Start a new conversation') }}"
+                                    class="rounded-full px-3.5 py-1.5 text-xs font-semibold transition {{ $chipColors[$index % count($chipColors)] }}"
+                                    wire:click="applyPrompt(@js($chip['prompt']))"
                                 >
-                                    <flux:icon icon="arrow-path-rounded-square" class="size-4" />
+                                    {{ $chip['label'] }}
                                 </button>
-                            @endif
+                            @endforeach
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
 
-                            <flux:button
-                                type="submit"
-                                size="sm"
-                                variant="primary"
-                                class="inline-grid size-9 place-items-center rounded-full bg-emerald-600 p-0 text-white hover:bg-emerald-500"
-                                wire:loading.attr="disabled"
-                                aria-label="{{ __('Send question') }}"
-                            >
-                                <flux:icon icon="paper-airplane" class="size-4" wire:loading.remove wire:target="ask" />
-                                <flux:icon icon="arrow-path" class="size-4 animate-spin" wire:loading wire:target="ask" />
-                            </flux:button>
-                        </x-slot>
-                    </flux:composer>
-
-                    <div class="flex flex-wrap gap-2">
-                        @php
-                            $chipColors = [
-                                'text-emerald-700 bg-emerald-50 hover:bg-emerald-100',
-                                'text-sky-700 bg-sky-50 hover:bg-sky-100',
-                                'text-purple-700 bg-purple-50 hover:bg-purple-100',
-                                'text-orange-700 bg-orange-50 hover:bg-orange-100',
-                            ];
-                        @endphp
-                        @foreach ($promptChips as $index => $chip)
-                            <button
-                                type="button"
-                                class="rounded-full px-3.5 py-1.5 text-xs font-semibold transition {{ $chipColors[$index % count($chipColors)] }}"
-                                wire:click="applyPrompt(@js($chip['prompt']))"
-                            >
-                                {{ $chip['label'] }}
-                            </button>
-                        @endforeach
+        {{-- Welcome box (right) --}}
+        <div class="flex flex-col gap-6">
+            <div class="flex flex-1 flex-col justify-between space-y-4 rounded-2xl border border-emerald-200/60 bg-emerald-50/30 p-5 shadow-sm">
+                <div class="space-y-4">
+                    <flux:heading size="lg">{{ __('Welcome to LocAlmanac') }}</flux:heading>
+                    <p class="text-sm leading-relaxed text-zinc-600">
+                        {{ __('Your AI-powered local information and news portal. Ask questions, browse articles, and stay informed about what\'s happening in your community.') }}
+                    </p>
+                    <div class="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                        <span class="font-semibold">{{ __('Pilot Status:') }}</span>
+                        {{ __('Live with real Wichita data! Try the AI assistant above.') }}
                     </div>
-                </form>
+                </div>
+                <div class="pt-2">
+                    <button
+                        type="button"
+                        x-data=""
+                        x-on:click="$flux.modal('site-feedback').show()"
+                        class="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-emerald-700 transition hover:text-emerald-600"
+                    >
+                        <flux:icon icon="chat-bubble-left-ellipsis" class="size-4" />
+                        {{ __('Let us know what you think') }}
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -363,9 +368,7 @@
                     @php
                         $articleTime = $article->published_at ?? $article->created_at;
                         $articleDisplayTime = $articleTime?->clone()->tz($timezone);
-                        $articleTimeLabel = $articleDisplayTime?->isStartOfDay()
-                            ? $articleDisplayTime->format('M j, Y')
-                            : $articleDisplayTime?->format('M j, Y g:i A');
+                        $articleTimeLabel = $articleDisplayTime?->format('M j, Y');
                         $sourceLabel = $article->scraper?->organization?->name
                             ?? parse_url($article->primarySourceUrl() ?? '', PHP_URL_HOST)
                             ?? __('Source');
@@ -408,17 +411,50 @@
         </div>
 
         <div class="space-y-6">
+            {{-- Calendar highlights --}}
             <div class="space-y-4 rounded-2xl border border-zinc-200/60 bg-white p-5 shadow-sm">
-                <flux:heading size="lg">{{ __('Welcome to LocAlmanac') }}</flux:heading>
-                <p class="text-sm leading-relaxed text-zinc-600">
-                    {{ __('Your AI-powered local news portal. Ask questions, browse articles, and stay informed about what\'s happening in your community.') }}
-                </p>
-                <div class="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                    <span class="font-semibold">{{ __('Pilot Status:') }}</span>
-                    {{ __('Live with real Wichita data! Try the AI assistant above.') }}
+                <div class="flex items-center gap-2">
+                    <flux:icon icon="calendar-days" class="size-5 text-emerald-600" />
+                    <flux:heading size="lg">{{ __('Events Calendar') }}</flux:heading>
                 </div>
+
+                @forelse ($upcomingEvents as $event)
+                    @php
+                        $eventStart = $event->starts_at?->clone()->tz($timezone);
+                        $eventEnd = $event->ends_at?->clone()->tz($timezone);
+                        $eventDateLabel = $event->all_day
+                            ? $eventStart?->format('D')
+                            : $eventStart?->format('D g:i A');
+                        $eventTimeRange = null;
+                        if (! $event->all_day && $eventStart && $eventEnd) {
+                            $eventTimeRange = $eventStart->format('g A') . ' - ' . $eventEnd->format('g A');
+                        } elseif (! $event->all_day && $eventStart) {
+                            $eventTimeRange = $eventStart->format('g:i A');
+                        }
+                    @endphp
+                    <div class="border-l-2 border-emerald-500 py-1 pl-3">
+                        <div class="text-sm font-semibold text-emerald-700">{{ $event->title }}</div>
+                        <div class="text-xs text-zinc-500">
+                            {{ $eventStart?->format('D') }} {{ $eventTimeRange }}
+                        </div>
+                        @if ($event->location_name)
+                            <div class="text-xs text-zinc-400">{{ $event->location_name }}</div>
+                        @endif
+                    </div>
+                @empty
+                    <flux:text variant="subtle">{{ __('No upcoming events.') }}</flux:text>
+                @endforelse
+
+                <a
+                    href="{{ route('demo.calendar') }}"
+                    class="inline-flex items-center gap-1 text-sm font-semibold uppercase tracking-wide text-zinc-700 transition hover:text-emerald-600"
+                    wire:navigate
+                >
+                    {{ __('Full Calendar') }}
+                </a>
             </div>
 
+            {{-- Browse by Category --}}
             <div class="space-y-4 rounded-2xl border border-zinc-200/60 bg-white p-5 shadow-sm">
                 <flux:heading size="lg">{{ __('Browse by Category') }}</flux:heading>
                 <p class="text-sm text-zinc-500">

@@ -262,7 +262,8 @@ it('renders dashboard feed dates as absolute labels', function () {
         ->assertSee('Date Only Article')
         ->assertSee('Mar 13, 2026')
         ->assertSee('Timed Article')
-        ->assertSee('Mar 13, 2026 3:45 PM')
+        ->assertSee('Mar 13, 2026')
+        ->assertDontSee('3:45 PM')
         ->assertDontSee('hours ago');
 });
 
