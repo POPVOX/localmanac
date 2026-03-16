@@ -420,6 +420,12 @@ class ArticleTimestampRepairer
 
     private function resolveArchivePdfPublishedAt(Article $article, string $timezone): ?Carbon
     {
+        $titleDate = $this->extractArchivePdfTitleDate($article, $timezone);
+
+        if ($titleDate instanceof Carbon && $this->isPlausiblePublishedAt($article, $titleDate, $timezone)) {
+            return $titleDate;
+        }
+
         $textCandidates = [
             $article->body?->cleaned_text,
             $article->body?->raw_text,
@@ -434,7 +440,7 @@ class ArticleTimestampRepairer
 
             $resolved = $this->extractArchivePdfPublishedAt($candidate, $timezone);
 
-            if ($resolved instanceof Carbon) {
+            if ($resolved instanceof Carbon && $this->isPlausiblePublishedAt($article, $resolved, $timezone)) {
                 return $resolved;
             }
         }
@@ -451,7 +457,36 @@ class ArticleTimestampRepairer
             return null;
         }
 
-        return $this->extractArchivePdfPublishedAt($fetchedText, $timezone);
+        $resolved = $this->extractArchivePdfPublishedAt($fetchedText, $timezone);
+
+        return $resolved instanceof Carbon && $this->isPlausiblePublishedAt($article, $resolved, $timezone)
+            ? $resolved
+            : null;
+    }
+
+    private function extractArchivePdfTitleDate(Article $article, string $timezone): ?Carbon
+    {
+        if (! is_string($article->title) || trim($article->title) === '') {
+            return null;
+        }
+
+        if (preg_match('/\b(\d{1,2})[.\-](\d{1,2})[.\-](\d{4})\b/', $article->title, $matches) !== 1) {
+            return null;
+        }
+
+        $month = (int) ($matches[1] ?? 0);
+        $day = (int) ($matches[2] ?? 0);
+        $year = (int) ($matches[3] ?? 0);
+
+        if ($month < 1 || $month > 12 || $day < 1 || $day > 31 || $year < 2000 || $year > 2100) {
+            return null;
+        }
+
+        try {
+            return Carbon::create($year, $month, $day, 0, 0, 0, $timezone);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function fetchArchiveDocumentText(string $url): ?string
@@ -552,6 +587,24 @@ class ArticleTimestampRepairer
         $window = implode(' ', array_slice($lines, 0, 12));
 
         return mb_substr($window, 0, 600);
+    }
+
+    private function isPlausiblePublishedAt(Article $article, Carbon $publishedAt, string $timezone): bool
+    {
+        $candidate = $publishedAt->copy()->setTimezone($timezone)->startOfDay();
+        $now = Carbon::now($timezone)->endOfDay();
+
+        if ($candidate->greaterThan($now)) {
+            return false;
+        }
+
+        if (! $article->created_at instanceof Carbon) {
+            return true;
+        }
+
+        return $candidate->lessThanOrEqualTo(
+            $article->created_at->copy()->setTimezone($timezone)->endOfDay()
+        );
     }
 
     /**

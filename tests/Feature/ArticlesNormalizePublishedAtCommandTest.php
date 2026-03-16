@@ -696,3 +696,72 @@ it('repairs legal notice archive pdf timestamps from OCR-damaged leading documen
 
     expect($article->fresh()?->published_at?->toAtomString())->toBe('2025-03-14T05:00:00+00:00');
 });
+
+it('uses explicit title dates for archive notices with mm.dd.yyyy suffixes', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'NOTICE OF PUBLIC HEARING - SECOND AMENDMENT TO PROJECT PLAN (002) 12.07.2025',
+        'summary' => 'Published in the Official Newspaper of the City (www.wichita.gov) and The Wichita Eagle on November 30, 2025 and December 7, 2025.',
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=99999',
+        'published_at' => '2026-12-07 06:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful();
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2025-12-07T06:00:00+00:00')
+        ->and($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
+});
+
+it('rejects archive notice publication dates that land after the article import date', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'Resolution 25-489 NOI',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=88888',
+        'published_at' => '2026-11-09 06:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => 'Published at Wichita.gov/LegalNotices on November 9, 2026. Notice to the residents...',
+        'cleaned_text' => 'Published at Wichita.gov/LegalNotices on November 9, 2026. Notice to the residents...',
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+    ])->assertSuccessful()
+        ->expectsOutputToContain('resolved: 0')
+        ->expectsOutputToContain('unresolved: 1');
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2026-11-09T06:00:00+00:00');
+});
