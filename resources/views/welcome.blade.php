@@ -21,7 +21,7 @@
 
             <header class="mx-auto flex w-full max-w-7xl items-center justify-between px-6 pt-8 sm:px-8 lg:px-12">
                 <a href="{{ route('home') }}" class="inline-flex items-center" wire:navigate>
-                    <x-app-logo-icon class="h-12 w-auto sm:h-14" />
+                    <x-app-logo-icon class="h-16 w-auto" />
                 </a>
 
                 <nav class="flex items-center gap-3 text-sm font-semibold text-zinc-700">

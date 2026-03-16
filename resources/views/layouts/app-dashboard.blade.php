@@ -4,7 +4,7 @@
         @include('partials.head')
     </head>
     <body class="app-shell-bg text-zinc-900 antialiased dark:text-zinc-100">
-        <flux:header container class="app-shell-header">
+        <flux:header container class="app-shell-header py-4">
             <div class="flex items-center gap-3">
                 <a href="{{ route('dashboard') }}" class="flex items-center" wire:navigate>
                     <x-app-logo />
