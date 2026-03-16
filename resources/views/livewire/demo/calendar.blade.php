@@ -3,7 +3,7 @@
     use Illuminate\Support\Str;
 
     $hasEvents = $allDayEvents->isNotEmpty() || $timedEventGroups->isNotEmpty();
-    $normalizeText = fn (?string $value): string => Str::of($value ?? '')
+    $normalizeText = fn (?string $value): string => Str::of(html_entity_decode($value ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8'))
         ->replace(['\\,'], [','])
         ->replace(['\\n', '\\r', '\\t'], ' ')
         ->squish()

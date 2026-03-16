@@ -52,6 +52,35 @@ test('shows events for the selected date only', function () {
         ->assertDontSee($otherEvent->title);
 });
 
+test('decodes html entities in calendar event text', function () {
+    $city = City::factory()->create([
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $selectedDate = Carbon::create(2026, 1, 13, 14, 30, 0, $city->timezone);
+
+    Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Rock &amp; Roll Night',
+        'description' => 'We&rsquo;ll bring snacks &amp; games.',
+        'starts_at' => $selectedDate,
+        'ends_at' => $selectedDate->copy()->addHour(),
+        'all_day' => false,
+    ]);
+
+    $response = $this->get(route('demo.calendar', [
+        'date' => $selectedDate->toDateString(),
+        'city_id' => $city->id,
+    ]));
+
+    $response
+        ->assertSuccessful()
+        ->assertSee('Rock & Roll Night')
+        ->assertSee('We’ll bring snacks & games.')
+        ->assertDontSee('Rock &amp; Roll Night')
+        ->assertDontSee('We&rsquo;ll bring snacks &amp; games.');
+});
+
 test('shows empty state when no events exist for the selected date', function () {
     $city = City::factory()->create([
         'timezone' => 'America/Chicago',
