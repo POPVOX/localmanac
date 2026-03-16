@@ -451,16 +451,20 @@ class ArticleTimestampRepairer
             return null;
         }
 
-        $fetchedText = $this->fetchArchiveDocumentText($sourceUrl);
+        $payload = $this->fetchArchiveDocumentPayload($sourceUrl, $timezone);
 
-        if ($fetchedText === null) {
-            return null;
+        if (is_string($payload['text']) && $payload['text'] !== '') {
+            $resolved = $this->extractArchivePdfPublishedAt($payload['text'], $timezone);
+
+            if ($resolved instanceof Carbon && $this->isPlausiblePublishedAt($article, $resolved, $timezone)) {
+                return $resolved;
+            }
         }
 
-        $resolved = $this->extractArchivePdfPublishedAt($fetchedText, $timezone);
+        $metadataDate = $payload['metadata_date'];
 
-        return $resolved instanceof Carbon && $this->isPlausiblePublishedAt($article, $resolved, $timezone)
-            ? $resolved
+        return $metadataDate instanceof Carbon && $this->isPlausiblePublishedAt($article, $metadataDate, $timezone)
+            ? $metadataDate
             : null;
     }
 
@@ -489,7 +493,10 @@ class ArticleTimestampRepairer
         }
     }
 
-    private function fetchArchiveDocumentText(string $url): ?string
+    /**
+     * @return array{text: string|null, metadata_date: Carbon|null}
+     */
+    private function fetchArchiveDocumentPayload(string $url, string $timezone): array
     {
         try {
             $response = Http::timeout(45)
@@ -497,31 +504,63 @@ class ArticleTimestampRepairer
                 ->withHeaders(['User-Agent' => 'LocalmanacBot/1.0'])
                 ->get($url);
         } catch (\Throwable) {
-            return null;
+            return ['text' => null, 'metadata_date' => null];
         }
 
         if (! $response->successful()) {
-            return null;
+            return ['text' => null, 'metadata_date' => null];
         }
 
         $contentType = mb_strtolower((string) $response->header('Content-Type'));
         $body = (string) $response->body();
 
         if ($body === '') {
-            return null;
+            return ['text' => null, 'metadata_date' => null];
         }
 
         if (str_contains($contentType, 'application/pdf') || Str::startsWith($body, '%PDF')) {
+            $metadataDate = $this->extractArchivePdfMetadataDate($body, $timezone);
+
             try {
-                return $this->pdfTextExtractor->extract($body);
+                return [
+                    'text' => $this->pdfTextExtractor->extract($body),
+                    'metadata_date' => $metadataDate,
+                ];
             } catch (\Throwable) {
-                return null;
+                return [
+                    'text' => null,
+                    'metadata_date' => $metadataDate,
+                ];
             }
         }
 
         $text = trim(strip_tags($body));
 
-        return $text !== '' ? $text : null;
+        return [
+            'text' => $text !== '' ? $text : null,
+            'metadata_date' => null,
+        ];
+    }
+
+    private function extractArchivePdfMetadataDate(string $binary, string $timezone): ?Carbon
+    {
+        if (preg_match('/\/CreationDate\s*\(D:(\d{4})(\d{2})(\d{2})\d{6}(?:[+\-Z].*?)?\)/', $binary, $matches) !== 1) {
+            return null;
+        }
+
+        try {
+            return Carbon::create(
+                (int) $matches[1],
+                (int) $matches[2],
+                (int) $matches[3],
+                0,
+                0,
+                0,
+                $timezone,
+            );
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function extractArchivePdfPublishedAt(string $content, string $timezone): ?Carbon
