@@ -23,7 +23,17 @@ class ArticleTimestampRepairer
      *     resolved: int,
      *     needs_update: int,
      *     updated: int,
-     *     unresolved: int
+     *     unresolved: int,
+     *     by_scraper: list<array{
+     *         scraper_id: int|null,
+     *         scraper_name: string,
+     *         scraper_slug: string,
+     *         scanned: int,
+     *         resolved: int,
+     *         needs_update: int,
+     *         updated: int,
+     *         unresolved: int
+     *     }>
      * }
      */
     public function repair(
@@ -39,23 +49,40 @@ class ArticleTimestampRepairer
         $needsUpdate = 0;
         $updated = 0;
         $unresolved = 0;
+        $byScraper = [];
 
         foreach ($articles as $article) {
+            $scraperKey = (string) ($article->scraper_id ?? 'unknown');
+            $byScraper[$scraperKey] ??= [
+                'scraper_id' => $article->scraper_id,
+                'scraper_name' => $article->scraper?->name ?? 'Unknown scraper',
+                'scraper_slug' => $article->scraper?->slug ?? 'unknown',
+                'scanned' => 0,
+                'resolved' => 0,
+                'needs_update' => 0,
+                'updated' => 0,
+                'unresolved' => 0,
+            ];
+            $byScraper[$scraperKey]['scanned']++;
+
             $repair = $this->resolveRepair($article);
 
             if ($repair === null) {
                 $unresolved++;
+                $byScraper[$scraperKey]['unresolved']++;
 
                 continue;
             }
 
             $resolved++;
+            $byScraper[$scraperKey]['resolved']++;
 
             if ($this->matches($article, $repair['published_at'], $repair['published_precision'])) {
                 continue;
             }
 
             $needsUpdate++;
+            $byScraper[$scraperKey]['needs_update']++;
 
             if (! $apply) {
                 continue;
@@ -67,7 +94,18 @@ class ArticleTimestampRepairer
             ])->save();
 
             $updated++;
+            $byScraper[$scraperKey]['updated']++;
         }
+
+        $scraperSummaries = collect($byScraper)
+            ->sortByDesc(fn (array $summary): array => [
+                $summary['unresolved'],
+                $summary['needs_update'],
+                $summary['scanned'],
+                $summary['scraper_name'],
+            ])
+            ->values()
+            ->all();
 
         return [
             'scanned' => $articles->count(),
@@ -75,6 +113,7 @@ class ArticleTimestampRepairer
             'needs_update' => $needsUpdate,
             'updated' => $updated,
             'unresolved' => $unresolved,
+            'by_scraper' => $scraperSummaries,
         ];
     }
 

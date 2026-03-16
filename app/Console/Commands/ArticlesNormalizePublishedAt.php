@@ -48,6 +48,21 @@ class ArticlesNormalizePublishedAt extends Command
         $this->line('needs_update: '.$summary['needs_update']);
         $this->line('updated: '.$summary['updated']);
         $this->line('unresolved: '.$summary['unresolved']);
+        $this->line('');
+        $this->line('By scraper:');
+
+        foreach ($summary['by_scraper'] as $scraperSummary) {
+            $this->line(sprintf(
+                '  %s (%s): scanned=%d resolved=%d needs_update=%d updated=%d unresolved=%d',
+                $scraperSummary['scraper_name'],
+                $scraperSummary['scraper_slug'],
+                $scraperSummary['scanned'],
+                $scraperSummary['resolved'],
+                $scraperSummary['needs_update'],
+                $scraperSummary['updated'],
+                $scraperSummary['unresolved'],
+            ));
+        }
 
         return self::SUCCESS;
     }
