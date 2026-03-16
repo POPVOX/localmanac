@@ -33,6 +33,14 @@ class ArticleTimestampRepairer
      *     needs_update: int,
      *     updated: int,
      *     unresolved: int,
+     *     unresolved_samples: list<array{
+     *         article_id: int,
+     *         scraper_name: string,
+     *         scraper_slug: string,
+     *         title: string,
+     *         canonical_url: string|null,
+     *         snippet: string|null
+     *     }>,
      *     by_scraper: list<array{
      *         scraper_id: int|null,
      *         scraper_name: string,
@@ -51,6 +59,7 @@ class ArticleTimestampRepairer
         bool $apply = false,
         ?int $limit = null,
         ?Carbon $before = null,
+        int $sampleUnresolved = 5,
     ): array {
         $articles = $this->targetArticles($city, $scraperIdentifier, $limit, $before);
 
@@ -59,6 +68,7 @@ class ArticleTimestampRepairer
         $updated = 0;
         $unresolved = 0;
         $byScraper = [];
+        $unresolvedSamples = [];
 
         foreach ($articles as $article) {
             $scraperKey = (string) ($article->scraper_id ?? 'unknown');
@@ -79,6 +89,17 @@ class ArticleTimestampRepairer
             if ($repair === null) {
                 $unresolved++;
                 $byScraper[$scraperKey]['unresolved']++;
+
+                if (count($unresolvedSamples) < $sampleUnresolved) {
+                    $unresolvedSamples[] = [
+                        'article_id' => $article->id,
+                        'scraper_name' => $article->scraper?->name ?? 'Unknown scraper',
+                        'scraper_slug' => $article->scraper?->slug ?? 'unknown',
+                        'title' => $article->title,
+                        'canonical_url' => $article->canonical_url,
+                        'snippet' => $this->unresolvedSnippet($article),
+                    ];
+                }
 
                 continue;
             }
@@ -122,6 +143,7 @@ class ArticleTimestampRepairer
             'needs_update' => $needsUpdate,
             'updated' => $updated,
             'unresolved' => $unresolved,
+            'unresolved_samples' => $unresolvedSamples,
             'by_scraper' => $scraperSummaries,
         ];
     }
@@ -551,6 +573,30 @@ class ArticleTimestampRepairer
     private function containsExplicitTime(string $value): bool
     {
         return preg_match('/\b\d{1,2}:\d{2}(?::\d{2})?\b/', $value) === 1;
+    }
+
+    private function unresolvedSnippet(Article $article): ?string
+    {
+        $candidates = [
+            $article->body?->cleaned_text,
+            $article->body?->raw_text,
+            is_string($article->body?->raw_html) ? strip_tags($article->body->raw_html) : null,
+            $article->summary,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (! is_string($candidate) || trim($candidate) === '') {
+                continue;
+            }
+
+            $normalized = $this->normalizeWhitespace($candidate);
+
+            if ($normalized !== '') {
+                return mb_substr($normalized, 0, 180);
+            }
+        }
+
+        return null;
     }
 
     private function matches(Article $article, ?Carbon $publishedAt, ?ArticlePublishedPrecision $precision): bool

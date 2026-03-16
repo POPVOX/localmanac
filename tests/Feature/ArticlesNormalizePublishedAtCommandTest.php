@@ -247,7 +247,12 @@ it('prints a per-scraper normalization summary', function () {
     ])->assertSuccessful()
         ->expectsOutputToContain('By scraper:')
         ->expectsOutputToContain('The-sunflower (the-sunflower): scanned=1 resolved=1 needs_update=1 updated=0 unresolved=0')
-        ->expectsOutputToContain('The-voice-wichita (the-voice-wichita): scanned=1 resolved=0 needs_update=0 updated=0 unresolved=1');
+        ->expectsOutputToContain('The-voice-wichita (the-voice-wichita): scanned=1 resolved=0 needs_update=0 updated=0 unresolved=1')
+        ->expectsOutputToContain('Unresolved samples:')
+        ->expectsOutputToContain('[2] The-voice-wichita (the-voice-wichita)')
+        ->expectsOutputToContain('title: Unresolved article')
+        ->expectsOutputToContain('url: https://example.com/unresolved')
+        ->expectsOutputToContain('snippet: No publish date here.');
 });
 
 it('repairs legal notice archive pdf article timestamps from extracted pdf text', function () {

@@ -12,6 +12,7 @@ class ArticlesNormalizePublishedAt extends Command
         {--city= : City ID or slug}
         {--scraper= : Scraper ID or slug}
         {--limit= : Maximum number of articles to inspect}
+        {--sample-unresolved=5 : Number of unresolved article samples to print}
         {--before= : Only normalize legacy rows created on or before this UTC timestamp}
         {--apply : Persist corrected published_at and published_precision values}';
 
@@ -22,6 +23,7 @@ class ArticlesNormalizePublishedAt extends Command
         $city = $this->stringOption('city');
         $scraper = $this->stringOption('scraper');
         $limit = $this->integerOption('limit');
+        $sampleUnresolved = $this->integerOption('sample-unresolved') ?? 5;
         $before = $this->datetimeOption('before');
         $apply = (bool) $this->option('apply');
 
@@ -41,6 +43,7 @@ class ArticlesNormalizePublishedAt extends Command
             apply: $apply,
             limit: $limit,
             before: $before,
+            sampleUnresolved: max(0, $sampleUnresolved),
         );
 
         $this->line('scanned: '.$summary['scanned']);
@@ -62,6 +65,29 @@ class ArticlesNormalizePublishedAt extends Command
                 $scraperSummary['updated'],
                 $scraperSummary['unresolved'],
             ));
+        }
+
+        if ($summary['unresolved'] > 0 && $summary['unresolved_samples'] !== []) {
+            $this->line('');
+            $this->line('Unresolved samples:');
+
+            foreach ($summary['unresolved_samples'] as $sample) {
+                $this->line(sprintf(
+                    '  [%d] %s (%s)',
+                    $sample['article_id'],
+                    $sample['scraper_name'],
+                    $sample['scraper_slug'],
+                ));
+                $this->line('    title: '.$sample['title']);
+
+                if (is_string($sample['canonical_url']) && $sample['canonical_url'] !== '') {
+                    $this->line('    url: '.$sample['canonical_url']);
+                }
+
+                if (is_string($sample['snippet']) && $sample['snippet'] !== '') {
+                    $this->line('    snippet: '.$sample['snippet']);
+                }
+            }
         }
 
         return self::SUCCESS;
