@@ -83,14 +83,32 @@ class Calendar extends Component
             ->with('sourceItems.eventSource')
             ->get();
 
-        $allDayEvents = $events->filter(fn (Event $event) => $event->all_day);
-        $timedEvents = $events->reject(fn (Event $event) => $event->all_day);
+        $allDayEvents = $events->filter(fn (Event $event) => $this->shouldDisplayAsAllDay($event, $timezone));
+        $timedEvents = $events->reject(fn (Event $event) => $this->shouldDisplayAsAllDay($event, $timezone));
 
         $groupedTimedEvents = $timedEvents
             ->groupBy(fn (Event $event) => $event->starts_at?->copy()->setTimezone($timezone)->format('H:i') ?? 'tbd')
             ->sortKeys();
 
         return [$allDayEvents, $groupedTimedEvents];
+    }
+
+    private function shouldDisplayAsAllDay(Event $event, string $timezone): bool
+    {
+        if ($event->all_day) {
+            return true;
+        }
+
+        $startsAt = $event->starts_at?->copy()->setTimezone($timezone);
+        $endsAt = $event->ends_at?->copy()->setTimezone($timezone);
+
+        if (! $startsAt || ! $endsAt) {
+            return false;
+        }
+
+        return $startsAt->isSameDay($endsAt)
+            && $startsAt->equalTo($startsAt->copy()->startOfDay())
+            && $endsAt->greaterThanOrEqualTo($startsAt->copy()->endOfDay()->subMinute());
     }
 
     private function resolveCity(): ?City

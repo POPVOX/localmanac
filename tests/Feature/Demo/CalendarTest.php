@@ -81,6 +81,37 @@ test('decodes html entities in calendar event text', function () {
         ->assertDontSee('We&rsquo;ll bring snacks &amp; games.');
 });
 
+test('treats full-day timed events as all-day on the calendar page', function () {
+    $city = City::factory()->create([
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $selectedDate = Carbon::create(2026, 1, 13, 0, 0, 0, $city->timezone);
+
+    Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Pokémon Scavenger Hunt',
+        'starts_at' => $selectedDate,
+        'ends_at' => $selectedDate->copy()->setTime(23, 59),
+        'all_day' => false,
+        'event_url' => 'https://events.example.com/pokemon-scavenger-hunt',
+    ]);
+
+    $response = $this->get(route('demo.calendar', [
+        'date' => $selectedDate->toDateString(),
+        'city_id' => $city->id,
+    ]));
+
+    $response
+        ->assertSuccessful()
+        ->assertSee('Pokémon Scavenger Hunt')
+        ->assertSee('All day')
+        ->assertDontSee('12:00 AM – 11:59 PM')
+        ->assertSee('href="https://events.example.com/pokemon-scavenger-hunt"', false)
+        ->assertSee('target="_blank"', false)
+        ->assertSee('rel="noopener noreferrer"', false);
+});
+
 test('shows empty state when no events exist for the selected date', function () {
     $city = City::factory()->create([
         'timezone' => 'America/Chicago',

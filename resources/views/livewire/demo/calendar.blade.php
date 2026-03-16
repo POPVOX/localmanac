@@ -86,7 +86,14 @@
                                         <div class="space-y-2">
                                             <h3 class="text-sm font-semibold text-zinc-900">
                                                 @if ($event->event_url)
-                                                    <a href="{{ $event->event_url }}" class="transition hover:text-emerald-600">{{ $titleText }}</a>
+                                                    <a
+                                                        href="{{ $event->event_url }}"
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        class="transition hover:text-emerald-600"
+                                                    >
+                                                        {{ $titleText }}
+                                                    </a>
                                                 @else
                                                     {{ $titleText }}
                                                 @endif
@@ -141,7 +148,14 @@
                                             <div class="min-w-0 flex-1 space-y-2">
                                                 <h3 class="text-sm font-semibold text-zinc-900">
                                                     @if ($event->event_url)
-                                                        <a href="{{ $event->event_url }}" class="transition hover:text-emerald-600">{{ $titleText }}</a>
+                                                        <a
+                                                            href="{{ $event->event_url }}"
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            class="transition hover:text-emerald-600"
+                                                        >
+                                                            {{ $titleText }}
+                                                        </a>
                                                     @else
                                                         {{ $titleText }}
                                                     @endif
