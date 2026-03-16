@@ -218,7 +218,7 @@ class ArticleTimestampRepairer
         }
 
         if ($profile === 'wichitadocumenters') {
-            $publishedAt = $this->resolveDocumentersPublishedAt($article);
+            $publishedAt = $this->resolveDocumentersPublishedAt($article, $timezone);
 
             if (! $publishedAt instanceof Carbon) {
                 return null;
@@ -544,7 +544,20 @@ class ArticleTimestampRepairer
 
     private function extractArchivePdfMetadataDate(string $binary, string $timezone): ?Carbon
     {
-        if (preg_match('/\/CreationDate\s*\(D:(\d{4})(\d{2})(\d{2})\d{6}(?:[+\-Z].*?)?\)/', $binary, $matches) !== 1) {
+        $matches = null;
+
+        foreach ([
+            '/\/CreationDate\s*\(D:(\d{4})(\d{2})(\d{2})\d{6}(?:[+\-Z].*?)?\)/',
+            '/<xmp:CreateDate>(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}(?:[+\-]\d{2}:\d{2}|Z)<\/xmp:CreateDate>/i',
+        ] as $pattern) {
+            if (preg_match($pattern, $binary, $candidateMatches) === 1) {
+                $matches = $candidateMatches;
+
+                break;
+            }
+        }
+
+        if (! is_array($matches)) {
             return null;
         }
 
@@ -737,12 +750,12 @@ class ArticleTimestampRepairer
         }, $value) ?? $value;
     }
 
-    private function resolveDocumentersPublishedAt(Article $article): ?Carbon
+    private function resolveDocumentersPublishedAt(Article $article, string $timezone): ?Carbon
     {
         $rawHtml = $article->body?->raw_html;
 
         if (is_string($rawHtml) && trim($rawHtml) !== '') {
-            $resolved = $this->extractDocumentersPublishedAt($rawHtml);
+            $resolved = $this->extractDocumentersPublishedAt($rawHtml, $timezone);
 
             if ($resolved instanceof Carbon) {
                 return $resolved;
@@ -761,10 +774,10 @@ class ArticleTimestampRepairer
             return null;
         }
 
-        return $this->extractDocumentersPublishedAt($html);
+        return $this->extractDocumentersPublishedAt($html, $timezone);
     }
 
-    private function extractDocumentersPublishedAt(string $html): ?Carbon
+    private function extractDocumentersPublishedAt(string $html, string $timezone): ?Carbon
     {
         $candidate = $this->matchDocumentersCandidate($html)
             ?? $this->matchDocumentersCandidate(strip_tags($html))
@@ -775,7 +788,7 @@ class ArticleTimestampRepairer
         }
 
         try {
-            return Carbon::parse($this->normalizeDocumentersCandidate($candidate));
+            return Carbon::parse($this->normalizeDocumentersCandidate($candidate), $timezone)->startOfDay();
         } catch (\Throwable) {
             return null;
         }

@@ -131,7 +131,8 @@ it('repairs documenters article timestamps from stored raw html', function () {
         ->expectsOutputToContain('resolved: 1')
         ->expectsOutputToContain('updated: 1');
 
-    expect($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2025-09-16T05:00:00+00:00')
+        ->and($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
 });
 
 it('backfills rss article precision without changing published_at', function () {
@@ -826,4 +827,66 @@ it('falls back to archive pdf metadata dates for scanned notices with unusable O
     ])->assertSuccessful();
 
     expect($article->fresh()?->published_at?->toAtomString())->toBe('2025-11-07T06:00:00+00:00');
+});
+
+it('falls back to archive pdf xmp metadata dates for scanned notices with unusable OCR text', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => '25-450 Hess Reservoir Improvements NOI',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=13471',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleSource::create([
+        'city_id' => $city->id,
+        'article_id' => $article->id,
+        'source_url' => 'https://www.wichita.gov/Archive.aspx?ADID=13471',
+        'source_type' => 'pdf',
+        'accessed_at' => now(),
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => 'Published at Wichita.gov/LegalNotices on 60A 1, 2025.)',
+        'cleaned_text' => 'Published at Wichita.gov/LegalNotices on 60A 1, 2025.)',
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    Http::fake([
+        'https://www.wichita.gov/Archive.aspx?ADID=13471' => Http::response('%PDF-1.7 <xmp:CreateDate>2025-10-17T08:51:32-05:00</xmp:CreateDate>', 200, [
+            'Content-Type' => 'application/pdf',
+        ]),
+    ]);
+
+    $extractor = new class extends PdfTextExtractor
+    {
+        public function extract(string $binary): string
+        {
+            return '';
+        }
+    };
+
+    app()->instance(PdfTextExtractor::class, $extractor);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful();
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2025-10-17T05:00:00+00:00');
 });

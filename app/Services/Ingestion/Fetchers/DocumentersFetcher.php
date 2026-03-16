@@ -76,11 +76,13 @@ class DocumentersFetcher
                 continue;
             }
 
+            $timezone = $scraper->city?->timezone ?? config('app.timezone', 'UTC');
+
             $items[] = [
                 'city_id' => $scraper->city_id,
                 'scraper_id' => $scraper->id,
                 'title' => $scraper->name.' — Notes',
-                'published_at' => $this->extractPublishedAt($rawHtml),
+                'published_at' => $this->extractPublishedAt($rawHtml, $timezone),
                 'published_precision' => ArticlePublishedPrecision::Date->value,
                 'summary' => null,
                 'body' => [
@@ -220,7 +222,7 @@ class DocumentersFetcher
         return trim($value);
     }
 
-    private function extractPublishedAt(string $html): ?Carbon
+    private function extractPublishedAt(string $html, string $timezone): ?Carbon
     {
         $candidate = $this->matchPublishedAtCandidate($html);
 
@@ -237,7 +239,7 @@ class DocumentersFetcher
         }
 
         try {
-            return Carbon::parse($this->normalizePublishedAtCandidate($candidate));
+            return Carbon::parse($this->normalizePublishedAtCandidate($candidate), $timezone)->startOfDay();
         } catch (\Throwable) {
             return null;
         }

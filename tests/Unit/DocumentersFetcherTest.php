@@ -192,6 +192,7 @@ it('extracts abbreviated documenters dates as published_at', function () {
     $city = City::create([
         'name' => 'Abbreviated City',
         'slug' => 'abbreviated-city',
+        'timezone' => 'America/Chicago',
     ]);
 
     $scraper = Scraper::create([
@@ -256,13 +257,14 @@ it('extracts abbreviated documenters dates as published_at', function () {
     $items = (new DocumentersFetcher($pageFetcher))->fetch($scraper);
 
     expect($items)->toHaveCount(1)
-        ->and($items[0]['published_at']?->toDateString())->toBe('2025-09-16');
+        ->and($items[0]['published_at']?->toAtomString())->toBe('2025-09-16T00:00:00-05:00');
 });
 
 it('falls back to the document title banner date when the date label is missing', function () {
     $city = City::create([
         'name' => 'Title Date City',
         'slug' => 'title-date-city',
+        'timezone' => 'America/Chicago',
     ]);
 
     $scraper = Scraper::create([
@@ -330,7 +332,7 @@ it('falls back to the document title banner date when the date label is missing'
     $items = (new DocumentersFetcher($pageFetcher))->fetch($scraper);
 
     expect($items)->toHaveCount(1)
-        ->and($items[0]['published_at']?->toDateString())->toBe('2024-06-24');
+        ->and($items[0]['published_at']?->toAtomString())->toBe('2024-06-24T00:00:00-05:00');
 });
 
 it('applies auto-scroll options to documenters listing fetch only', function () {
