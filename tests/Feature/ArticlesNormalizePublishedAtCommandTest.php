@@ -544,3 +544,155 @@ it('refetches legal notice pdf text when stored extraction is too degraded to pa
     expect($article->fresh()?->published_at?->toAtomString())->toBe('2026-02-06T06:00:00+00:00')
         ->and($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
 });
+
+it('repairs legal notice archive pdf timestamps from OCR-damaged affidavit dates', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'NOI affidavit',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=13967',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => 'That the attached notice was published on such website beginning on the 91b day of January, 2026.',
+        'cleaned_text' => 'That the attached notice was published on such website beginning on the 91b day of January, 2026.',
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful();
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2026-01-09T06:00:00+00:00');
+});
+
+it('repairs legal notice archive pdf timestamps from OCR-damaged year tokens', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'NOI affidavit year',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=14152',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => 'That the attached notice was published on such website beginning on the 6th day of February, 202u.',
+        'cleaned_text' => 'That the attached notice was published on such website beginning on the 6th day of February, 202u.',
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful();
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2026-02-06T06:00:00+00:00');
+});
+
+it('repairs legal notice archive pdf timestamps from signed notice dates', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'Environmental conditions notice',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=11148',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => "NOTICE CONCERNING GILBERT MOSLEY SITE CERTIFICATE AND RELEASE FOR ENVIRONMENTAL CONDITIONS\nSigned: Darren Brown,\nCity of Wichita Program Manager\nNovember 13, 2024",
+        'cleaned_text' => "NOTICE CONCERNING GILBERT MOSLEY SITE CERTIFICATE AND RELEASE FOR ENVIRONMENTAL CONDITIONS\nSigned: Darren Brown,\nCity of Wichita Program Manager\nNovember 13, 2024",
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful();
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2024-11-13T06:00:00+00:00');
+});
+
+it('repairs legal notice archive pdf timestamps from OCR-damaged leading document dates', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'Multi-Agency Center Project 3 1',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=11914',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => 'NOTICE OF FINDING OF NO SIGNIFICANT IMPACT AND NOTICE OF INTENT TO REQUEST RELEASE OF FUNDS Mareh 14, 2025 City of Wichita',
+        'cleaned_text' => 'NOTICE OF FINDING OF NO SIGNIFICANT IMPACT AND NOTICE OF INTENT TO REQUEST RELEASE OF FUNDS Mareh 14, 2025 City of Wichita',
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful();
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2025-03-14T05:00:00+00:00');
+});

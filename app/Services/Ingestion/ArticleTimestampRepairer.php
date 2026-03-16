@@ -23,9 +23,11 @@ class ArticleTimestampRepairer
         '/Published\s+on\s+the\s+City\'?s\s+Website\s+on\s+(?:[A-Za-z]+,\s+)?((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
         '/Published\s+Wichita\.gov\s+website\s+on\s+(\d{1,2}\/\d{1,2}\/\d{4})/i',
         '/Published\s+at\s+Wichita\.gov\/LegalNotices\s+on\s+((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
-        '/published\s+on\s+such\s+website\s+beginning\s+on\s+the\s+(\d{1,2})\s*(?:st|nd|rd|th)?\s+day\s+of\s+((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\,?\s+\d{4})/i',
+        '/published\s+on\s+such\s+website\s+beginning\s+on\s+the\s+([0-9A-Za-z]{1,4})\s*(?:st|nd|rd|th)?\s+day\s+of\s+([A-Za-z.,]+\s+[0-9A-Za-z]{4})/i',
         '/Dated\s+at\s+Wichita,\s+Kansas,?\s+((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
         '/\bDATED:\s*((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
+        '/Signed:\s*.*?\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|Mareh)\.?\s+\d{1,2},\s+\d{4})/is',
+        '/comments\s+received\s+on\s+or\s+before\s+((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|Mareh)\.?\s+\d{1,2},\s+\d{4})/i',
         '/Published\s+(?:on|in)\s+.*?\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
     ];
 
@@ -512,7 +514,8 @@ class ArticleTimestampRepairer
 
     private function extractArchivePdfLeadingDate(string $content, string $timezone): ?Carbon
     {
-        $leadingText = $this->archiveLeadingTextWindow($content);
+        $leadingText = $this->normalizeArchivePdfMonthYear($this->archiveLeadingTextWindow($content));
+        $leadingText = $this->normalizeArchivePdfYearToken($leadingText);
 
         foreach ([
             '/\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})\b/i',
@@ -556,8 +559,21 @@ class ArticleTimestampRepairer
      */
     private function normalizeArchivePdfDateCandidate(array $matches): string
     {
-        if (isset($matches[2]) && isset($matches[1]) && preg_match('/^\d{1,2}$/', trim((string) $matches[1])) === 1) {
-            $normalized = trim((string) $matches[1]).' '.trim((string) $matches[2]);
+        if (isset($matches[2]) && isset($matches[1]) && preg_match('/^[0-9A-Za-z]{1,4}$/', trim((string) $matches[1])) === 1) {
+            $day = $this->normalizeArchivePdfDayToken((string) $matches[1]);
+            $monthYear = $this->normalizeArchivePdfMonthYear((string) $matches[2]);
+
+            if ($day !== null && $monthYear !== '') {
+                $normalized = $monthYear;
+
+                if (preg_match('/^([A-Za-z]+)\s+(\d{4})$/', $normalized, $parts) === 1) {
+                    $normalized = sprintf('%s %d, %s', $parts[1], $day, $parts[2]);
+                } else {
+                    $normalized = sprintf('%d %s', $day, $monthYear);
+                }
+            } else {
+                $normalized = trim((string) ($matches[1] ?? ''));
+            }
         } else {
             $normalized = trim((string) ($matches[1] ?? ''));
         }
@@ -566,11 +582,67 @@ class ArticleTimestampRepairer
             return '';
         }
 
+        $normalized = $this->normalizeArchivePdfMonthYear($normalized);
+        $normalized = $this->normalizeArchivePdfYearToken($normalized);
+
         if (preg_match('/^([A-Za-z]+)\s+(\d{4})$/', $normalized, $matches) === 1) {
             return sprintf('%s 1, %s', $matches[1], $matches[2]);
         }
 
         return str_replace('.', '', $normalized);
+    }
+
+    private function normalizeArchivePdfDayToken(string $value): ?int
+    {
+        $normalized = preg_replace('/[^0-9]/', '', $value) ?? '';
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        $day = (int) $normalized;
+
+        if ($day >= 1 && $day <= 31) {
+            return $day;
+        }
+
+        $firstDigit = (int) substr($normalized, 0, 1);
+
+        return ($firstDigit >= 1 && $firstDigit <= 9) ? $firstDigit : null;
+    }
+
+    private function normalizeArchivePdfMonthYear(string $value): string
+    {
+        $normalized = str_replace('.', '', trim($value));
+
+        return str_ireplace(
+            ['Mareh ', 'Jam ', 'Januaty ', 'Februaty ', 'Sept ', 'Oet ', 'Dee '],
+            ['March ', 'January ', 'January ', 'February ', 'September ', 'October ', 'December '],
+            $normalized,
+        );
+    }
+
+    private function normalizeArchivePdfYearToken(string $value): string
+    {
+        return preg_replace_callback('/\b20([0-9A-Za-z]{2})\b/', function (array $matches): string {
+            $suffix = strtr($matches[1], [
+                'O' => '0',
+                'o' => '0',
+                'Q' => '0',
+                'I' => '1',
+                'l' => '1',
+                'Z' => '2',
+                'z' => '2',
+                'S' => '5',
+                's' => '5',
+                'G' => '6',
+                'b' => '6',
+                'u' => '6',
+                'g' => '9',
+            ]);
+
+            return '20'.$suffix;
+        }, $value) ?? $value;
     }
 
     private function resolveDocumentersPublishedAt(Article $article): ?Carbon
