@@ -13,6 +13,15 @@ class ArticleTimestampRepairer
 {
     private const DOCUMENTERS_DATE_PATTERN = '/Date:\s*((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i';
 
+    /**
+     * @var list<string>
+     */
+    private const LEGAL_NOTICE_DATE_PATTERNS = [
+        '/Published\s+on\s+the\s+City\'?s\s+Website\s+on\s+(?:[A-Za-z]+,\s+)?((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
+        '/Dated\s+at\s+Wichita,\s+Kansas,?\s+((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
+        '/Published\s+(?:on|in)\s+.*?\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
+    ];
+
     public function __construct(
         private readonly PageFetcher $pageFetcher,
     ) {}
@@ -178,6 +187,19 @@ class ArticleTimestampRepairer
 
         if ($profile === 'wichitadocumenters') {
             $publishedAt = $this->resolveDocumentersPublishedAt($article);
+
+            if (! $publishedAt instanceof Carbon) {
+                return null;
+            }
+
+            return [
+                'published_at' => $publishedAt,
+                'published_precision' => ArticlePublishedPrecision::Date,
+            ];
+        }
+
+        if ($profile === 'wichita_archive_pdf_list') {
+            $publishedAt = $this->resolveArchivePdfPublishedAt($article, $timezone);
 
             if (! $publishedAt instanceof Carbon) {
                 return null;
@@ -362,6 +384,53 @@ class ArticleTimestampRepairer
         $candidate = trim((string) ($matches[0] ?? ''));
 
         return $candidate === '' ? null : $this->parseGenericDate($candidate, $timezone);
+    }
+
+    private function resolveArchivePdfPublishedAt(Article $article, string $timezone): ?Carbon
+    {
+        $textCandidates = [
+            $article->body?->cleaned_text,
+            $article->body?->raw_text,
+            $article->summary,
+            $article->title,
+        ];
+
+        foreach ($textCandidates as $candidate) {
+            if (! is_string($candidate) || trim($candidate) === '') {
+                continue;
+            }
+
+            $resolved = $this->extractArchivePdfPublishedAt($candidate, $timezone);
+
+            if ($resolved instanceof Carbon) {
+                return $resolved;
+            }
+        }
+
+        return null;
+    }
+
+    private function extractArchivePdfPublishedAt(string $content, string $timezone): ?Carbon
+    {
+        foreach (self::LEGAL_NOTICE_DATE_PATTERNS as $pattern) {
+            if (preg_match($pattern, $content, $matches) !== 1) {
+                continue;
+            }
+
+            $candidate = trim((string) ($matches[1] ?? ''));
+
+            if ($candidate === '') {
+                continue;
+            }
+
+            try {
+                return Carbon::parse(str_replace('.', '', $candidate), $timezone)->startOfDay();
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return null;
     }
 
     private function resolveDocumentersPublishedAt(Article $article): ?Carbon

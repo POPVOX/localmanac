@@ -249,3 +249,62 @@ it('prints a per-scraper normalization summary', function () {
         ->expectsOutputToContain('The-sunflower (the-sunflower): scanned=1 resolved=1 needs_update=1 updated=0 unresolved=0')
         ->expectsOutputToContain('The-voice-wichita (the-voice-wichita): scanned=1 resolved=0 needs_update=0 updated=0 unresolved=1');
 });
+
+it('repairs legal notice archive pdf article timestamps from extracted pdf text', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => '458-2022-085515_LegalNotice (PDF)',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=12345',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleSource::create([
+        'city_id' => $city->id,
+        'article_id' => $article->id,
+        'source_url' => 'https://www.wichita.gov/Archive.aspx?ADID=12345',
+        'source_type' => 'pdf',
+        'source_uid' => '12345',
+        'accessed_at' => now(),
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => implode("\n", [
+            'PROJ # 458-2022-085515',
+            'Published on the City\'s Website on Friday, January 30, 2026',
+            'SEALED PROPOSALS',
+        ]),
+        'cleaned_text' => implode("\n", [
+            'PROJ # 458-2022-085515',
+            'Published on the City\'s Website on Friday, January 30, 2026',
+            'SEALED PROPOSALS',
+        ]),
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful()
+        ->expectsOutputToContain('resolved: 1')
+        ->expectsOutputToContain('updated: 1')
+        ->expectsOutputToContain('Legal-notices (legal-notices): scanned=1 resolved=1 needs_update=1 updated=1 unresolved=0');
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2026-01-30T06:00:00+00:00')
+        ->and($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
+});
