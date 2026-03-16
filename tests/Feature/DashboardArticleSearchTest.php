@@ -8,6 +8,7 @@ use App\Models\City;
 use App\Models\Event;
 use App\Models\IssueArea;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\LazyCollection;
 use Laravel\Scout\Builder;
@@ -302,14 +303,20 @@ it('renders upcoming events on the dashboard when they exist', function () {
     Event::factory()->create([
         'city_id' => $city->id,
         'title' => 'Board Meeting',
-        'starts_at' => now()->addDays(2)->setTime(18, 0),
-        'ends_at' => now()->addDays(2)->setTime(19, 0),
+        'starts_at' => Carbon::parse('2026-03-18 18:00:00', 'America/Chicago')->utc(),
+        'ends_at' => Carbon::parse('2026-03-18 19:00:00', 'America/Chicago')->utc(),
         'all_day' => false,
+        'event_url' => 'https://events.example.com/board-meeting',
     ]);
 
     Livewire::test(Dashboard::class)
         ->set('cityId', $city->id)
-        ->assertSee('Board Meeting');
+        ->assertSee('Board Meeting')
+        ->assertSee('Mar 18')
+        ->assertSee('6:00 PM - 7:00 PM')
+        ->assertSee('href="https://events.example.com/board-meeting"', false)
+        ->assertSee('target="_blank"', false)
+        ->assertSee('rel="noopener noreferrer"', false);
 });
 
 function registerFailingScoutEngine(): void

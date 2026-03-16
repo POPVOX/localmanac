@@ -423,20 +423,31 @@
                     @php
                         $eventStart = $event->starts_at?->clone()->tz($timezone);
                         $eventEnd = $event->ends_at?->clone()->tz($timezone);
-                        $eventDateLabel = $event->all_day
-                            ? $eventStart?->format('D')
-                            : $eventStart?->format('D g:i A');
+                        $eventDateLabel = $eventStart?->format('M j');
                         $eventTimeRange = null;
                         if (! $event->all_day && $eventStart && $eventEnd) {
-                            $eventTimeRange = $eventStart->format('g A') . ' - ' . $eventEnd->format('g A');
+                            $eventTimeRange = $eventStart->format('g:i A') . ' - ' . $eventEnd->format('g:i A');
                         } elseif (! $event->all_day && $eventStart) {
                             $eventTimeRange = $eventStart->format('g:i A');
                         }
                     @endphp
                     <div class="border-l-2 border-emerald-500 py-1 pl-3">
-                        <div class="text-sm font-semibold text-emerald-700">{{ $event->title }}</div>
+                        <div class="text-sm font-semibold text-emerald-700">
+                            @if ($event->event_url)
+                                <a
+                                    href="{{ $event->event_url }}"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="transition hover:text-emerald-600"
+                                >
+                                    {{ $event->title }}
+                                </a>
+                            @else
+                                {{ $event->title }}
+                            @endif
+                        </div>
                         <div class="text-xs text-zinc-500">
-                            {{ $eventStart?->format('D') }} {{ $eventTimeRange }}
+                            {{ $eventDateLabel }}@if ($eventTimeRange) &middot; {{ $eventTimeRange }}@endif
                         </div>
                         @if ($event->location_name)
                             <div class="text-xs text-zinc-400">{{ $event->location_name }}</div>
