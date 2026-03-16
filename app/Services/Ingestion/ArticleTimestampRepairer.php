@@ -18,7 +18,11 @@ class ArticleTimestampRepairer
      */
     private const LEGAL_NOTICE_DATE_PATTERNS = [
         '/Published\s+on\s+the\s+City\'?s\s+Website\s+on\s+(?:[A-Za-z]+,\s+)?((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
+        '/Published\s+Wichita\.gov\s+website\s+on\s+(\d{1,2}\/\d{1,2}\/\d{4})/i',
+        '/Published\s+at\s+Wichita\.gov\/LegalNotices\s+on\s+((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
+        '/published\s+on\s+such\s+website\s+beginning\s+on\s+the\s+(\d{1,2})\s*(?:st|nd|rd|th)?\s+day\s+of\s+((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\,?\s+\d{4})/i',
         '/Dated\s+at\s+Wichita,\s+Kansas,?\s+((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
+        '/\bDATED:\s*((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
         '/Published\s+(?:on|in)\s+.*?\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})/i',
     ];
 
@@ -439,7 +443,7 @@ class ArticleTimestampRepairer
                 continue;
             }
 
-            $candidate = trim((string) ($matches[1] ?? ''));
+            $candidate = $this->normalizeArchivePdfDateCandidate($matches);
 
             if ($candidate === '') {
                 continue;
@@ -453,6 +457,28 @@ class ArticleTimestampRepairer
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<int|string, string>  $matches
+     */
+    private function normalizeArchivePdfDateCandidate(array $matches): string
+    {
+        if (isset($matches[2]) && isset($matches[1]) && preg_match('/^\d{1,2}$/', trim((string) $matches[1])) === 1) {
+            $normalized = trim((string) $matches[1]).' '.trim((string) $matches[2]);
+        } else {
+            $normalized = trim((string) ($matches[1] ?? ''));
+        }
+
+        if ($normalized === '') {
+            return '';
+        }
+
+        if (preg_match('/^([A-Za-z]+)\s+(\d{4})$/', $normalized, $matches) === 1) {
+            return sprintf('%s 1, %s', $matches[1], $matches[2]);
+        }
+
+        return str_replace('.', '', $normalized);
     }
 
     private function resolveDocumentersPublishedAt(Article $article): ?Carbon

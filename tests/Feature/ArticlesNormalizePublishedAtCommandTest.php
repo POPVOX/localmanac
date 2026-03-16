@@ -313,3 +313,126 @@ it('repairs legal notice archive pdf article timestamps from extracted pdf text'
     expect($article->fresh()?->published_at?->toAtomString())->toBe('2026-01-30T06:00:00+00:00')
         ->and($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
 });
+
+it('repairs legal notice archive pdf timestamps from Wichita.gov numeric publication lines', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'Abatement of the property located at 1832 N Grove',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=14404',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => 'Org Code # 10022741 City of Wichita NOTICE OF LEGAL PUBLICATION NNE2026-00240 Published Wichita.gov website on 3/4/2026.',
+        'cleaned_text' => 'Org Code # 10022741 City of Wichita NOTICE OF LEGAL PUBLICATION NNE2026-00240 Published Wichita.gov website on 3/4/2026.',
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful()
+        ->expectsOutputToContain('resolved: 1')
+        ->expectsOutputToContain('updated: 1');
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2026-03-04T06:00:00+00:00')
+        ->and($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
+});
+
+it('repairs legal notice archive pdf timestamps from Wichita legal notices publication listings', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => '(Published At Wichita.gov/Legalnotices On February 27',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=14297',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => '(Published at Wichita.gov/LegalNotices on February 27, 2026, and March 6, 2026) NOTICE OF PUBLIC HEARING REGARDING PROPOSED FIRST AMENDMENT',
+        'cleaned_text' => '(Published at Wichita.gov/LegalNotices on February 27, 2026, and March 6, 2026) NOTICE OF PUBLIC HEARING REGARDING PROPOSED FIRST AMENDMENT',
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful()
+        ->expectsOutputToContain('resolved: 1')
+        ->expectsOutputToContain('updated: 1');
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2026-02-27T06:00:00+00:00')
+        ->and($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
+});
+
+it('repairs legal notice archive pdf timestamps from affidavit publication language', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'Abatement of the property at 2111 S Washington',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=14239',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => 'WICHITA AFFIDAVIT OF PUBLICATION State of Kansas, Sedgwick County, ss: Shinita Rice, City Clerk being duly sworn states this notice was published on such website beginning on the 4th day of March, 2026.',
+        'cleaned_text' => 'WICHITA AFFIDAVIT OF PUBLICATION State of Kansas, Sedgwick County, ss: Shinita Rice, City Clerk being duly sworn states this notice was published on such website beginning on the 4th day of March, 2026.',
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful()
+        ->expectsOutputToContain('resolved: 1')
+        ->expectsOutputToContain('updated: 1');
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2026-03-04T06:00:00+00:00')
+        ->and($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
+});
