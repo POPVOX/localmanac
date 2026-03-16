@@ -5,8 +5,11 @@ namespace App\Services\Ingestion;
 use App\Enums\ArticlePublishedPrecision;
 use App\Models\Article;
 use App\Services\Chat\Ingestion\PageFetcher;
+use App\Services\Chat\PdfTextExtractor;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Symfony\Component\DomCrawler\Crawler;
 
 class ArticleTimestampRepairer
@@ -28,6 +31,7 @@ class ArticleTimestampRepairer
 
     public function __construct(
         private readonly PageFetcher $pageFetcher,
+        private readonly PdfTextExtractor $pdfTextExtractor,
     ) {}
 
     /**
@@ -433,7 +437,54 @@ class ArticleTimestampRepairer
             }
         }
 
-        return null;
+        $sourceUrl = $this->articleSourceUrl($article);
+
+        if ($sourceUrl === null) {
+            return null;
+        }
+
+        $fetchedText = $this->fetchArchiveDocumentText($sourceUrl);
+
+        if ($fetchedText === null) {
+            return null;
+        }
+
+        return $this->extractArchivePdfPublishedAt($fetchedText, $timezone);
+    }
+
+    private function fetchArchiveDocumentText(string $url): ?string
+    {
+        try {
+            $response = Http::timeout(45)
+                ->retry(2, 500)
+                ->withHeaders(['User-Agent' => 'LocalmanacBot/1.0'])
+                ->get($url);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (! $response->successful()) {
+            return null;
+        }
+
+        $contentType = mb_strtolower((string) $response->header('Content-Type'));
+        $body = (string) $response->body();
+
+        if ($body === '') {
+            return null;
+        }
+
+        if (str_contains($contentType, 'application/pdf') || Str::startsWith($body, '%PDF')) {
+            try {
+                return $this->pdfTextExtractor->extract($body);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        $text = trim(strip_tags($body));
+
+        return $text !== '' ? $text : null;
     }
 
     private function extractArchivePdfPublishedAt(string $content, string $timezone): ?Carbon
@@ -456,7 +507,48 @@ class ArticleTimestampRepairer
             }
         }
 
+        return $this->extractArchivePdfLeadingDate($content, $timezone);
+    }
+
+    private function extractArchivePdfLeadingDate(string $content, string $timezone): ?Carbon
+    {
+        $leadingText = $this->archiveLeadingTextWindow($content);
+
+        foreach ([
+            '/\b((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4})\b/i',
+            '/\b(\d{1,2}\/\d{1,2}\/\d{4})\b/',
+        ] as $pattern) {
+            if (preg_match($pattern, $leadingText, $matches) !== 1) {
+                continue;
+            }
+
+            $candidate = $this->normalizeArchivePdfDateCandidate($matches);
+
+            if ($candidate === '') {
+                continue;
+            }
+
+            try {
+                return Carbon::parse($candidate, $timezone)->startOfDay();
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
         return null;
+    }
+
+    private function archiveLeadingTextWindow(string $content): string
+    {
+        $normalized = preg_replace("/\r\n?/", "\n", $content) ?? $content;
+        $lines = array_values(array_filter(array_map(
+            fn (string $line): string => $this->normalizeWhitespace($line),
+            preg_split("/\n+/", $normalized) ?: []
+        ), fn (string $line): bool => $line !== ''));
+
+        $window = implode(' ', array_slice($lines, 0, 12));
+
+        return mb_substr($window, 0, 600);
     }
 
     /**

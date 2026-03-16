@@ -6,6 +6,8 @@ use App\Models\ArticleBody;
 use App\Models\ArticleSource;
 use App\Models\City;
 use App\Models\Scraper;
+use App\Services\Chat\PdfTextExtractor;
+use Illuminate\Support\Facades\Http;
 
 function makeArticleNormalizationCity(): City
 {
@@ -434,5 +436,111 @@ it('repairs legal notice archive pdf timestamps from affidavit publication langu
         ->expectsOutputToContain('updated: 1');
 
     expect($article->fresh()?->published_at?->toAtomString())->toBe('2026-03-04T06:00:00+00:00')
+        ->and($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
+});
+
+it('repairs legal notice archive pdf timestamps from a leading document date when no publication phrase exists', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'Early Notice and Public Review',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=13534',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => "Early Notice and Public Review of a Proposed Activity in a 500-Year Floodplain\nOctober 24, 2025\nThis is to give notice that the City of Wichita...",
+        'cleaned_text' => "Early Notice and Public Review of a Proposed Activity in a 500-Year Floodplain\nOctober 24, 2025\nThis is to give notice that the City of Wichita...",
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful()
+        ->expectsOutputToContain('resolved: 1')
+        ->expectsOutputToContain('updated: 1');
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2025-10-24T05:00:00+00:00')
+        ->and($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
+});
+
+it('refetches legal notice pdf text when stored extraction is too degraded to parse', function () {
+    $city = makeArticleNormalizationCity();
+    $scraper = makeArticleNormalizationScraper($city, 'html', 'wichita_archive_pdf_list', 'legal-notices');
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => '26-059 Large Water Meter Replacement NOI',
+        'summary' => null,
+        'status' => 'published',
+        'content_type' => 'pdf',
+        'canonical_url' => 'https://www.wichita.gov/Archive.aspx?ADID=14152',
+        'published_at' => '2026-03-13 00:00:00',
+    ]);
+
+    \Illuminate\Support\Facades\DB::table('articles')->where('id', $article->id)->update([
+        'created_at' => '2026-03-10 12:00:00',
+        'updated_at' => '2026-03-10 12:00:00',
+    ]);
+
+    ArticleSource::create([
+        'city_id' => $city->id,
+        'article_id' => $article->id,
+        'source_url' => 'https://www.wichita.gov/Archive.aspx?ADID=14152',
+        'source_type' => 'pdf',
+        'accessed_at' => now(),
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_text' => 'Published at Wichita. gov/ LegalNotices on C vA, 1, 2026.)',
+        'cleaned_text' => 'Published at Wichita. gov/ LegalNotices on C vA, 1, 2026.)',
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    Http::fake([
+        'https://www.wichita.gov/Archive.aspx?ADID=14152' => Http::response('%PDF-fake-binary', 200, [
+            'Content-Type' => 'application/pdf',
+        ]),
+    ]);
+
+    $extractor = new class extends PdfTextExtractor
+    {
+        public function extract(string $binary): string
+        {
+            return "NOTICE\nThat the attached Notice was published on such website beginning on the 6th day of February, 2026.";
+        }
+    };
+
+    app()->instance(PdfTextExtractor::class, $extractor);
+
+    $this->artisan('articles:normalize-published-at', [
+        '--scraper' => 'legal-notices',
+        '--before' => '2026-03-15 00:00:00+00',
+        '--apply' => true,
+    ])->assertSuccessful()
+        ->expectsOutputToContain('resolved: 1')
+        ->expectsOutputToContain('updated: 1');
+
+    expect($article->fresh()?->published_at?->toAtomString())->toBe('2026-02-06T06:00:00+00:00')
         ->and($article->fresh()?->published_precision)->toBe(ArticlePublishedPrecision::Date);
 });
