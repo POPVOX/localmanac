@@ -11,6 +11,7 @@ class ChatSourceRetriever
     public function __construct(
         private readonly EmbeddingClient $embeddingClient,
         private readonly VectorFormatter $vectorFormatter,
+        private readonly ChatSourceGuard $chatSourceGuard,
     ) {}
 
     /**
@@ -52,7 +53,9 @@ class ChatSourceRetriever
         $rows = $this->rerankRows($rows, $question)->take($limit);
         $rows = $this->expandNeighborChunks($rows);
         $rows = $this->rerankRows($rows, $question);
-        $rows = $this->deduplicateRows($rows)->take((int) config('chat.retrieval_max_evidence', 24));
+        $rows = $this->deduplicateRows($rows)
+            ->filter(fn (array $row): bool => ! $this->isBlockedRow($row))
+            ->take((int) config('chat.retrieval_max_evidence', 24));
 
         $evidence = $rows
             ->map(fn (array $row) => $this->mapEvidence($row))
@@ -226,6 +229,22 @@ class ChatSourceRetriever
             ->join('chat_sources as sources', 'sources.id', '=', 'pages.chat_source_id')
             ->whereIn('sources.id', $sourceIds)
             ->where('sources.is_active', true)
+            ->where(function (Builder $query): void {
+                $query->whereNull('pages.url')
+                    ->orWhere('pages.url', 'not like', '%/cdn-cgi/%');
+            })
+            ->where(function (Builder $query): void {
+                $query->whereNull('pages.canonical_url')
+                    ->orWhere('pages.canonical_url', 'not like', '%/cdn-cgi/%');
+            })
+            ->where(function (Builder $query): void {
+                $query->whereNull('pages.title')
+                    ->orWhereRaw('lower(pages.title) not in (?, ?, ?)', [
+                        'email protection | cloudflare',
+                        'attention required! | cloudflare',
+                        'just a moment...',
+                    ]);
+            })
             ->select([
                 'chunks.id as chunk_id',
                 'chunks.chat_source_page_id as page_id',
@@ -478,6 +497,19 @@ class ChatSourceRetriever
                 return md5($url.'|'.$snippet);
             })
             ->values();
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function isBlockedRow(array $row): bool
+    {
+        return $this->chatSourceGuard->isBlockedPage(
+            (string) ($row['page_url'] ?? ''),
+            (string) ($row['canonical_url'] ?? ''),
+            (string) ($row['page_title'] ?? ''),
+            (string) ($row['chunk'] ?? '')
+        );
     }
 
     private function hasOperationalSignal(string $question, string $chunk): bool

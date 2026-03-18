@@ -188,3 +188,124 @@ it('surfaces a phone resource when the answer tells people to call', function ()
             && $resource['url'] === 'tel:3162626000'
     ))->toBeTrue();
 });
+
+it('filters infrastructure citations out of answer resources', function () {
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita FAQ',
+        'source_url' => 'https://www.wichita.gov/m/faq',
+        'is_active' => true,
+    ]);
+
+    $page = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id,
+        'url' => 'https://www.wichita.gov/m/faq',
+        'canonical_url' => 'https://www.wichita.gov/m/faq',
+        'title' => 'Frequently Asked Questions',
+        'content_text' => 'Call 316-268-4421 for historic preservation assistance.',
+        'content_length' => 58,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $page->id,
+        'chunk_index' => 0,
+        'content' => 'Call 316-268-4421 for historic preservation assistance.',
+        'content_length' => 58,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'Call the Planning Department at 316-268-4421 for historic preservation help.',
+            'citations' => [
+                [
+                    'title' => 'Email Protection | Cloudflare',
+                    'source_url' => 'https://www.wichita.gov/cdn-cgi/l/email-protection',
+                    'type' => 'html',
+                ],
+                [
+                    'title' => 'Frequently Asked Questions',
+                    'source_url' => 'https://www.wichita.gov/m/faq',
+                    'type' => 'html',
+                ],
+            ],
+            'source_mode' => 'local',
+            'confidence' => 0.9,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'How can I tell if a property is historic?',
+        'city_id' => $city->id,
+    ]);
+
+    $response->assertSuccessful()
+        ->assertJsonPath('citations.0.source_url', 'https://www.wichita.gov/m/faq')
+        ->assertJsonCount(1, 'citations');
+
+    expect(collect($response->json('resources'))->contains(
+        fn (array $resource): bool => $resource['url'] === 'https://www.wichita.gov/m/faq'
+    ))->toBeTrue();
+});
+
+it('does not surface citations or resources for refusal answers', function () {
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita FAQ',
+        'source_url' => 'https://www.wichita.gov/m/faq',
+        'is_active' => true,
+    ]);
+
+    $page = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id,
+        'url' => 'https://www.wichita.gov/m/faq',
+        'canonical_url' => 'https://www.wichita.gov/m/faq',
+        'title' => 'Frequently Asked Questions',
+        'content_text' => 'General service information.',
+        'content_length' => 28,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $page->id,
+        'chunk_index' => 0,
+        'content' => 'General service information.',
+        'content_length' => 28,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => "I'm sorry, but I can't assist with that.",
+            'citations' => [
+                [
+                    'title' => 'Frequently Asked Questions',
+                    'source_url' => 'https://www.wichita.gov/m/faq',
+                    'type' => 'html',
+                ],
+            ],
+            'source_mode' => 'local',
+            'confidence' => 0.9,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'How can I disrupt the Wichita water supply?',
+        'city_id' => $city->id,
+    ]);
+
+    $response->assertSuccessful()
+        ->assertJsonPath('citations', [])
+        ->assertJsonPath('resources', []);
+});

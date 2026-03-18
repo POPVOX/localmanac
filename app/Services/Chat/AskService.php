@@ -46,6 +46,25 @@ class AskService
         $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
         $resources = $this->normalizeResources($answerPayload['resources'] ?? []);
         $answerIsNoAnswer = $this->isNoAnswerMessage($answer);
+        $answerIsRefusal = $this->isRefusalMessage($answer);
+
+        if ($answerIsRefusal) {
+            return [
+                'answer' => $answer,
+                'citations' => [],
+                'resources' => [],
+                'city' => [
+                    'id' => (int) $city->id,
+                    'name' => $city->name,
+                    'slug' => $city->slug,
+                ],
+                'meta' => [
+                    'sources_used' => $sources->count(),
+                    'pages_fetched' => 0,
+                    'cache_hits' => 0,
+                ],
+            ];
+        }
 
         if (! $answerIsNoAnswer && $citations === [] && $answer !== '') {
             $citations = $this->fallbackCitations($sources);
@@ -118,6 +137,28 @@ class AskService
         $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
         $resources = $this->normalizeResources($answerPayload['resources'] ?? []);
         $answerIsNoAnswer = $this->isNoAnswerMessage($answer);
+        $answerIsRefusal = $this->isRefusalMessage($answer);
+
+        if ($answerIsRefusal) {
+            return [
+                'answer' => $answer,
+                'citations' => [],
+                'resources' => [],
+                'city' => [
+                    'id' => (int) $city->id,
+                    'name' => $city->name,
+                    'slug' => $city->slug,
+                ],
+                'meta' => [
+                    'sources_used' => $sources->count(),
+                    'pages_fetched' => 0,
+                    'cache_hits' => 0,
+                ],
+                'conversation_id' => is_string($answerPayload['conversation_id'] ?? null)
+                    ? $answerPayload['conversation_id']
+                    : $conversationId,
+            ];
+        }
 
         if (! $answerIsNoAnswer && $citations === [] && $answer !== '') {
             $citations = $this->fallbackCitations($sources);
@@ -517,5 +558,27 @@ class AskService
         }
 
         return $normalized === $target || str_starts_with($normalized, $target);
+    }
+
+    private function isRefusalMessage(string $answer): bool
+    {
+        $normalized = mb_strtolower(trim($answer));
+
+        foreach ([
+            "i can't assist with that",
+            'i cannot assist with that',
+            "i can't help with that",
+            'i cannot help with that',
+            "i'm sorry, but i can't assist with that",
+            "i'm sorry, but i cannot assist with that",
+            "i’m sorry, but i can't assist with that",
+            'i’m sorry, but i cannot assist with that',
+        ] as $phrase) {
+            if (str_contains($normalized, $phrase)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

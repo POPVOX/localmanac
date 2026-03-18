@@ -3,6 +3,7 @@
 namespace App\Services\Chat\Ingestion;
 
 use App\Models\ChatSource;
+use App\Services\Chat\ChatSourceGuard;
 use App\Services\Chat\HtmlTextExtractor;
 use App\Services\Chat\PdfTextExtractor;
 use GuzzleHttp\Psr7\Uri;
@@ -15,6 +16,7 @@ class ChatSourceCrawler
         private readonly PageFetcher $fetcher,
         private readonly HtmlTextExtractor $htmlTextExtractor,
         private readonly PdfTextExtractor $pdfTextExtractor,
+        private readonly ChatSourceGuard $chatSourceGuard,
     ) {}
 
     /**
@@ -76,6 +78,10 @@ class ChatSourceCrawler
                 $canonicalUrl = $extracted['canonical_url'] ?? null;
             }
 
+            if ($this->chatSourceGuard->isBlockedPage($url, $canonicalUrl, $title, $contentText)) {
+                continue;
+            }
+
             $contentText = $this->limitContent($contentText);
 
             $pages[] = [
@@ -109,7 +115,7 @@ class ChatSourceCrawler
                     continue;
                 }
 
-                if ($this->isBlockedPath($resolved)) {
+                if ($this->isBlockedPath($resolved) || $this->chatSourceGuard->isBlockedUrl($resolved)) {
                     continue;
                 }
 
@@ -172,6 +178,7 @@ class ChatSourceCrawler
     private function isBlockedPath(string $url): bool
     {
         $blocked = [
+            '/cdn-cgi/',
             '/search',
             '/directory',
             '/calendar',

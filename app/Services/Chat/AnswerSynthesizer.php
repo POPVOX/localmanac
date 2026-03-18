@@ -30,6 +30,7 @@ class AnswerSynthesizer
     public function __construct(
         private readonly ChatCitationAgent $chatCitationAgent,
         private readonly ChatSourceRetriever $chatSourceRetriever,
+        private readonly ChatSourceGuard $chatSourceGuard,
         private readonly EventIntentDetector $eventIntentDetector,
         private readonly EventWindowResolver $eventWindowResolver,
         private readonly EventSearchService $eventSearchService,
@@ -105,6 +106,11 @@ class AnswerSynthesizer
         }
 
         $answer = $this->cleanAnswerText($answer);
+
+        if ($this->isRefusalMessage($answer)) {
+            $citations = [];
+        }
+
         $resources = $this->buildAnswerResources($question, $answer, $citations, $seedEvidence);
 
         $sourceMode = $this->normalizeSourceMode($structured['source_mode'] ?? null);
@@ -254,6 +260,11 @@ class AnswerSynthesizer
         }
 
         $answer = $this->cleanAnswerText($answer);
+
+        if ($this->isRefusalMessage($answer)) {
+            $citations = [];
+        }
+
         $resources = $this->buildAnswerResources($question, $answer, $citations, $seedEvidence);
 
         return [
@@ -606,14 +617,15 @@ class AnswerSynthesizer
             ->filter(fn ($item): bool => is_array($item))
             ->map(function (array $item): array {
                 $sourceUrl = trim((string) ($item['source_url'] ?? $item['url'] ?? ''));
+                $title = trim((string) ($item['title'] ?? 'Source')) ?: 'Source';
 
                 return [
-                    'title' => trim((string) ($item['title'] ?? 'Source')) ?: 'Source',
+                    'title' => $title,
                     'source_url' => $sourceUrl,
                     'type' => trim((string) ($item['type'] ?? $this->inferCitationType($sourceUrl))) ?: 'html',
                 ];
             })
-            ->filter(fn (array $item): bool => $item['source_url'] !== '')
+            ->filter(fn (array $item): bool => $item['source_url'] !== '' && $this->chatSourceGuard->isAllowedCitation($item['source_url'], $item['title']))
             ->unique('source_url')
             ->values()
             ->all();
@@ -633,8 +645,14 @@ class AnswerSynthesizer
                     return null;
                 }
 
+                $title = trim((string) ($citation->title ?? 'Source')) ?: 'Source';
+
+                if (! $this->chatSourceGuard->isAllowedCitation($url, $title)) {
+                    return null;
+                }
+
                 return [
-                    'title' => trim((string) ($citation->title ?? 'Source')) ?: 'Source',
+                    'title' => $title,
                     'source_url' => $url,
                     'type' => $this->inferCitationType($url),
                 ];
@@ -706,14 +724,15 @@ class AnswerSynthesizer
         return collect($candidates)
             ->map(function (array $item): array {
                 $url = trim((string) ($item['source_url'] ?? $item['url'] ?? ''));
+                $title = trim((string) ($item['title'] ?? 'Source')) ?: 'Source';
 
                 return [
-                    'title' => trim((string) ($item['title'] ?? 'Source')) ?: 'Source',
+                    'title' => $title,
                     'source_url' => $url,
                     'type' => trim((string) ($item['type'] ?? $this->inferCitationType($url))) ?: 'html',
                 ];
             })
-            ->filter(fn (array $item): bool => $item['source_url'] !== '')
+            ->filter(fn (array $item): bool => $item['source_url'] !== '' && $this->chatSourceGuard->isAllowedCitation($item['source_url'], $item['title']))
             ->unique('source_url')
             ->values()
             ->all();
@@ -976,14 +995,15 @@ class AnswerSynthesizer
         return collect($seedEvidence)
             ->map(function (array $item): array {
                 $sourceUrl = trim((string) ($item['source_url'] ?? ''));
+                $title = trim((string) ($item['title'] ?? 'Source')) ?: 'Source';
 
                 return [
-                    'title' => trim((string) ($item['title'] ?? 'Source')) ?: 'Source',
+                    'title' => $title,
                     'source_url' => $sourceUrl,
                     'type' => trim((string) ($item['type'] ?? $this->inferCitationType($sourceUrl))) ?: 'html',
                 ];
             })
-            ->filter(fn (array $item): bool => $item['source_url'] !== '')
+            ->filter(fn (array $item): bool => $item['source_url'] !== '' && $this->chatSourceGuard->isAllowedCitation($item['source_url'], $item['title']))
             ->unique('source_url')
             ->values()
             ->all();
@@ -1015,6 +1035,28 @@ class AnswerSynthesizer
         $target = mb_strtolower(self::NO_ANSWER_MESSAGE);
 
         return $normalized === $target || str_starts_with($normalized, $target);
+    }
+
+    private function isRefusalMessage(string $answer): bool
+    {
+        $normalized = mb_strtolower(trim($answer));
+
+        foreach ([
+            "i can't assist with that",
+            'i cannot assist with that',
+            "i can't help with that",
+            'i cannot help with that',
+            "i'm sorry, but i can't assist with that",
+            "i'm sorry, but i cannot assist with that",
+            "i’m sorry, but i can't assist with that",
+            'i’m sorry, but i cannot assist with that',
+        ] as $phrase) {
+            if (str_contains($normalized, $phrase)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -1073,6 +1115,10 @@ class AnswerSynthesizer
      */
     private function buildAnswerResources(string $question, string $answer, array $citations, array $seedEvidence): array
     {
+        if ($this->isRefusalMessage($answer)) {
+            return [];
+        }
+
         $linkResource = $this->bestLinkResource($question, $answer, $citations);
         $phoneResource = $this->bestPhoneResource($question, $answer, $seedEvidence);
         $addressResource = $this->bestAddressResource($question, $answer, $seedEvidence);

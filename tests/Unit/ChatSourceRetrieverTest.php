@@ -250,3 +250,60 @@ it('retains short intent tokens like id when ranking evidence', function () {
     expect($result['evidence'])->not->toBeEmpty()
         ->and($result['evidence'][0]['snippet'])->toContain('not valid for voting');
 });
+
+it('ignores infrastructure pages when retrieving evidence', function () {
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.fts_enabled', true);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita FAQ',
+        'source_url' => 'https://www.wichita.gov/m/faq',
+        'is_active' => true,
+    ]);
+
+    $realPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id,
+        'url' => 'https://www.wichita.gov/m/faq',
+        'canonical_url' => 'https://www.wichita.gov/m/faq',
+        'title' => 'Frequently Asked Questions',
+        'content_text' => 'Call 316-268-4421 for historic preservation assistance.',
+        'content_length' => 58,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $realPage->id,
+        'chunk_index' => 0,
+        'content' => 'Call 316-268-4421 for historic preservation assistance.',
+        'content_length' => 58,
+    ]);
+
+    $cloudflarePage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id,
+        'url' => 'https://www.wichita.gov/cdn-cgi/l/email-protection',
+        'canonical_url' => null,
+        'title' => 'Email Protection | Cloudflare',
+        'content_text' => 'Email Protection. The website from which you got to this page is protected by Cloudflare.',
+        'content_length' => 88,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $cloudflarePage->id,
+        'chunk_index' => 0,
+        'content' => 'Email Protection. The website from which you got to this page is protected by Cloudflare.',
+        'content_length' => 88,
+    ]);
+
+    $retriever = app(ChatSourceRetriever::class);
+    $result = $retriever->retrieve(collect([$source]), 'historic preservation phone number');
+
+    expect($result['evidence'])->toHaveCount(1)
+        ->and($result['evidence'][0]['source_url'])->toBe('https://www.wichita.gov/m/faq')
+        ->and($result['evidence'][0]['snippet'])->toContain('316-268-4421');
+});

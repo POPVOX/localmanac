@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\ChatSource;
 use App\Models\ChatSourcePage;
+use App\Services\Chat\ChatSourceGuard;
 use App\Services\Chat\Ingestion\ChatSourceCrawler;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -27,7 +28,7 @@ class IngestChatSource implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(ChatSourceCrawler $crawler): void
+    public function handle(ChatSourceCrawler $crawler, ChatSourceGuard $chatSourceGuard): void
     {
         $source = ChatSource::query()->find($this->chatSourceId);
 
@@ -39,6 +40,18 @@ class IngestChatSource implements ShouldQueue
         $queue = (string) config('chat.crawl_queue', 'ingestion');
         $embeddingQueue = (string) config('chat.embedding_queue', 'embedding');
         $now = now();
+
+        ChatSourcePage::query()
+            ->where('chat_source_id', $source->id)
+            ->get()
+            ->filter(fn (ChatSourcePage $page): bool => $chatSourceGuard->isBlockedPage(
+                $page->url,
+                $page->canonical_url,
+                $page->title,
+                (string) ($page->content_text ?? '')
+            ))
+            ->each
+            ->delete();
 
         foreach ($pages as $pageData) {
             $contentText = trim((string) ($pageData['content_text'] ?? ''));
