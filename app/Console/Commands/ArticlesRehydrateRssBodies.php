@@ -21,6 +21,8 @@ class ArticlesRehydrateRssBodies extends Command
         RssCanonicalBodyHydrator $hydrator,
         ArticleTextService $textService,
     ): int {
+        $baseQuery = $this->baseArticlesQuery();
+        $totalMatching = (clone $baseQuery)->count();
         $query = $this->eligibleArticlesQuery();
         $limit = $this->option('limit');
         $processed = 0;
@@ -50,12 +52,31 @@ class ArticlesRehydrateRssBodies extends Command
             $query->chunkById(100, $processor);
         }
 
-        $this->info("Rehydrated {$updated} of {$processed} article(s).");
+        $alreadyComplete = max(0, $totalMatching - $processed);
+        $failed = max(0, $processed - $updated);
+
+        if ($this->option('article')) {
+            $this->info("Rehydrated {$updated} of {$processed} article(s).");
+
+            return self::SUCCESS;
+        }
+
+        $summary = "Rehydrated {$updated} of {$processed} candidate article(s).";
+
+        if ($alreadyComplete > 0) {
+            $summary .= " Skipped {$alreadyComplete} already complete.";
+        }
+
+        if ($failed > 0) {
+            $summary .= " {$failed} could not be hydrated.";
+        }
+
+        $this->info($summary);
 
         return self::SUCCESS;
     }
 
-    private function eligibleArticlesQuery(): Builder
+    private function baseArticlesQuery(): Builder
     {
         $cityOption = $this->option('city');
         $articleOption = $this->option('article');
@@ -82,6 +103,25 @@ class ArticlesRehydrateRssBodies extends Command
         }
 
         return $query;
+    }
+
+    private function eligibleArticlesQuery(): Builder
+    {
+        $query = $this->baseArticlesQuery();
+
+        if ($this->option('article')) {
+            return $query;
+        }
+
+        return $query->where(function (Builder $candidateQuery): void {
+            $candidateQuery->doesntHave('body')
+                ->orWhereHas('body', function (Builder $bodyQuery): void {
+                    $bodyQuery
+                        ->whereNull('cleaned_text')
+                        ->orWhereRaw("length(trim(coalesce(cleaned_text, ''))) < 280")
+                        ->orWhereRaw("length(trim(coalesce(raw_html, ''))) < 280");
+                });
+        });
     }
 
     private function rehydrateArticle(

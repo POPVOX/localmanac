@@ -92,7 +92,7 @@ it('rehydrates teaser-only rss articles from their canonical page', function () 
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
 
     $this->artisan('articles:rehydrate-rss-bodies --limit=1')
-        ->expectsOutputToContain('Rehydrated 1 of 1 article(s).')
+        ->expectsOutputToContain('Rehydrated 1 of 1 candidate article(s).')
         ->assertExitCode(0);
 
     $article->refresh();
@@ -186,6 +186,16 @@ it('continues bulk rehydration when one rss article fails', function () {
         'source_url' => 'https://example.com/feed',
     ]);
 
+    $completeArticle = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'Already complete article',
+        'summary' => 'Existing summary',
+        'status' => 'published',
+        'content_type' => 'news',
+        'canonical_url' => 'https://example.com/complete',
+    ]);
+
     $firstArticle = Article::create([
         'city_id' => $city->id,
         'scraper_id' => $scraper->id,
@@ -206,7 +216,30 @@ it('continues bulk rehydration when one rss article fails', function () {
         'canonical_url' => 'https://example.com/recoverable',
     ]);
 
-    foreach ([$firstArticle, $secondArticle] as $article) {
+    ArticleBody::create([
+        'article_id' => $completeArticle->id,
+        'raw_html' => '<main>'.str_repeat('Completed article body. ', 30).'</main>',
+        'raw_text' => str_repeat('Completed article body. ', 30),
+        'cleaned_text' => str_repeat('Completed article body. ', 30),
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    foreach ([$completeArticle, $firstArticle, $secondArticle] as $article) {
+        if ($article->is($completeArticle)) {
+            ArticleSource::create([
+                'city_id' => $city->id,
+                'article_id' => $article->id,
+                'source_url' => $article->canonical_url,
+                'source_type' => 'rss',
+                'source_uid' => 'guid-'.$article->id,
+                'accessed_at' => now(),
+            ]);
+
+            continue;
+        }
+
         ArticleBody::create([
             'article_id' => $article->id,
             'raw_html' => 'Yesterday at the City Council meeting, the Council heard the following items:',
@@ -250,8 +283,8 @@ it('continues bulk rehydration when one rss article fails', function () {
     Queue::fake();
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
 
-    $this->artisan('articles:rehydrate-rss-bodies --limit=2')
-        ->expectsOutputToContain('Rehydrated 1 of 2 article(s).')
+    $this->artisan('articles:rehydrate-rss-bodies')
+        ->expectsOutputToContain('Rehydrated 1 of 2 candidate article(s). Skipped 1 already complete. 1 could not be hydrated.')
         ->assertExitCode(0);
 
     Queue::assertPushed(EnrichArticle::class, function (EnrichArticle $job) use ($secondArticle) {
