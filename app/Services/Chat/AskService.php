@@ -45,6 +45,7 @@ class AskService
         $answer = trim((string) ($answerPayload['answer'] ?? ''));
         $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
         $resources = $this->normalizeResources($answerPayload['resources'] ?? []);
+        $confidence = $this->normalizeConfidence($answerPayload['confidence'] ?? 0.0);
         $answerIsNoAnswer = $this->isNoAnswerMessage($answer);
         $answerIsRefusal = $this->isRefusalMessage($answer);
 
@@ -66,11 +67,12 @@ class AskService
             ];
         }
 
-        if (! $answerIsNoAnswer && $citations === [] && $answer !== '') {
-            $citations = $this->fallbackCitations($sources);
+        if (! $this->shouldSurfaceSources($confidence, $citations)) {
+            $citations = [];
+            $resources = [];
         }
 
-        if ($answerIsNoAnswer || $citations === [] || $answer === '') {
+        if ($answerIsNoAnswer || $answer === '') {
             return $this->fallbackResponse($city, $sources, $question);
         }
 
@@ -136,6 +138,7 @@ class AskService
         $answer = trim((string) ($answerPayload['answer'] ?? ''));
         $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
         $resources = $this->normalizeResources($answerPayload['resources'] ?? []);
+        $confidence = $this->normalizeConfidence($answerPayload['confidence'] ?? 0.0);
         $answerIsNoAnswer = $this->isNoAnswerMessage($answer);
         $answerIsRefusal = $this->isRefusalMessage($answer);
 
@@ -160,11 +163,12 @@ class AskService
             ];
         }
 
-        if (! $answerIsNoAnswer && $citations === [] && $answer !== '') {
-            $citations = $this->fallbackCitations($sources);
+        if (! $this->shouldSurfaceSources($confidence, $citations)) {
+            $citations = [];
+            $resources = [];
         }
 
-        if ($answerIsNoAnswer || $citations === [] || $answer === '') {
+        if ($answerIsNoAnswer || $answer === '') {
             $fallback = $this->fallbackResponse($city, $sources, $question);
 
             return array_merge($fallback, [
@@ -294,7 +298,7 @@ class AskService
     private function fallbackResponse(City $city, Collection $sources, string $question = ''): array
     {
         $digest = $this->articleDigestFallback($city, $question);
-        $citations = $digest['citations'] ?? $this->fallbackCitations($sources);
+        $citations = $digest['citations'] ?? [];
         $answer = $digest['answer'] ?? __('I could not find the answer in the sources I checked. Try a different wording or a more specific question.');
 
         return [
@@ -509,29 +513,6 @@ class AskService
     }
 
     /**
-     * @param  Collection<int, \App\Models\ChatSource>  $sources
-     * @return array<int, array{title: string, source_url: string, type: string}>
-     */
-    private function fallbackCitations(Collection $sources): array
-    {
-        return $sources
-            ->take(3)
-            ->map(function ($source): array {
-                $url = trim((string) ($source->source_url ?? ''));
-
-                return [
-                    'title' => trim((string) ($source->name ?? 'Source')) ?: 'Source',
-                    'source_url' => $url,
-                    'type' => $this->inferCitationType($url),
-                ];
-            })
-            ->filter(fn (array $citation): bool => $citation['source_url'] !== '')
-            ->unique('source_url')
-            ->values()
-            ->all();
-    }
-
-    /**
      * @param  array<int, array{title: string, source_url: string, type: string}>  $citations
      */
     private function pagesFetchedFromCitations(array $citations): int
@@ -546,6 +527,27 @@ class AskService
     private function inferCitationType(string $url): string
     {
         return str_ends_with(mb_strtolower($url), '.pdf') ? 'pdf' : 'html';
+    }
+
+    /**
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $citations
+     */
+    private function shouldSurfaceSources(float $confidence, array $citations): bool
+    {
+        if ($citations === []) {
+            return false;
+        }
+
+        return $confidence >= (float) config('chat.source_display_min_confidence', 0.85);
+    }
+
+    private function normalizeConfidence(mixed $confidence): float
+    {
+        if (! is_numeric($confidence)) {
+            return 0.0;
+        }
+
+        return max(0.0, min(1.0, (float) $confidence));
     }
 
     private function isNoAnswerMessage(string $answer): bool

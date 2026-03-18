@@ -63,7 +63,7 @@ it('answers with citations from ingested sources', function () {
                 ],
             ],
             'source_mode' => 'local',
-            'confidence' => 0.82,
+            'confidence' => 0.9,
         ],
     ]);
 
@@ -105,6 +105,46 @@ it('returns fallback answer when evidence is insufficient', function () {
 
     $response->assertOk()
         ->assertSeeText('I could not find the answer in the sources I checked.');
+});
+
+it('keeps an uncited answer but does not attach unrelated source links', function () {
+    Cache::flush();
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.retrieval_mode', 'local_only');
+    config()->set('chat.tools.web_search.enabled', false);
+    config()->set('chat.source_display_min_confidence', 0.85);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'About Wichita Public Schools',
+        'source_url' => 'https://www.usd259.org/about-wps',
+        'is_active' => true,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'Spirit AeroSystems is likely the largest employer in Wichita.',
+            'citations' => [],
+            'source_mode' => 'web',
+            'confidence' => 0.74,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()
+        ->postJson('/ask', [
+            'question' => 'Who is the largest employer in Wichita?',
+            'city_id' => $city->id,
+        ]);
+
+    $response->assertOk()
+        ->assertJsonPath('answer', 'Spirit AeroSystems is likely the largest employer in Wichita.')
+        ->assertJsonPath('citations', [])
+        ->assertJsonPath('resources', []);
 });
 
 it('returns a cited weekly digest fallback for broad local update asks', function () {
@@ -229,7 +269,7 @@ it('keeps reranked evidence when minimum score filtering is enabled', function (
                 ],
             ],
             'source_mode' => 'local',
-            'confidence' => 0.84,
+            'confidence' => 0.9,
         ],
     ]);
 

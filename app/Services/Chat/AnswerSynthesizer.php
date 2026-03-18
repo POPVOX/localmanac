@@ -69,6 +69,7 @@ class AnswerSynthesizer
 
         $structured = is_array($response->structured ?? null) ? $response->structured : [];
         $citations = $this->normalizeCitations($structured['citations'] ?? []);
+        $confidence = $this->normalizedConfidence($structured['confidence'] ?? 0.0);
 
         if ($citations === []) {
             $citations = $this->citationsFromMeta($response->meta->citations ?? new Collection);
@@ -91,11 +92,13 @@ class AnswerSynthesizer
 
         if (($usedSeedAnswer || $citations === []) && $seedCitations !== []) {
             $citations = $seedCitations;
+            $confidence = max($confidence, $this->deterministicSourceConfidence());
         }
 
         if (($eventContext['intent'] ?? false) && ($answer === '' || $this->isNoAnswerMessage($answer))) {
             if ((int) ($eventContext['local_total'] ?? 0) > 0 && is_array($eventContext['local_events'] ?? null)) {
                 $answer = $this->answerFromLocalEvents($city, $eventContext['window'] ?? null, $eventContext['local_events']);
+                $confidence = max($confidence, $this->deterministicSourceConfidence());
 
                 if ($citations === []) {
                     $citations = $this->citationsFromLocalEvents($eventContext['local_events']);
@@ -123,7 +126,7 @@ class AnswerSynthesizer
             'answer' => $answer,
             'citations' => $citations,
             'resources' => $resources,
-            'confidence' => (float) ($structured['confidence'] ?? 0.0),
+            'confidence' => $confidence,
             'source_mode' => $sourceMode,
         ];
     }
@@ -219,7 +222,7 @@ class AnswerSynthesizer
                         $citations = $normalized;
                     }
 
-                    $confidence = (float) ($structured['confidence'] ?? 0.0);
+                    $confidence = $this->normalizedConfidence($structured['confidence'] ?? 0.0);
                 } catch (\Throwable) {
                     $confidence = 0.0;
                 }
@@ -243,12 +246,14 @@ class AnswerSynthesizer
 
         if (($usedSeedAnswer || $citations === []) && $seedCitations !== []) {
             $citations = $seedCitations;
+            $confidence = max($confidence, $this->deterministicSourceConfidence());
             $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
         }
 
         if (($eventContext['intent'] ?? false) && ($answer === '' || $this->isNoAnswerMessage($answer))) {
             if ((int) ($eventContext['local_total'] ?? 0) > 0 && is_array($eventContext['local_events'] ?? null)) {
                 $answer = $this->answerFromLocalEvents($city, $eventContext['window'] ?? null, $eventContext['local_events']);
+                $confidence = max($confidence, $this->deterministicSourceConfidence());
 
                 if ($citations === []) {
                     $citations = $this->citationsFromLocalEvents($eventContext['local_events']);
@@ -1057,6 +1062,20 @@ class AnswerSynthesizer
         }
 
         return false;
+    }
+
+    private function normalizedConfidence(mixed $confidence): float
+    {
+        if (! is_numeric($confidence)) {
+            return 0.0;
+        }
+
+        return max(0.0, min(1.0, (float) $confidence));
+    }
+
+    private function deterministicSourceConfidence(): float
+    {
+        return max((float) config('chat.source_display_min_confidence', 0.85), 0.9);
     }
 
     /**

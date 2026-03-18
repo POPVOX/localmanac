@@ -15,6 +15,7 @@ return [
     'memory_max_messages' => (int) env('CHAT_MEMORY_MAX_MESSAGES', 100),
     'max_sources' => 12,
     'link_limit' => 6,
+    'source_display_min_confidence' => (float) env('CHAT_SOURCE_DISPLAY_MIN_CONFIDENCE', 0.85),
     'max_chars_per_page' => 12000,
     'retrieval_chunk_limit' => 8,
     'retrieval_neighbor_window' => (int) env('CHAT_RETRIEVAL_NEIGHBOR_WINDOW', 1),
