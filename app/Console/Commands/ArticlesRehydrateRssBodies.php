@@ -90,8 +90,15 @@ class ArticlesRehydrateRssBodies extends Command
         $storedCleanedText = $this->stringValue($storedBody?->cleaned_text);
         $storedSummary = $this->stringValue($article->summary);
         $storedRawHtml = $this->stringValue($storedBody?->raw_html);
+        $refreshAiOnly = $this->shouldRefreshAiWithoutHydration($storedCleanedText);
 
         if (! $hydrator->shouldHydrate($storedCleanedText, $storedSummary, $storedRawHtml, $sourceUrl)) {
+            if ($refreshAiOnly && config('enrichment.enabled', true)) {
+                EnrichArticleJob::dispatchSync($article->id);
+
+                return true;
+            }
+
             return false;
         }
 
@@ -144,6 +151,15 @@ class ArticlesRehydrateRssBodies extends Command
         $textUpdated = $textService->refresh($article, cleanedText: $newCleanedText);
 
         return $bodyUpdated || $textUpdated;
+    }
+
+    private function shouldRefreshAiWithoutHydration(?string $storedCleanedText): bool
+    {
+        if (! $this->option('article')) {
+            return false;
+        }
+
+        return $storedCleanedText !== null && config('enrichment.enabled', true);
     }
 
     private function stringValue(mixed $value): ?string
