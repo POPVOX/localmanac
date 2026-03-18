@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\EnrichArticle;
 use App\Jobs\ExtractPdfBody;
 use App\Models\Article;
 use App\Models\ArticleBody;
@@ -8,6 +9,7 @@ use App\Models\Scraper;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\LazyCollection;
 use Laravel\Scout\Builder;
 use Laravel\Scout\EngineManager;
@@ -220,6 +222,8 @@ it('marks failure when response is not a pdf', function () {
 });
 
 it('extracts docx responses and refreshes article text', function () {
+    Queue::fake();
+
     $docxBinary = makeDocxBinary([
         'Abatement of the property located at 323 N Ash',
         'Remove all scattered trash and debris from the property.',
@@ -325,9 +329,13 @@ it('extracts docx responses and refreshes article text', function () {
         ->and($article->title)->toBe('Abatement of the property located at 323 N Ash')
         ->and($article->summary)->toContain('Abatement of the property located at 323 N Ash')
         ->and($engine->updateCalls)->toBeGreaterThanOrEqual(1);
+
+    Queue::assertPushed(EnrichArticle::class, fn (EnrichArticle $job): bool => $job->articleId === $article->id);
 });
 
 it('uses ocr fallback when enabled', function () {
+    Queue::fake();
+
     Http::fake([
         'https://example.com/ocr.pdf' => Http::response('PDF', 200, [
             'Content-Type' => 'application/pdf',
@@ -388,9 +396,13 @@ it('uses ocr fallback when enabled', function () {
         ->and($body?->extraction_meta['ocr_attempted'])->toBeTrue()
         ->and($body?->extraction_meta['ocr_pages'])->toBe(1)
         ->and($body?->extraction_meta['ocr_length'])->toBe(15);
+
+    Queue::assertPushed(EnrichArticle::class, fn (EnrichArticle $job): bool => $job->articleId === $article->id);
 });
 
 it('reindexes the article after a successful extraction', function () {
+    Queue::fake();
+
     Http::fake([
         'https://example.com/text.pdf' => Http::response('PDF', 200, [
             'Content-Type' => 'application/pdf',
@@ -495,4 +507,6 @@ it('reindexes the article after a successful extraction', function () {
         ->and($engine->lastUpdatePayload[0]['body'])->toContain('Hello world')
         ->and($engine->lastUpdatePayload[0]['extraction_status'])->toBe('success')
         ->and($engine->lastUpdatePayload[0]['source_url'])->toBeNull();
+
+    Queue::assertPushed(EnrichArticle::class, fn (EnrichArticle $job): bool => $job->articleId === $article->id);
 });

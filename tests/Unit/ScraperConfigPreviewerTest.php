@@ -5,10 +5,11 @@ use App\Services\Ingestion\Fetchers\DocumentersFetcher;
 use App\Services\Ingestion\Fetchers\GenericListingFetcher;
 use App\Services\Ingestion\Fetchers\RssFetcher;
 use App\Services\Ingestion\Fetchers\WichitaArchivePdfListFetcher;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 
-uses(Tests\TestCase::class);
+uses(Tests\TestCase::class, RefreshDatabase::class);
 
 it('returns preview items for generic listing config', function () {
     Http::fake([

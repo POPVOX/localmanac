@@ -9,5 +9,5 @@ test('admin organizations index uses shaded table surface', function () {
 
     $response
         ->assertOk()
-        ->assertSee('bg-zinc-100/60 dark:bg-zinc-800/45');
+        ->assertSee('bg-white dark:bg-zinc-800/35');
 });
