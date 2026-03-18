@@ -65,6 +65,44 @@
                             ])>
                                 <div class="whitespace-pre-wrap text-sm leading-relaxed">{{ $message['content'] }}</div>
 
+                                @if (! empty($message['resources']))
+                                    <div @class([
+                                        'grid gap-2 border-t pt-2',
+                                        'border-emerald-500/40' => $isUser,
+                                        'border-zinc-200' => ! $isUser,
+                                    ])>
+                                        @foreach ($message['resources'] as $resource)
+                                            <a
+                                                href="{{ $resource['url'] }}"
+                                                @if (! str_starts_with($resource['url'], 'tel:')) target="_blank" @endif
+                                                @class([
+                                                    'flex items-start justify-between gap-3 rounded-xl border px-3 py-2 transition',
+                                                    'border-emerald-500/40 bg-emerald-500/20 text-emerald-50 hover:bg-emerald-500/30' => $isUser,
+                                                    'border-zinc-200 bg-white text-zinc-900 hover:border-zinc-300' => ! $isUser,
+                                                ])
+                                            >
+                                                <div class="space-y-1">
+                                                    <div @class([
+                                                        'text-[11px] font-semibold uppercase tracking-[0.18em]',
+                                                        'text-emerald-100/80' => $isUser,
+                                                        'text-zinc-500' => ! $isUser,
+                                                    ])>{{ $resource['label'] }}</div>
+                                                    <div class="text-sm leading-snug">{{ $resource['value'] }}</div>
+                                                </div>
+
+                                                <flux:icon
+                                                    icon="{{ match ($resource['type']) {
+                                                        'phone' => 'phone',
+                                                        'address' => 'map-pin',
+                                                        default => 'arrow-top-right-on-square',
+                                                    } }}"
+                                                    class="mt-0.5 size-4 shrink-0"
+                                                />
+                                            </a>
+                                        @endforeach
+                                    </div>
+                                @endif
+
                                 @if (! empty($message['citations']))
                                     <div @class([
                                         'flex flex-wrap items-center gap-1.5 border-t pt-2',

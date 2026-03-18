@@ -46,6 +46,14 @@ it('streams answers for authenticated dashboard users and persists conversation 
                         'type' => 'html',
                     ],
                 ],
+                'resources' => [
+                    [
+                        'type' => 'link',
+                        'label' => 'Open source page',
+                        'value' => 'Recycling & Trash',
+                        'url' => 'https://example.com/recycling',
+                    ],
+                ],
                 'city' => [
                     'id' => $city->id,
                     'name' => $city->name,
@@ -67,7 +75,9 @@ it('streams answers for authenticated dashboard users and persists conversation 
         ->set('question', 'When is trash pickup?')
         ->call('ask')
         ->assertSet('conversationId', 'conv_123')
-        ->assertSee('Trash pickup is on Monday.');
+        ->assertSee('Trash pickup is on Monday.')
+        ->assertSee('Open source page')
+        ->assertSee('Recycling & Trash');
 
     expect(session()->get('chat.conversation_id'))->toBe('conv_123');
 });

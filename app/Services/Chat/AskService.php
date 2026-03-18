@@ -21,6 +21,7 @@ class AskService
      * @return array{
      *     answer: string,
      *     citations: array<int, array{title: string, source_url: string, type: string}>,
+     *     resources: array<int, array{type: string, label: string, value: string, url: string}>,
      *     city: array{id: int, name: string, slug: string},
      *     meta: array{sources_used: int, pages_fetched: int, cache_hits: int}
      * }
@@ -43,6 +44,7 @@ class AskService
 
         $answer = trim((string) ($answerPayload['answer'] ?? ''));
         $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
+        $resources = $this->normalizeResources($answerPayload['resources'] ?? []);
         $answerIsNoAnswer = $this->isNoAnswerMessage($answer);
 
         if (! $answerIsNoAnswer && $citations === [] && $answer !== '') {
@@ -56,6 +58,7 @@ class AskService
         return [
             'answer' => $answer,
             'citations' => $citations,
+            'resources' => $resources,
             'city' => [
                 'id' => (int) $city->id,
                 'name' => $city->name,
@@ -73,6 +76,7 @@ class AskService
      * @return array{
      *     answer: string,
      *     citations: array<int, array{title: string, source_url: string, type: string}>,
+     *     resources: array<int, array{type: string, label: string, value: string, url: string}>,
      *     city: array{id: int, name: string, slug: string},
      *     meta: array{sources_used: int, pages_fetched: int, cache_hits: int},
      *     conversation_id: string|null
@@ -112,6 +116,7 @@ class AskService
 
         $answer = trim((string) ($answerPayload['answer'] ?? ''));
         $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
+        $resources = $this->normalizeResources($answerPayload['resources'] ?? []);
         $answerIsNoAnswer = $this->isNoAnswerMessage($answer);
 
         if (! $answerIsNoAnswer && $citations === [] && $answer !== '') {
@@ -131,6 +136,7 @@ class AskService
         return [
             'answer' => $answer,
             'citations' => $citations,
+            'resources' => $resources,
             'city' => [
                 'id' => (int) $city->id,
                 'name' => $city->name,
@@ -213,10 +219,33 @@ class AskService
     }
 
     /**
+     * @param  array<int, mixed>  $resources
+     * @return array<int, array{type: string, label: string, value: string, url: string}>
+     */
+    private function normalizeResources(array $resources): array
+    {
+        return collect($resources)
+            ->filter(fn ($item): bool => is_array($item))
+            ->map(function (array $item): array {
+                return [
+                    'type' => trim((string) ($item['type'] ?? 'link')) ?: 'link',
+                    'label' => trim((string) ($item['label'] ?? 'Resource')) ?: 'Resource',
+                    'value' => trim((string) ($item['value'] ?? '')),
+                    'url' => trim((string) ($item['url'] ?? '')),
+                ];
+            })
+            ->filter(fn (array $item): bool => $item['value'] !== '' && $item['url'] !== '')
+            ->unique(fn (array $item): string => $item['type'].'|'.$item['url'])
+            ->values()
+            ->all();
+    }
+
+    /**
      * @param  Collection<int, \App\Models\ChatSource>  $sources
      * @return array{
      *     answer: string,
      *     citations: array<int, array{title: string, source_url: string, type: string}>,
+     *     resources: array<int, array{type: string, label: string, value: string, url: string}>,
      *     city: array{id: int, name: string, slug: string},
      *     meta: array{sources_used: int, pages_fetched: int, cache_hits: int}
      * }
@@ -230,6 +259,7 @@ class AskService
         return [
             'answer' => $answer,
             'citations' => $citations,
+            'resources' => [],
             'city' => [
                 'id' => (int) $city->id,
                 'name' => $city->name,

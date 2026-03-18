@@ -23,6 +23,21 @@
 
                     <flux:text class="whitespace-pre-wrap">{{ $message['content'] }}</flux:text>
 
+                    @if (! empty($message['resources']))
+                        <div class="grid gap-2 sm:grid-cols-2">
+                            @foreach ($message['resources'] as $resource)
+                                <a
+                                    href="{{ $resource['url'] }}"
+                                    @if (! str_starts_with($resource['url'], 'tel:')) target="_blank" @endif
+                                    class="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 transition hover:border-zinc-300 hover:bg-white"
+                                >
+                                    <flux:text size="sm" class="font-semibold">{{ $resource['label'] }}</flux:text>
+                                    <flux:text variant="subtle" class="mt-1 block text-sm">{{ $resource['value'] }}</flux:text>
+                                </a>
+                            @endforeach
+                        </div>
+                    @endif
+
                     @if (! empty($message['citations']))
                         <div class="flex flex-wrap gap-2">
                             @foreach ($message['citations'] as $citation)

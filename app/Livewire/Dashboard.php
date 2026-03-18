@@ -30,7 +30,12 @@ class Dashboard extends Component
     public string $question = '';
 
     /**
-     * @var array<int, array{role: string, content: string, citations?: array<int, array{title: string, source_url: string, type: string}>}>
+     * @var array<int, array{
+     *     role: string,
+     *     content: string,
+     *     citations?: array<int, array{title: string, source_url: string, type: string}>,
+     *     resources?: array<int, array{type: string, label: string, value: string, url: string}>
+     * }>
      */
     public array $messages = [];
 
@@ -98,6 +103,7 @@ class Dashboard extends Component
                 'role' => 'assistant',
                 'content' => (string) ($response['answer'] ?? ''),
                 'citations' => $response['citations'] ?? [],
+                'resources' => $response['resources'] ?? [],
             ];
         } catch (Throwable $exception) {
             report($exception);
