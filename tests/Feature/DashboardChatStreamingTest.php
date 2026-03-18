@@ -77,7 +77,8 @@ it('streams answers for authenticated dashboard users and persists conversation 
         ->assertSet('conversationId', 'conv_123')
         ->assertSee('Trash pickup is on Monday.')
         ->assertSee('Open source page')
-        ->assertSee('Recycling & Trash');
+        ->assertSee('Recycling & Trash')
+        ->assertSeeHtml('data-chat-role="assistant"');
 
     expect(session()->get('chat.conversation_id'))->toBe('conv_123');
 });

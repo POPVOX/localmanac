@@ -28,6 +28,17 @@ test('verified users can visit the dashboard', function () {
         ->assertDontSee('data-testid="new-conversation-button"', false);
 });
 
+test('dashboard scrolls to the start of the latest assistant answer', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $response = $this->get(route('dashboard'));
+
+    $response->assertOk()
+        ->assertSee('queueScrollToLatestAssistantStart()', false)
+        ->assertSee('scrollToLatestAssistantStart()', false);
+});
+
 test('dashboard shows task-oriented chat prompt chips', function () {
     $user = User::factory()->create();
     $this->actingAs($user);

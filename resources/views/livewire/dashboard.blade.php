@@ -32,11 +32,37 @@
                             }
                         });
                     },
+                    scrollToLatestAssistantStart() {
+                        this.$nextTick(() => {
+                            const container = this.$refs.chatScroll;
+                            if (! container) {
+                                return;
+                            }
+
+                            const assistantMessages = container.querySelectorAll('[data-chat-role=\"assistant\"]');
+                            const latestAssistant = assistantMessages[assistantMessages.length - 1];
+
+                            if (! latestAssistant) {
+                                this.scrollToBottom();
+
+                                return;
+                            }
+
+                            container.scrollTop = Math.max(latestAssistant.offsetTop - 8, 0);
+                        });
+                    },
                     queueScrollToBottom() {
                         this.scrollTimers.forEach((timer) => clearTimeout(timer));
                         this.scrollTimers = [];
                         [0, 60, 140, 260, 420].forEach((delay) => {
                             this.scrollTimers.push(setTimeout(() => this.scrollToBottom(), delay));
+                        });
+                    },
+                    queueScrollToLatestAssistantStart() {
+                        this.scrollTimers.forEach((timer) => clearTimeout(timer));
+                        this.scrollTimers = [];
+                        [0, 60, 140, 260, 420].forEach((delay) => {
+                            this.scrollTimers.push(setTimeout(() => this.scrollToLatestAssistantStart(), delay));
                         });
                     },
                 }"
@@ -50,14 +76,17 @@
                     x-show="hasMessages || pendingQuestion"
                     x-cloak
                     class="max-h-[320px] space-y-1 overflow-y-auto px-6 py-5"
-                    x-on:chat-updated.window="hasMessages = true; pendingQuestion = ''; queueScrollToBottom()"
+                    x-on:chat-updated.window="hasMessages = true; pendingQuestion = ''; queueScrollToLatestAssistantStart()"
                     x-on:chat-reset.window="hasMessages = false; pendingQuestion = ''"
                 >
                     @foreach ($messages as $message)
                         @php
                             $isUser = $message['role'] === 'user';
                         @endphp
-                        <div class="flex w-full {{ $isUser ? 'justify-end' : 'justify-start' }} py-1.5">
+                        <div
+                            data-chat-role="{{ $message['role'] }}"
+                            class="flex w-full {{ $isUser ? 'justify-end' : 'justify-start' }} py-1.5"
+                        >
                             <div @class([
                                 'max-w-[85%] space-y-2 rounded-2xl px-4 py-3',
                                 'bg-emerald-600 text-white' => $isUser,
