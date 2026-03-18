@@ -39,7 +39,7 @@
                                 return;
                             }
 
-                            const assistantMessages = container.querySelectorAll('[data-chat-role=\"assistant\"]');
+                            const assistantMessages = container.querySelectorAll('[data-chat-role=assistant]');
                             const latestAssistant = assistantMessages[assistantMessages.length - 1];
 
                             if (! latestAssistant) {
