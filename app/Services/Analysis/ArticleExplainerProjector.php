@@ -4,23 +4,30 @@ namespace App\Services\Analysis;
 
 use App\Models\Article;
 use App\Models\ArticleExplainer;
+use App\Services\Articles\MeetingSummaryFallback;
 use Illuminate\Support\Str;
 
 class ArticleExplainerProjector
 {
     public function projectForArticle(Article $article, ?array $payload = null): void
     {
-        $article->loadMissing(['analysis', 'city']);
+        $article->loadMissing(['analysis', 'body', 'city']);
 
         $extraction = $this->extractExplainer($article, $payload);
         $explainer = $extraction['explainer'];
+        $narrative = app(MeetingSummaryFallback::class)->narrative(
+            title: $article->title,
+            cleanedText: $article->body?->cleaned_text,
+            whatsHappening: $explainer['whats_happening'],
+            whyItMatters: $explainer['why_it_matters'],
+        );
 
         ArticleExplainer::updateOrCreate(
             ['article_id' => $article->id],
             [
                 'city_id' => $article->city_id,
-                'whats_happening' => $explainer['whats_happening'],
-                'why_it_matters' => $explainer['why_it_matters'],
+                'whats_happening' => $narrative['whats_happening'],
+                'why_it_matters' => $narrative['why_it_matters'],
                 'key_details' => $explainer['key_details'],
                 'what_to_watch' => $explainer['what_to_watch'],
                 'evidence_json' => $explainer['evidence'],

@@ -7,6 +7,10 @@ use Illuminate\Support\Str;
 
 class ArticleTextService
 {
+    public function __construct(
+        private readonly ?MeetingSummaryFallback $meetingSummaryFallback = null,
+    ) {}
+
     public function refresh(Article $article, ?string $cleanedText = null, ?string $whatsHappening = null): bool
     {
         $article->loadMissing(['body', 'explainer']);
@@ -17,6 +21,13 @@ class ArticleTextService
         $cleanedText = $this->stringValue($cleanedText) ?? $this->stringValue($article->body?->cleaned_text);
         $whatsHappening = $this->stringValue($whatsHappening) ?? $this->stringValue($article->explainer?->whats_happening);
         $headline = $this->headlineFromPayload($article->explainer?->source_payload);
+        $narrative = $this->meetingSummaryFallback()->narrative(
+            title: $currentTitle,
+            cleanedText: $cleanedText,
+            whatsHappening: $whatsHappening,
+            whyItMatters: null,
+        );
+        $whatsHappening = $this->stringValue($narrative['whats_happening']) ?? $whatsHappening;
 
         $summary = $currentSummary;
 
@@ -175,6 +186,10 @@ class ArticleTextService
         $summary = $this->stringValue($summary);
 
         if ($summary === null) {
+            return true;
+        }
+
+        if ($this->isWeakSummary($summary)) {
             return true;
         }
 
@@ -652,6 +667,31 @@ class ArticleTextService
         }
 
         return false;
+    }
+
+    private function isWeakSummary(string $summary): bool
+    {
+        $summary = mb_strtolower(trim($summary));
+
+        foreach ([
+            'various items were discussed',
+            'important local issues affecting',
+            'community issues and opportunities',
+            'focus on important local issues',
+            'residents should be aware of these discussions',
+            'helps residents stay informed about community decisions and local governance',
+        ] as $phrase) {
+            if (str_contains($summary, $phrase)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function meetingSummaryFallback(): MeetingSummaryFallback
+    {
+        return $this->meetingSummaryFallback ?? app(MeetingSummaryFallback::class);
     }
 
     private function normalizeWhitespace(string $text): string

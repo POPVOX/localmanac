@@ -48,6 +48,50 @@ it('uses explainer summaries when the current summary is truncated', function ()
         ->toBe('Council Preview');
 });
 
+it('replaces weak meeting summaries with the fallback narrative', function () {
+    $city = City::create([
+        'name' => 'Meeting City',
+        'slug' => 'meeting-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'March 10 City Council Meeting recap',
+        'summary' => 'During the March 10 City Council meeting, various items were discussed. The Council focused on important local issues affecting Wichita residents.',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => implode("\n\n", [
+            'Yesterday at the City Council meeting, the Council heard the following items:',
+            '* Consent Agenda with the exception of item 6 – Approved 7/0',
+            '* Board of Bids and Contracts – Approved 7/0',
+            '* Petitions for Public Improvements – Approved 7/0',
+        ]),
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    ArticleExplainer::create([
+        'article_id' => $article->id,
+        'city_id' => $city->id,
+        'whats_happening' => 'During the March 10 City Council meeting, various items were discussed. The Council focused on important local issues affecting Wichita residents.',
+        'why_it_matters' => 'Understanding the outcomes of these meetings helps residents stay informed about community decisions and local governance.',
+    ]);
+
+    $service = new ArticleTextService;
+    $service->refresh($article->fresh());
+
+    $article->refresh();
+
+    expect($article->summary)
+        ->toContain('Consent Agenda with the exception of item 6')
+        ->toContain('Board of Bids and Contracts')
+        ->not->toContain('various items were discussed');
+});
+
 it('derives a cleaner title from the summary when the title is file-like', function () {
     $city = City::create([
         'name' => 'Title City',

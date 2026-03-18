@@ -7,6 +7,7 @@ use App\Models\CivicAction;
 use App\Models\Location;
 use App\Models\Organization;
 use App\Models\Person;
+use App\Services\Articles\MeetingSummaryFallback;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
@@ -116,12 +117,25 @@ class ArticleExplainer extends Component
     public function explainerContent(): array
     {
         $explainer = $this->article->explainer;
-
-        return [
+        $content = [
             'whats_happening' => $this->stringValue($explainer?->whats_happening),
             'why_it_matters' => $this->stringValue($explainer?->why_it_matters),
             'key_details' => $this->normalizeExplainerItems($explainer?->key_details),
             'what_to_watch' => $this->normalizeExplainerItems($explainer?->what_to_watch),
+        ];
+
+        $narrative = app(MeetingSummaryFallback::class)->narrative(
+            title: $this->stringValue($this->article->title),
+            cleanedText: $this->stringValue($this->article->body?->cleaned_text),
+            whatsHappening: $content['whats_happening'],
+            whyItMatters: $content['why_it_matters'],
+        );
+
+        return [
+            'whats_happening' => $narrative['whats_happening'],
+            'why_it_matters' => $narrative['why_it_matters'],
+            'key_details' => $content['key_details'],
+            'what_to_watch' => $content['what_to_watch'],
         ];
     }
 
