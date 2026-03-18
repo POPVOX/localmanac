@@ -112,7 +112,7 @@
                                 @if ($isUser)
                                     <div class="whitespace-pre-wrap text-sm leading-relaxed">{{ $message['content'] }}</div>
                                 @else
-                                    <div class="prose prose-sm max-w-none text-sm leading-relaxed text-zinc-900 prose-p:my-0 prose-p:leading-relaxed prose-a:text-emerald-700 prose-a:underline prose-a:underline-offset-2 hover:prose-a:text-emerald-600">
+                                    <div class="max-w-none text-sm leading-relaxed text-zinc-900 [&_p]:my-0 [&_p]:leading-relaxed [&_a]:font-semibold [&_a]:text-emerald-600 [&_a]:underline [&_a]:decoration-emerald-600 [&_a]:underline-offset-2 hover:[&_a]:text-emerald-500">
                                         {!! $assistantContent !!}
                                     </div>
                                 @endif
