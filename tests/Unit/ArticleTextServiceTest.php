@@ -92,6 +92,41 @@ it('replaces weak meeting summaries with the fallback narrative', function () {
         ->not->toContain('various items were discussed');
 });
 
+it('treats colon-ended meeting teasers as truncated summaries', function () {
+    $city = City::create([
+        'name' => 'Teaser City',
+        'slug' => 'teaser-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'March 10 City Council Meeting recap',
+        'summary' => 'Yesterday at the City Council meeting, the Council heard the following items:',
+        'status' => 'published',
+        'content_type' => 'news',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => implode("\n\n", [
+            'Yesterday at the City Council meeting, the Council heard the following items:',
+            '* Consent Agenda approved 7-0',
+            '* Board of Bids and Contracts approved 7-0',
+        ]),
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    $service = new ArticleTextService;
+    $service->refresh($article->fresh());
+
+    $article->refresh();
+
+    expect($article->summary)
+        ->toContain('Consent Agenda approved 7-0')
+        ->toContain('Board of Bids and Contracts approved 7-0');
+});
+
 it('derives a cleaner title from the summary when the title is file-like', function () {
     $city = City::create([
         'name' => 'Title City',

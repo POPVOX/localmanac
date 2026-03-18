@@ -662,6 +662,10 @@ class ArticleTextService
             return true;
         }
 
+        if (preg_match('/[:;]$/', $summary)) {
+            return true;
+        }
+
         if (mb_strlen($summary) >= 180 && ! preg_match('/[.!?]["\')\]]?$/', $summary)) {
             return true;
         }

@@ -4,6 +4,7 @@ namespace App\Services\Ingestion\Fetchers;
 
 use App\Enums\ArticlePublishedPrecision;
 use App\Models\Scraper;
+use App\Services\Ingestion\RssCanonicalBodyHydrator;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
@@ -11,6 +12,10 @@ use SimpleXMLElement;
 
 class RssFetcher
 {
+    public function __construct(
+        private readonly ?RssCanonicalBodyHydrator $canonicalBodyHydrator = null,
+    ) {}
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -59,10 +64,25 @@ class RssFetcher
 
             $description = $this->stringValue($item->description);
             $contentEncoded = $this->contentEncoded($item);
-            $rawHtml = $contentEncoded ?: $description;
-            $cleanedText = $this->normalizeWhitespace(strip_tags($rawHtml ?? ''));
             $summary = $this->normalizeWhitespace(strip_tags($description));
+            $rawHtml = $contentEncoded ?: $description;
             $rawText = $rawHtml ? $this->normalizeWhitespace(strip_tags($rawHtml)) : '';
+            $cleanedText = $rawText;
+            $canonicalUrl = $link;
+            $hydratedBody = $this->hydratedBody(
+                cleanedText: $cleanedText,
+                summary: $summary,
+                contentEncoded: $contentEncoded,
+                link: $link,
+            );
+
+            if ($hydratedBody !== null) {
+                $rawHtml = $hydratedBody['raw_html'];
+                $rawText = $hydratedBody['raw_text'];
+                $cleanedText = $hydratedBody['cleaned_text'];
+                $canonicalUrl = $hydratedBody['canonical_url'] ?? $canonicalUrl;
+            }
+
             $publishedAtData = $this->parseDate($this->stringValue($item->pubDate));
 
             $items[] = [
@@ -74,7 +94,7 @@ class RssFetcher
                 'published_precision' => $publishedAtData['published_precision']?->value,
                 'content_type' => $defaultContentType,
                 'status' => 'published',
-                'canonical_url' => $link,
+                'canonical_url' => $canonicalUrl,
                 'content_hash' => $cleanedText ? hash('sha256', $cleanedText) : null,
                 'body' => [
                     'raw_html' => $rawHtml ?: null,
@@ -116,6 +136,33 @@ class RssFetcher
         $encoded = $this->stringValue($content->encoded ?? '');
 
         return $encoded !== '' ? $encoded : null;
+    }
+
+    /**
+     * @return array{
+     *     canonical_url: string|null,
+     *     raw_html: string,
+     *     raw_text: string,
+     *     cleaned_text: string,
+     *     title: string|null,
+     *     renderer: string|null
+     * }|null
+     */
+    private function hydratedBody(
+        ?string $cleanedText,
+        ?string $summary,
+        ?string $contentEncoded,
+        string $link,
+    ): ?array {
+        if ($this->canonicalBodyHydrator === null) {
+            return null;
+        }
+
+        if (! $this->canonicalBodyHydrator->shouldHydrate($cleanedText, $summary, $contentEncoded, $link)) {
+            return null;
+        }
+
+        return $this->canonicalBodyHydrator->hydrate($link);
     }
 
     /**
