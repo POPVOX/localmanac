@@ -152,6 +152,59 @@ it('queues document extraction for document-like candidates', function () {
     });
 });
 
+it('queues document extraction for document center urls without a file extension', function () {
+    Queue::fake();
+    config()->set('enrichment.enabled', true);
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Detour Notice',
+        'summary' => 'Routes will be detoured.',
+        'status' => 'published',
+        'content_type' => 'news',
+        'canonical_url' => 'https://www.wichita.gov/DocumentCenter/View/36955/Delano-Paddy-Day-Parade-Detour-PDF',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_html' => 'Routes will be detoured.',
+        'raw_text' => 'Routes will be detoured.',
+        'cleaned_text' => 'Routes will be detoured.',
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    ArticleSource::create([
+        'city_id' => $city->id,
+        'article_id' => $article->id,
+        'source_url' => 'https://www.wichita.gov/DocumentCenter/View/36955/Delano-Paddy-Day-Parade-Detour-PDF',
+        'source_type' => 'rss',
+        'source_uid' => 'guid-doc-center',
+        'accessed_at' => now(),
+    ]);
+
+    $hydrator = \Mockery::mock(RssCanonicalBodyHydrator::class);
+    $hydrator->shouldReceive('shouldHydrate')->never();
+    $hydrator->shouldReceive('hydrate')->never();
+
+    app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
+
+    $this->artisan('articles:rehydrate-rss-bodies')
+        ->expectsOutputToContain('Repaired 1 of 1 candidate article(s). 1 queued for document extraction.')
+        ->assertExitCode(0);
+
+    Queue::assertPushed(ExtractPdfBody::class, function (ExtractPdfBody $job) use ($article) {
+        return $job->articleId === $article->id
+            && $job->pdfUrl === 'https://www.wichita.gov/DocumentCenter/View/36955/Delano-Paddy-Day-Parade-Detour-PDF';
+    });
+});
+
 it('queues ai enrichment for full-body articles with weak explainers', function () {
     Queue::fake();
     config()->set('enrichment.enabled', true);

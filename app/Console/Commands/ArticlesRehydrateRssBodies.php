@@ -389,20 +389,8 @@ class ArticlesRehydrateRssBodies extends Command
         }
 
         foreach ([$sourceUrl, $article->canonical_url] as $url) {
-            $normalized = mb_strtolower(trim((string) $url));
-
-            if ($normalized === '') {
-                continue;
-            }
-
-            if (str_contains($normalized, 'archive.aspx?adid=')) {
+            if ($this->urlLooksDocumentLike($url)) {
                 return true;
-            }
-
-            foreach (['.pdf', '.docx', '.doc'] as $suffix) {
-                if (str_contains($normalized, $suffix)) {
-                    return true;
-                }
             }
         }
 
@@ -410,6 +398,29 @@ class ArticlesRehydrateRssBodies extends Command
             if (in_array($source->source_type, ['pdf', 'doc', 'docx', 'document'], true)) {
                 return true;
             }
+        }
+
+        return false;
+    }
+
+    private function urlLooksDocumentLike(?string $url): bool
+    {
+        $normalized = mb_strtolower(trim((string) $url));
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        if (str_contains($normalized, 'archive.aspx?adid=')) {
+            return true;
+        }
+
+        if (str_contains($normalized, 'documentcenter/view/')) {
+            return true;
+        }
+
+        if (preg_match('/(?:\.|[-_\/])(pdf|docx?|document)(?:$|[?#])/i', $normalized) === 1) {
+            return true;
         }
 
         return false;
