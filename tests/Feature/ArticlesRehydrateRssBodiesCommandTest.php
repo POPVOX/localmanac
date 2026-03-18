@@ -169,3 +169,92 @@ it('reruns ai enrichment for a targeted rss article even when hydration is no lo
         return $job->articleId === $article->id;
     });
 });
+
+it('continues bulk rehydration when one rss article fails', function () {
+    config()->set('enrichment.enabled', true);
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $scraper = Scraper::create([
+        'city_id' => $city->id,
+        'name' => 'Updates',
+        'slug' => 'updates',
+        'type' => 'rss',
+        'source_url' => 'https://example.com/feed',
+    ]);
+
+    $firstArticle = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'Broken source article',
+        'summary' => 'Yesterday at the City Council meeting, the Council heard the following items:',
+        'status' => 'published',
+        'content_type' => 'news',
+        'canonical_url' => 'https://example.com/broken',
+    ]);
+
+    $secondArticle = Article::create([
+        'city_id' => $city->id,
+        'scraper_id' => $scraper->id,
+        'title' => 'Recoverable source article',
+        'summary' => 'Yesterday at the City Council meeting, the Council heard the following items:',
+        'status' => 'published',
+        'content_type' => 'news',
+        'canonical_url' => 'https://example.com/recoverable',
+    ]);
+
+    foreach ([$firstArticle, $secondArticle] as $article) {
+        ArticleBody::create([
+            'article_id' => $article->id,
+            'raw_html' => 'Yesterday at the City Council meeting, the Council heard the following items:',
+            'raw_text' => 'Yesterday at the City Council meeting, the Council heard the following items:',
+            'cleaned_text' => 'Yesterday at the City Council meeting, the Council heard the following items:',
+            'lang' => 'en',
+            'extracted_at' => now(),
+            'extraction_status' => 'success',
+        ]);
+
+        ArticleSource::create([
+            'city_id' => $city->id,
+            'article_id' => $article->id,
+            'source_url' => $article->canonical_url,
+            'source_type' => 'rss',
+            'source_uid' => 'guid-'.$article->id,
+            'accessed_at' => now(),
+        ]);
+    }
+
+    $hydrator = \Mockery::mock(RssCanonicalBodyHydrator::class);
+    $hydrator->shouldReceive('shouldHydrate')
+        ->twice()
+        ->andReturnTrue();
+    $hydrator->shouldReceive('hydrate')
+        ->once()
+        ->with('https://example.com/broken')
+        ->andThrow(new RuntimeException('Binary payload'));
+    $hydrator->shouldReceive('hydrate')
+        ->once()
+        ->with('https://example.com/recoverable')
+        ->andReturn([
+            'canonical_url' => 'https://example.com/recoverable',
+            'raw_html' => '<main><p>Consent Agenda approved 7-0.</p></main>',
+            'raw_text' => 'Consent Agenda approved 7-0.',
+            'cleaned_text' => 'Consent Agenda approved 7-0.',
+            'title' => 'Recoverable source article',
+            'renderer' => 'http',
+        ]);
+
+    Queue::fake();
+    app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
+
+    $this->artisan('articles:rehydrate-rss-bodies --limit=2')
+        ->expectsOutputToContain('Rehydrated 1 of 2 article(s).')
+        ->assertExitCode(0);
+
+    Queue::assertPushed(EnrichArticle::class, function (EnrichArticle $job) use ($secondArticle) {
+        return $job->articleId === $secondArticle->id;
+    });
+});

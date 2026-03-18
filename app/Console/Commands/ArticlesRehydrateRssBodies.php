@@ -9,6 +9,7 @@ use App\Services\Articles\ArticleTextService;
 use App\Services\Ingestion\RssCanonicalBodyHydrator;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
 
 class ArticlesRehydrateRssBodies extends Command
 {
@@ -29,8 +30,16 @@ class ArticlesRehydrateRssBodies extends Command
             foreach ($articles as $article) {
                 $processed++;
 
-                if ($this->rehydrateArticle($article, $hydrator, $textService)) {
-                    $updated++;
+                try {
+                    if ($this->rehydrateArticle($article, $hydrator, $textService)) {
+                        $updated++;
+                    }
+                } catch (\Throwable $exception) {
+                    Log::warning('RSS article body rehydration failed.', [
+                        'article_id' => $article->id,
+                        'source_url' => $article->primarySourceUrl() ?? $article->canonical_url,
+                        'message' => $exception->getMessage(),
+                    ]);
                 }
             }
         };

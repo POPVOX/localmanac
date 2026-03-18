@@ -32,11 +32,16 @@ class RssCanonicalBodyHydrator
 
         $html = trim((string) $result['body']);
 
-        if ($html === '') {
+        if (! $this->isHydratableResponse($result['content_type'] ?? null, $html)) {
             return null;
         }
 
-        $extracted = $this->htmlTextExtractor->extract($html, $url);
+        try {
+            $extracted = $this->htmlTextExtractor->extract($html, $url);
+        } catch (\Throwable) {
+            return null;
+        }
+
         $cleanedText = trim((string) ($extracted['text'] ?? ''));
 
         if ($cleanedText === '') {
@@ -76,6 +81,26 @@ class RssCanonicalBodyHydrator
         }
 
         return mb_strlen($normalizedText) < 280;
+    }
+
+    private function isHydratableResponse(?string $contentType, string $body): bool
+    {
+        if ($body === '' || ! mb_check_encoding($body, 'UTF-8')) {
+            return false;
+        }
+
+        $lowerBody = mb_strtolower(ltrim($body));
+
+        foreach (['<!doctype html', '<html', '<head', '<body', '<main', '<article', '<div'] as $marker) {
+            if (str_contains($lowerBody, $marker)) {
+                return true;
+            }
+        }
+
+        $normalizedContentType = mb_strtolower(trim((string) $contentType));
+
+        return str_starts_with($normalizedContentType, 'text/html')
+            || str_starts_with($normalizedContentType, 'application/xhtml+xml');
     }
 
     private function normalize(?string $value): ?string

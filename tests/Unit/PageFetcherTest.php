@@ -123,3 +123,25 @@ it('respects playwright override when provided', function () {
 
     expect($result['renderer'])->toBe('playwright');
 });
+
+it('rejects non-html binary responses before extraction', function () {
+    config()->set('chat.crawl_renderer', 'auto');
+
+    $httpFetcher = Mockery::mock(HttpPageFetcher::class);
+    $httpFetcher->shouldReceive('fetch')
+        ->once()
+        ->andReturn([
+            'url' => 'https://example.com/agenda.pdf',
+            'status_code' => 200,
+            'content_type' => 'application/pdf',
+            'body' => "%PDF-\x00\x01binary-data",
+            'renderer' => 'http',
+        ]);
+
+    $playwrightFetcher = Mockery::mock(PlaywrightPageFetcher::class);
+    $playwrightFetcher->shouldReceive('fetch')->never();
+
+    $fetcher = new PageFetcher($httpFetcher, $playwrightFetcher, app(HtmlTextExtractor::class));
+
+    expect($fetcher->fetch('https://example.com/agenda.pdf'))->toBeNull();
+});

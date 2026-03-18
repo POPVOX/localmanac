@@ -35,6 +35,10 @@ class PageFetcher
             return $this->playwrightFetch($url, $playwrightOptions);
         }
 
+        if (! $this->isProcessableResponse($httpResult['content_type'] ?? null, $httpResult['body'])) {
+            return null;
+        }
+
         if ($this->shouldUsePlaywright($httpResult['body'], $url)) {
             $playwrightResult = $this->playwrightFetch($url, $playwrightOptions);
 
@@ -53,6 +57,47 @@ class PageFetcher
 
         if (mb_strlen($text) < $minChars) {
             return $this->isLikelyJavascriptShell($html);
+        }
+
+        return false;
+    }
+
+    private function isProcessableResponse(?string $contentType, string $body): bool
+    {
+        $normalizedContentType = mb_strtolower(trim((string) $contentType));
+        $trimmedBody = ltrim($body);
+
+        if ($trimmedBody === '') {
+            return false;
+        }
+
+        if (! mb_check_encoding($body, 'UTF-8')) {
+            return false;
+        }
+
+        if ($this->looksLikeHtml($trimmedBody)) {
+            return true;
+        }
+
+        if ($normalizedContentType === '') {
+            return false;
+        }
+
+        if (str_starts_with($normalizedContentType, 'text/html')) {
+            return true;
+        }
+
+        return str_starts_with($normalizedContentType, 'application/xhtml+xml');
+    }
+
+    private function looksLikeHtml(string $body): bool
+    {
+        $lower = mb_strtolower($body);
+
+        foreach (['<!doctype html', '<html', '<head', '<body', '<main', '<article', '<div'] as $marker) {
+            if (str_contains($lower, $marker)) {
+                return true;
+            }
         }
 
         return false;
