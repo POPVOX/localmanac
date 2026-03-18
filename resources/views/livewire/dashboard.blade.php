@@ -23,6 +23,7 @@
                 x-data="{
                     pendingQuestion: '',
                     hasMessages: @js(count($messages) > 0),
+                    pageScrollTop: window.scrollY,
                     scrollTimers: [],
                     scrollToBottom() {
                         this.$nextTick(() => {
@@ -48,8 +49,9 @@
                                 return;
                             }
 
-                            latestAssistant.scrollIntoView({ block: 'start', inline: 'nearest' });
-                            container.scrollTop = Math.max(container.scrollTop - 8, 0);
+                            const delta = latestAssistant.getBoundingClientRect().top - container.getBoundingClientRect().top;
+                            container.scrollTop = Math.max(container.scrollTop + delta - 8, 0);
+                            window.scrollTo({ top: this.pageScrollTop, behavior: 'instant' });
                         });
                     },
                     queueScrollToBottom() {
@@ -192,7 +194,7 @@
                 <div class="border-t border-zinc-100 px-6 pb-5 pt-4">
                     <form
                         wire:submit.prevent="ask"
-                        x-on:submit="pendingQuestion = ($refs.chatComposer?.querySelector('textarea')?.value ?? '').trim(); if (pendingQuestion) { hasMessages = true; setTimeout(() => { const input = $refs.chatComposer?.querySelector('textarea'); if (input) { input.value = ''; } }, 0); }"
+                        x-on:submit="pageScrollTop = window.scrollY; pendingQuestion = ($refs.chatComposer?.querySelector('textarea')?.value ?? '').trim(); if (pendingQuestion) { hasMessages = true; setTimeout(() => { const input = $refs.chatComposer?.querySelector('textarea'); if (input) { input.value = ''; } }, 0); }"
                         class="space-y-3"
                     >
                         <flux:composer
