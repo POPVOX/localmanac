@@ -83,7 +83,7 @@ it('rehydrates teaser-only html articles and queues enrichment', function () {
     Queue::fake();
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
 
-    $this->artisan('articles:rehydrate-rss-bodies --limit=1')
+    $this->artisan('articles:repair-content --limit=1')
         ->expectsOutputToContain('Repaired 1 of 1 candidate article(s). 1 rehydrated from canonical HTML.')
         ->assertExitCode(0);
 
@@ -142,7 +142,7 @@ it('queues document extraction for document-like candidates', function () {
 
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
 
-    $this->artisan('articles:rehydrate-rss-bodies')
+    $this->artisan('articles:repair-content')
         ->expectsOutputToContain('Repaired 1 of 1 candidate article(s). 1 queued for document extraction.')
         ->assertExitCode(0);
 
@@ -195,7 +195,7 @@ it('queues document extraction for document center urls without a file extension
 
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
 
-    $this->artisan('articles:rehydrate-rss-bodies')
+    $this->artisan('articles:repair-content')
         ->expectsOutputToContain('Repaired 1 of 1 candidate article(s). 1 queued for document extraction.')
         ->assertExitCode(0);
 
@@ -250,7 +250,7 @@ it('queues ai enrichment for full-body articles with weak explainers', function 
 
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
 
-    $this->artisan('articles:rehydrate-rss-bodies')
+    $this->artisan('articles:repair-content')
         ->expectsOutputToContain('Repaired 1 of 1 candidate article(s). 1 queued for AI enrichment.')
         ->assertExitCode(0);
 
@@ -304,7 +304,7 @@ it('reruns ai enrichment for a targeted article even when hydration is not neede
 
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
 
-    $this->artisan("articles:rehydrate-rss-bodies --article={$article->id}")
+    $this->artisan("articles:repair-content --article={$article->id}")
         ->expectsOutputToContain('Repaired 1 of 1 article(s).')
         ->assertExitCode(0);
 
@@ -383,7 +383,7 @@ it('continues bulk repair when one candidate fails', function () {
 
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
 
-    $this->artisan('articles:rehydrate-rss-bodies')
+    $this->artisan('articles:repair-content')
         ->expectsOutputToContain('Repaired 1 of 2 candidate article(s). 1 rehydrated from canonical HTML; 1 failed.')
         ->assertExitCode(0);
 

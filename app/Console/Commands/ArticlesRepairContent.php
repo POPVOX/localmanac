@@ -12,9 +12,9 @@ use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
 
-class ArticlesRehydrateRssBodies extends Command
+class ArticlesRepairContent extends Command
 {
-    protected $signature = 'articles:rehydrate-rss-bodies {--city=} {--article=} {--limit=}';
+    protected $signature = 'articles:repair-content {--city=} {--article=} {--limit=}';
 
     protected $description = 'Repair low-quality article bodies, summaries, and explainers';
 
