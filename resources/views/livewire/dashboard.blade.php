@@ -85,6 +85,20 @@
                     @foreach ($messages as $message)
                         @php
                             $isUser = $message['role'] === 'user';
+                            $assistantContent = null;
+
+                            if (! $isUser) {
+                                $assistantContent = \Illuminate\Support\Str::markdown((string) ($message['content'] ?? ''), [
+                                    'html_input' => 'strip',
+                                    'allow_unsafe_links' => false,
+                                ]);
+
+                                $assistantContent = preg_replace(
+                                    '/<a\s+/i',
+                                    '<a target="_blank" rel="noopener noreferrer" ',
+                                    $assistantContent ?? ''
+                                ) ?? '';
+                            }
                         @endphp
                         <div
                             data-chat-role="{{ $message['role'] }}"
@@ -95,7 +109,13 @@
                                 'bg-emerald-600 text-white' => $isUser,
                                 'bg-zinc-100 text-zinc-900' => ! $isUser,
                             ])>
-                                <div class="whitespace-pre-wrap text-sm leading-relaxed">{{ $message['content'] }}</div>
+                                @if ($isUser)
+                                    <div class="whitespace-pre-wrap text-sm leading-relaxed">{{ $message['content'] }}</div>
+                                @else
+                                    <div class="prose prose-sm max-w-none text-sm leading-relaxed text-zinc-900 prose-p:my-0 prose-p:leading-relaxed prose-a:text-emerald-700 prose-a:underline prose-a:underline-offset-2 hover:prose-a:text-emerald-600">
+                                        {!! $assistantContent !!}
+                                    </div>
+                                @endif
 
                                 @if (! empty($message['resources']))
                                     <div @class([

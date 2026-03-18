@@ -3,6 +3,7 @@
 use App\Models\City;
 use App\Models\IssueArea;
 use App\Models\User;
+use Livewire\Livewire;
 
 test('guests are redirected to the login page', function () {
     $response = $this->get(route('dashboard'));
@@ -50,6 +51,23 @@ test('dashboard shows task-oriented chat prompt chips', function () {
         ->assertSee('Upcoming meetings')
         ->assertSee('New permits & projects')
         ->assertSee('Service alerts');
+});
+
+test('dashboard renders assistant markdown links as clickable anchors', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    Livewire::test(\App\Livewire\Dashboard::class)
+        ->set('messages', [
+            [
+                'role' => 'assistant',
+                'content' => 'See [Wichita Economic Development](https://www.wichita.gov/208/Economic-Development).',
+            ],
+        ])
+        ->assertSee('Wichita Economic Development')
+        ->assertSeeHtml('href="https://www.wichita.gov/208/Economic-Development"')
+        ->assertSeeHtml('target="_blank"')
+        ->assertSeeHtml('rel="noopener noreferrer"');
 });
 
 test('regular users do not see admin dashboard link in dropdown', function () {
