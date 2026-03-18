@@ -75,10 +75,15 @@ class MeetingSummaryFallback
             'important local issues affecting',
             'community issues and opportunities',
             'focusing on important local issues',
+            'heard the following items',
         ] as $phrase) {
             if (str_contains(mb_strtolower($whatsHappening), $phrase)) {
                 return true;
             }
+        }
+
+        if (preg_match('/[:;]$/', $whatsHappening) === 1) {
+            return true;
         }
 
         return false;
@@ -141,10 +146,6 @@ class MeetingSummaryFallback
 
         if (str_contains($lower, 'interactive map')) {
             $channels[] = 'the interactive map for community feedback';
-        }
-
-        if (str_contains($lower, 'public hearing')) {
-            $channels[] = 'the upcoming public hearing';
         }
 
         if (str_contains($lower, 'next meeting')) {

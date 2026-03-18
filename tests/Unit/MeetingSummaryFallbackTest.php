@@ -64,3 +64,31 @@ it('keeps strong explainer narrative unchanged', function () {
         ->toBe('Board members reviewed a zoning case, heard staff reports, and opened a public survey for residents.')
         ->and($result['why_it_matters'])->toBe('Residents can respond through the survey before the next meeting.');
 });
+
+it('replaces teaser explainers on rss council recap pages', function () {
+    $text = implode("\n\n", [
+        'News Flash',
+        'March 10 City Council Meeting recap',
+        'Yesterday at the City Council meeting, the Council heard the following items:',
+        'Consent Agenda with the exception of item 6 – Approved 7/0',
+        'Consent Agenda item 6, Contract Documents for Main Water Treatment Plant Conversion to Emergency Use – Approved 6/1 (No-Johnston)',
+        'Board of Bids and Contracts – Approved 7/0',
+        'Petitions for Public Improvements – Approved 7/0',
+        'Public Hearings Considering an Amendment to a Tax Increment Financing Project Plan 3A – Approved 7/0',
+        'The video may be found here and the agenda report may be found here.',
+        'Related News',
+    ]);
+
+    $result = (new MeetingSummaryFallback)->narrative(
+        title: 'March 10 City Council Meeting recap',
+        cleanedText: $text,
+        whatsHappening: 'Yesterday at the City Council meeting, the Council heard the following items:',
+        whyItMatters: null,
+    );
+
+    expect($result['whats_happening'])
+        ->toContain('Consent Agenda with the exception of item 6')
+        ->toContain('Board of Bids and Contracts')
+        ->not->toContain('heard the following items')
+        ->and($result['why_it_matters'])->toBeNull();
+});

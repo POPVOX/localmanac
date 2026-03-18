@@ -2,6 +2,7 @@
 
 use App\Models\Article;
 use App\Models\ArticleBody;
+use App\Models\ArticleExplainer;
 use App\Models\ArticleSource;
 use App\Models\City;
 use App\Models\Scraper;
@@ -53,6 +54,14 @@ it('rehydrates teaser-only rss articles from their canonical page', function () 
         'accessed_at' => now(),
     ]);
 
+    ArticleExplainer::create([
+        'article_id' => $article->id,
+        'city_id' => $city->id,
+        'whats_happening' => 'Yesterday at the City Council meeting, the Council heard the following items:',
+        'why_it_matters' => null,
+        'source' => 'analysis_llm',
+    ]);
+
     $hydrator = \Mockery::mock(RssCanonicalBodyHydrator::class);
     $hydrator->shouldReceive('shouldHydrate')
         ->once()
@@ -95,4 +104,6 @@ it('rehydrates teaser-only rss articles from their canonical page', function () 
     expect($article->explainer?->whats_happening)
         ->toContain('Consent Agenda approved 7-0')
         ->toContain('Board of Bids and Contracts approved 7-0');
+
+    expect($article->explainer?->why_it_matters)->toBeNull();
 });
