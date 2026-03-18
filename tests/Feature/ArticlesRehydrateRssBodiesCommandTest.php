@@ -1,17 +1,23 @@
 <?php
 
 use App\Models\Article;
+use App\Models\ArticleAnalysis;
 use App\Models\ArticleBody;
 use App\Models\ArticleExplainer;
 use App\Models\ArticleSource;
 use App\Models\City;
 use App\Models\Scraper;
+use App\Services\Extraction\Enricher;
 use App\Services\Ingestion\RssCanonicalBodyHydrator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
 it('rehydrates teaser-only rss articles from their canonical page', function () {
+    config()->set('enrichment.enabled', true);
+    config()->set('enrichment.model', 'test-model');
+    config()->set('enrichment.prompt_version', 'test-prompt');
+
     $city = City::create([
         'name' => 'Wichita',
         'slug' => 'wichita',
@@ -85,6 +91,56 @@ it('rehydrates teaser-only rss articles from their canonical page', function () 
         ]);
 
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
+    app()->instance(Enricher::class, new class extends Enricher
+    {
+        public function __construct() {}
+
+        public function enrich(Article $article): array
+        {
+            return [
+                'analysis' => [
+                    'dimensions' => [
+                        'comprehensibility' => 0.8,
+                        'orientation' => 0.7,
+                        'representation' => 0.6,
+                        'agency' => 0.5,
+                        'relevance' => 0.7,
+                        'timeliness' => 0.8,
+                    ],
+                    'justifications' => [
+                        'comprehensibility' => 'Clear summary.',
+                        'orientation' => 'Explains the council actions.',
+                        'representation' => 'Includes affected actions.',
+                        'agency' => 'No immediate action requested.',
+                        'relevance' => 'Covers city council approvals.',
+                        'timeliness' => 'Recent recap.',
+                    ],
+                    'opportunities' => [],
+                    'confidence' => 0.82,
+                ],
+                'enrichment' => [
+                    'people' => [],
+                    'organizations' => [],
+                    'locations' => [],
+                    'keywords' => [],
+                    'issue_areas' => [],
+                    'confidence' => 0.75,
+                ],
+                'process_timeline' => [
+                    'items' => [],
+                    'current_key' => null,
+                ],
+                'explainer' => [
+                    'whats_happening' => 'The council approved most consent-agenda items, signed off on bids and contracts, and moved forward public improvement requests.',
+                    'why_it_matters' => 'These votes advance city contracts and public works decisions that affect Wichita projects and services.',
+                    'key_details' => null,
+                    'what_to_watch' => null,
+                    'evidence' => null,
+                ],
+                'confidence' => 0.8,
+            ];
+        }
+    });
 
     $this->artisan('articles:rehydrate-rss-bodies --limit=1')
         ->expectsOutputToContain('Rehydrated 1 of 1 article(s).')
@@ -98,12 +154,14 @@ it('rehydrates teaser-only rss articles from their canonical page', function () 
         ->toContain('Board of Bids and Contracts approved 7-0');
 
     expect($article->summary)
-        ->toContain('Consent Agenda approved 7-0')
-        ->toContain('Board of Bids and Contracts approved 7-0');
+        ->toBe('The council approved most consent-agenda items, signed off on bids and contracts, and moved forward public improvement requests.');
 
     expect($article->explainer?->whats_happening)
-        ->toContain('Consent Agenda approved 7-0')
-        ->toContain('Board of Bids and Contracts approved 7-0');
+        ->toBe('The council approved most consent-agenda items, signed off on bids and contracts, and moved forward public improvement requests.')
+        ->and($article->explainer?->why_it_matters)
+        ->toBe('These votes advance city contracts and public works decisions that affect Wichita projects and services.')
+        ->and($article->explainer?->source)
+        ->toBe('analysis_llm');
 
-    expect($article->explainer?->why_it_matters)->toBeNull();
+    expect(ArticleAnalysis::query()->where('article_id', $article->id)->exists())->toBeTrue();
 });

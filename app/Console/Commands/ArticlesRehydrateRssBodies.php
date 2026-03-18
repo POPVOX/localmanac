@@ -2,11 +2,10 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\EnrichArticle as EnrichArticleJob;
 use App\Models\Article;
 use App\Models\ArticleBody;
-use App\Models\ArticleExplainer;
 use App\Services\Articles\ArticleTextService;
-use App\Services\Articles\MeetingSummaryFallback;
 use App\Services\Ingestion\RssCanonicalBodyHydrator;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
@@ -20,18 +19,17 @@ class ArticlesRehydrateRssBodies extends Command
     public function handle(
         RssCanonicalBodyHydrator $hydrator,
         ArticleTextService $textService,
-        MeetingSummaryFallback $fallback,
     ): int {
         $query = $this->eligibleArticlesQuery();
         $limit = $this->option('limit');
         $processed = 0;
         $updated = 0;
 
-        $processor = function ($articles) use ($hydrator, $textService, $fallback, &$processed, &$updated): void {
+        $processor = function ($articles) use ($hydrator, $textService, &$processed, &$updated): void {
             foreach ($articles as $article) {
                 $processed++;
 
-                if ($this->rehydrateArticle($article, $hydrator, $textService, $fallback)) {
+                if ($this->rehydrateArticle($article, $hydrator, $textService)) {
                     $updated++;
                 }
             }
@@ -81,7 +79,6 @@ class ArticlesRehydrateRssBodies extends Command
         Article $article,
         RssCanonicalBodyHydrator $hydrator,
         ArticleTextService $textService,
-        MeetingSummaryFallback $fallback,
     ): bool {
         $sourceUrl = $article->primarySourceUrl() ?? $article->canonical_url;
 
@@ -136,68 +133,17 @@ class ArticlesRehydrateRssBodies extends Command
         $article->save();
 
         $article->unsetRelation('body');
-        $article->load(['body', 'explainer']);
+        $article->load('body');
 
-        $explainerUpdated = $this->refreshExplainer($article, $fallback, $newCleanedText);
-        $textUpdated = $textService->refresh($article, cleanedText: $newCleanedText);
-
-        return $bodyUpdated || $explainerUpdated || $textUpdated;
-    }
-
-    private function refreshExplainer(Article $article, MeetingSummaryFallback $fallback, string $cleanedText): bool
-    {
-        $article->loadMissing('explainer');
-
-        $narrative = $fallback->narrative(
-            title: $article->title,
-            cleanedText: $cleanedText,
-            whatsHappening: $article->explainer?->whats_happening,
-            whyItMatters: $article->explainer?->why_it_matters,
-        );
-
-        $whatsHappening = $this->stringValue($narrative['whats_happening'] ?? null);
-        $whyItMatters = $this->stringValue($narrative['why_it_matters'] ?? null);
-
-        if ($article->explainer !== null) {
-            $changes = [];
-
-            if ($whatsHappening !== $article->explainer->whats_happening) {
-                $changes['whats_happening'] = $whatsHappening;
-            }
-
-            if ($whyItMatters !== $article->explainer->why_it_matters) {
-                $changes['why_it_matters'] = $whyItMatters;
-            }
-
-            if ($changes === []) {
-                return false;
-            }
-
-            if ($article->explainer->source === null) {
-                $changes['source'] = 'meeting_summary_fallback';
-            }
-
-            $article->explainer->fill($changes)->save();
+        if (config('enrichment.enabled', true)) {
+            EnrichArticleJob::dispatchSync($article->id);
 
             return true;
         }
 
-        if ($whatsHappening === null && $whyItMatters === null) {
-            return false;
-        }
+        $textUpdated = $textService->refresh($article, cleanedText: $newCleanedText);
 
-        ArticleExplainer::query()->create([
-            'article_id' => $article->id,
-            'city_id' => $article->city_id,
-            'whats_happening' => $whatsHappening,
-            'why_it_matters' => $whyItMatters,
-            'source' => 'meeting_summary_fallback',
-        ]);
-
-        $article->unsetRelation('explainer');
-        $article->load('explainer');
-
-        return true;
+        return $bodyUpdated || $textUpdated;
     }
 
     private function stringValue(mixed $value): ?string
