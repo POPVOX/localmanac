@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Jobs\EnrichArticle as EnrichArticleJob;
+use App\Jobs\ExtractPdfBody;
 use App\Models\Article;
 use App\Models\ArticleBody;
 use App\Services\Articles\ArticleTextService;
@@ -15,32 +16,52 @@ class ArticlesRehydrateRssBodies extends Command
 {
     protected $signature = 'articles:rehydrate-rss-bodies {--city=} {--article=} {--limit=}';
 
-    protected $description = 'Repair RSS-backed articles whose stored body is only a teaser or missing';
+    protected $description = 'Repair low-quality article bodies, summaries, and explainers';
 
     public function handle(
         RssCanonicalBodyHydrator $hydrator,
         ArticleTextService $textService,
     ): int {
-        $baseQuery = $this->baseArticlesQuery();
-        $totalMatching = (clone $baseQuery)->count();
         $query = $this->eligibleArticlesQuery();
         $limit = $this->option('limit');
         $processed = 0;
-        $updated = 0;
+        $hydrated = 0;
+        $queuedDocumentExtraction = 0;
+        $queuedEnrichment = 0;
+        $refreshedText = 0;
+        $failed = 0;
 
-        $processor = function ($articles) use ($hydrator, $textService, &$processed, &$updated): void {
+        $processor = function ($articles) use (
+            $hydrator,
+            $textService,
+            &$processed,
+            &$hydrated,
+            &$queuedDocumentExtraction,
+            &$queuedEnrichment,
+            &$refreshedText,
+            &$failed
+        ): void {
             foreach ($articles as $article) {
                 $processed++;
 
                 try {
-                    if ($this->rehydrateArticle($article, $hydrator, $textService)) {
-                        $updated++;
-                    }
+                    $action = $this->repairArticle($article, $hydrator, $textService);
+
+                    match ($action) {
+                        'hydrated' => $hydrated++,
+                        'document_extraction' => $queuedDocumentExtraction++,
+                        'enrichment' => $queuedEnrichment++,
+                        'text_refresh' => $refreshedText++,
+                        default => null,
+                    };
                 } catch (\Throwable $exception) {
-                    Log::warning('RSS article body rehydration failed.', [
+                    $failed++;
+
+                    Log::warning('Article repair failed.', [
                         'article_id' => $article->id,
                         'source_url' => $article->primarySourceUrl() ?? $article->canonical_url,
                         'message' => $exception->getMessage(),
+                        'exception' => $exception::class,
                     ]);
                 }
             }
@@ -52,23 +73,40 @@ class ArticlesRehydrateRssBodies extends Command
             $query->chunkById(100, $processor);
         }
 
-        $alreadyComplete = max(0, $totalMatching - $processed);
-        $failed = max(0, $processed - $updated);
+        $repaired = $hydrated + $queuedDocumentExtraction + $queuedEnrichment + $refreshedText;
 
         if ($this->option('article')) {
-            $this->info("Rehydrated {$updated} of {$processed} article(s).");
+            $this->info("Repaired {$repaired} of {$processed} article(s).");
 
             return self::SUCCESS;
         }
 
-        $summary = "Rehydrated {$updated} of {$processed} candidate article(s).";
+        $details = [];
 
-        if ($alreadyComplete > 0) {
-            $summary .= " Skipped {$alreadyComplete} already complete.";
+        if ($hydrated > 0) {
+            $details[] = "{$hydrated} rehydrated from canonical HTML";
+        }
+
+        if ($queuedDocumentExtraction > 0) {
+            $details[] = "{$queuedDocumentExtraction} queued for document extraction";
+        }
+
+        if ($queuedEnrichment > 0) {
+            $details[] = "{$queuedEnrichment} queued for AI enrichment";
+        }
+
+        if ($refreshedText > 0) {
+            $details[] = "{$refreshedText} refreshed from existing text";
         }
 
         if ($failed > 0) {
-            $summary .= " {$failed} could not be hydrated.";
+            $details[] = "{$failed} failed";
+        }
+
+        $summary = "Repaired {$repaired} of {$processed} candidate article(s).";
+
+        if ($details !== []) {
+            $summary .= ' '.implode('; ', $details).'.';
         }
 
         $this->info($summary);
@@ -82,10 +120,7 @@ class ArticlesRehydrateRssBodies extends Command
         $articleOption = $this->option('article');
 
         $query = Article::query()
-            ->with(['body', 'explainer', 'sources'])
-            ->whereHas('sources', function (Builder $sourceQuery): void {
-                $sourceQuery->where('source_type', 'rss');
-            })
+            ->with(['analysis', 'body', 'explainer', 'sources'])
             ->orderBy('id');
 
         if ($articleOption) {
@@ -114,53 +149,128 @@ class ArticlesRehydrateRssBodies extends Command
         }
 
         return $query->where(function (Builder $candidateQuery): void {
-            $candidateQuery->doesntHave('body')
-                ->orWhereHas('body', function (Builder $bodyQuery): void {
+            $candidateQuery
+                ->where(function (Builder $bodyQuery): void {
                     $bodyQuery
-                        ->whereNull('cleaned_text')
-                        ->orWhereRaw("length(trim(coalesce(cleaned_text, ''))) < 280")
-                        ->orWhereRaw("length(trim(coalesce(raw_html, ''))) < 280");
+                        ->doesntHave('body')
+                        ->orWhereHas('body', function (Builder $articleBodyQuery): void {
+                            $articleBodyQuery
+                                ->whereNull('cleaned_text')
+                                ->orWhereRaw("length(trim(coalesce(cleaned_text, ''))) < 280")
+                                ->orWhereIn('extraction_status', ['failed', 'empty']);
+                        });
+                })
+                ->orWhere(function (Builder $qualityQuery): void {
+                    $qualityQuery
+                        ->whereHas('body', function (Builder $bodyQuery): void {
+                            $bodyQuery->whereRaw("length(trim(coalesce(cleaned_text, ''))) >= 280");
+                        })
+                        ->where(function (Builder $needsQualityRepair): void {
+                            $needsQualityRepair
+                                ->doesntHave('analysis')
+                                ->orDoesntHave('explainer')
+                                ->orWhereNull('summary')
+                                ->orWhereRaw("length(trim(coalesce(summary, ''))) = 0")
+                                ->orWhereRaw('lower(coalesce(summary, \'\')) like ?', ['%various items were discussed%'])
+                                ->orWhereRaw('lower(coalesce(summary, \'\')) like ?', ['%important local issues affecting%'])
+                                ->orWhereRaw('lower(coalesce(summary, \'\')) like ?', ['%community issues and opportunities%'])
+                                ->orWhereRaw('lower(coalesce(summary, \'\')) like ?', ['%focus on important local issues%'])
+                                ->orWhereRaw('lower(coalesce(summary, \'\')) like ?', ['%helps residents stay informed about community decisions and local governance%'])
+                                ->orWhereRaw("trim(coalesce(summary, '')) like ?", ['%:'])
+                                ->orWhereHas('explainer', function (Builder $explainerQuery): void {
+                                    $explainerQuery
+                                        ->whereNull('whats_happening')
+                                        ->orWhereRaw("length(trim(coalesce(whats_happening, ''))) = 0")
+                                        ->orWhere('source', '!=', 'analysis_llm')
+                                        ->orWhereRaw('lower(coalesce(whats_happening, \'\')) like ?', ['%various items were discussed%'])
+                                        ->orWhereRaw('lower(coalesce(whats_happening, \'\')) like ?', ['%important local issues affecting%'])
+                                        ->orWhereRaw('lower(coalesce(whats_happening, \'\')) like ?', ['%community issues and opportunities%'])
+                                        ->orWhereRaw('lower(coalesce(whats_happening, \'\')) like ?', ['%heard the following items%'])
+                                        ->orWhereRaw("trim(coalesce(whats_happening, '')) like ?", ['%:'])
+                                        ->orWhereRaw('lower(coalesce(why_it_matters, \'\')) like ?', ['%stay informed%'])
+                                        ->orWhereRaw('lower(coalesce(why_it_matters, \'\')) like ?', ['%community decisions%'])
+                                        ->orWhereRaw('lower(coalesce(why_it_matters, \'\')) like ?', ['%local governance%']);
+                                });
+                        });
                 });
         });
     }
 
-    private function rehydrateArticle(
+    private function repairArticle(
         Article $article,
         RssCanonicalBodyHydrator $hydrator,
         ArticleTextService $textService,
-    ): bool {
+    ): ?string {
         $sourceUrl = $article->primarySourceUrl() ?? $article->canonical_url;
 
+        if ($this->isDocumentLike($article, $sourceUrl)) {
+            if ($this->needsDocumentExtraction($article)) {
+                if (! is_string($sourceUrl) || trim($sourceUrl) === '') {
+                    return null;
+                }
+
+                ExtractPdfBody::dispatch($article->id, $sourceUrl);
+
+                return 'document_extraction';
+            }
+
+            if ($this->shouldQueueEnrichment($article, forceForTarget: (bool) $this->option('article'))) {
+                EnrichArticleJob::dispatch($article->id);
+
+                return 'enrichment';
+            }
+
+            if (($this->summaryNeedsRefresh($article->summary) || $this->titleNeedsRefresh($article->title))
+                && $this->hasUsableBody($article)
+                && $textService->refresh($article)) {
+                return 'text_refresh';
+            }
+
+            return null;
+        }
+
+        if ($this->needsHtmlHydration($article, $hydrator, $sourceUrl)) {
+            return $this->hydrateArticle($article, $hydrator, $textService, $sourceUrl);
+        }
+
+        if ($this->shouldQueueEnrichment($article, forceForTarget: (bool) $this->option('article'))) {
+            EnrichArticleJob::dispatch($article->id);
+
+            return 'enrichment';
+        }
+
+        if (($this->summaryNeedsRefresh($article->summary) || $this->titleNeedsRefresh($article->title))
+            && $this->hasUsableBody($article)
+            && $textService->refresh($article)) {
+            return 'text_refresh';
+        }
+
+        return null;
+    }
+
+    private function hydrateArticle(
+        Article $article,
+        RssCanonicalBodyHydrator $hydrator,
+        ArticleTextService $textService,
+        ?string $sourceUrl,
+    ): ?string {
         if (! is_string($sourceUrl) || trim($sourceUrl) === '') {
-            return false;
+            return null;
         }
 
         $storedBody = $article->body;
         $storedCleanedText = $this->stringValue($storedBody?->cleaned_text);
-        $storedSummary = $this->stringValue($article->summary);
         $storedRawHtml = $this->stringValue($storedBody?->raw_html);
-        $refreshAiOnly = $this->shouldRefreshAiWithoutHydration($storedCleanedText);
-
-        if (! $hydrator->shouldHydrate($storedCleanedText, $storedSummary, $storedRawHtml, $sourceUrl)) {
-            if ($refreshAiOnly && config('enrichment.enabled', true)) {
-                EnrichArticleJob::dispatch($article->id);
-
-                return true;
-            }
-
-            return false;
-        }
-
         $hydratedBody = $hydrator->hydrate($sourceUrl);
 
         if ($hydratedBody === null) {
-            return false;
+            return null;
         }
 
         $newCleanedText = $this->stringValue($hydratedBody['cleaned_text'] ?? null);
 
         if ($newCleanedText === null) {
-            return false;
+            return null;
         }
 
         $canonicalUrl = $this->stringValue($hydratedBody['canonical_url'] ?? null) ?? $article->canonical_url ?? $sourceUrl;
@@ -194,21 +304,217 @@ class ArticlesRehydrateRssBodies extends Command
         if (config('enrichment.enabled', true)) {
             EnrichArticleJob::dispatch($article->id);
 
-            return true;
+            return 'hydrated';
         }
 
         $textUpdated = $textService->refresh($article, cleanedText: $newCleanedText);
 
-        return $bodyUpdated || $textUpdated;
+        return ($bodyUpdated || $textUpdated) ? 'hydrated' : null;
     }
 
-    private function shouldRefreshAiWithoutHydration(?string $storedCleanedText): bool
+    private function hasUsableBody(Article $article): bool
     {
-        if (! $this->option('article')) {
+        $cleanedText = $this->stringValue($article->body?->cleaned_text);
+
+        if ($cleanedText === null) {
             return false;
         }
 
-        return $storedCleanedText !== null && config('enrichment.enabled', true);
+        return mb_strlen($cleanedText) >= 280;
+    }
+
+    private function needsDocumentExtraction(Article $article): bool
+    {
+        $status = $this->stringValue($article->body?->extraction_status);
+
+        if (in_array($status, ['failed', 'empty'], true)) {
+            return true;
+        }
+
+        return ! $this->hasUsableBody($article);
+    }
+
+    private function needsHtmlHydration(
+        Article $article,
+        RssCanonicalBodyHydrator $hydrator,
+        ?string $sourceUrl,
+    ): bool {
+        if (! is_string($sourceUrl) || trim($sourceUrl) === '') {
+            return false;
+        }
+
+        return $hydrator->shouldHydrate(
+            $this->stringValue($article->body?->cleaned_text),
+            $this->stringValue($article->summary),
+            $this->stringValue($article->body?->raw_html),
+            $sourceUrl,
+        );
+    }
+
+    private function shouldQueueEnrichment(Article $article, bool $forceForTarget = false): bool
+    {
+        if (! config('enrichment.enabled', true) || ! $this->hasUsableBody($article)) {
+            return false;
+        }
+
+        if ($forceForTarget) {
+            return true;
+        }
+
+        if ($article->analysis === null) {
+            return true;
+        }
+
+        $explainer = $article->explainer;
+
+        if ($explainer === null) {
+            return true;
+        }
+
+        if ($explainer->source !== 'analysis_llm') {
+            return true;
+        }
+
+        if ($this->isWeakExplainer($explainer->whats_happening, $explainer->why_it_matters)) {
+            return true;
+        }
+
+        return $this->summaryNeedsRefresh($article->summary);
+    }
+
+    private function isDocumentLike(Article $article, ?string $sourceUrl): bool
+    {
+        if (in_array($article->content_type, ['pdf', 'doc', 'docx', 'document'], true)) {
+            return true;
+        }
+
+        foreach ([$sourceUrl, $article->canonical_url] as $url) {
+            $normalized = mb_strtolower(trim((string) $url));
+
+            if ($normalized === '') {
+                continue;
+            }
+
+            if (str_contains($normalized, 'archive.aspx?adid=')) {
+                return true;
+            }
+
+            foreach (['.pdf', '.docx', '.doc'] as $suffix) {
+                if (str_contains($normalized, $suffix)) {
+                    return true;
+                }
+            }
+        }
+
+        foreach ($article->sources as $source) {
+            if (in_array($source->source_type, ['pdf', 'doc', 'docx', 'document'], true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isWeakExplainer(?string $whatsHappening, ?string $whyItMatters): bool
+    {
+        $whatsHappening = mb_strtolower(trim((string) $whatsHappening));
+        $whyItMatters = mb_strtolower(trim((string) $whyItMatters));
+
+        if ($whatsHappening === '') {
+            return true;
+        }
+
+        foreach ([
+            'various items were discussed',
+            'important local issues affecting',
+            'community issues and opportunities',
+            'heard the following items',
+        ] as $phrase) {
+            if (str_contains($whatsHappening, $phrase)) {
+                return true;
+            }
+        }
+
+        if (preg_match('/[:;]$/', $whatsHappening) === 1) {
+            return true;
+        }
+
+        foreach ([
+            'stay informed',
+            'community decisions',
+            'local governance',
+            'community engagement',
+            'directly impact local initiatives',
+        ] as $phrase) {
+            if ($whyItMatters !== '' && str_contains($whyItMatters, $phrase)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function summaryNeedsRefresh(?string $summary): bool
+    {
+        $summary = $this->stringValue($summary);
+
+        if ($summary === null) {
+            return true;
+        }
+
+        $normalized = mb_strtolower($summary);
+
+        foreach ([
+            'various items were discussed',
+            'important local issues affecting',
+            'community issues and opportunities',
+            'focus on important local issues',
+            'residents should be aware of these discussions',
+            'helps residents stay informed about community decisions and local governance',
+        ] as $phrase) {
+            if (str_contains($normalized, $phrase)) {
+                return true;
+            }
+        }
+
+        if (preg_match('/\.{3,}$/', $summary) === 1) {
+            return true;
+        }
+
+        if (preg_match('/[:;]$/', $summary) === 1) {
+            return true;
+        }
+
+        return mb_strlen($summary) >= 180 && preg_match('/[.!?]["\')\]]?$/', $summary) !== 1;
+    }
+
+    private function titleNeedsRefresh(?string $title): bool
+    {
+        $title = trim((string) $title);
+
+        if ($title === '') {
+            return true;
+        }
+
+        $length = mb_strlen($title);
+
+        if ($length < 4) {
+            return true;
+        }
+
+        $digits = preg_match_all('/\d/', $title) ?: 0;
+        $letters = preg_match_all('/[A-Za-z]/', $title) ?: 0;
+        $total = $digits + $letters;
+
+        if ($letters < 3) {
+            return true;
+        }
+
+        if ($total > 0 && ($digits / $total) > 0.60) {
+            return true;
+        }
+
+        return $length >= 80 && preg_match('/\b(is|are|was|were|will)\b/i', $title) === 1;
     }
 
     private function stringValue(mixed $value): ?string

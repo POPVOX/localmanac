@@ -1,9 +1,9 @@
 <?php
 
 use App\Jobs\EnrichArticle;
+use App\Jobs\ExtractPdfBody;
 use App\Models\Article;
 use App\Models\ArticleBody;
-use App\Models\ArticleExplainer;
 use App\Models\ArticleSource;
 use App\Models\City;
 use App\Models\Scraper;
@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
-it('rehydrates teaser-only rss articles from their canonical page', function () {
+it('rehydrates teaser-only html articles and queues enrichment', function () {
     config()->set('enrichment.enabled', true);
 
     $city = City::create([
@@ -58,14 +58,6 @@ it('rehydrates teaser-only rss articles from their canonical page', function () 
         'accessed_at' => now(),
     ]);
 
-    ArticleExplainer::create([
-        'article_id' => $article->id,
-        'city_id' => $city->id,
-        'whats_happening' => 'Yesterday at the City Council meeting, the Council heard the following items:',
-        'why_it_matters' => null,
-        'source' => 'analysis_llm',
-    ]);
-
     $hydrator = \Mockery::mock(RssCanonicalBodyHydrator::class);
     $hydrator->shouldReceive('shouldHydrate')
         ->once()
@@ -83,7 +75,7 @@ it('rehydrates teaser-only rss articles from their canonical page', function () 
             'canonical_url' => 'https://example.com/article-598',
             'raw_html' => '<main><p>Consent Agenda approved 7-0.</p><p>Board of Bids and Contracts approved 7-0.</p></main>',
             'raw_text' => "Consent Agenda approved 7-0.\n\nBoard of Bids and Contracts approved 7-0.",
-            'cleaned_text' => "Yesterday at the City Council meeting, the Council heard the following items:\n\n* Consent Agenda approved 7-0\n\n* Board of Bids and Contracts approved 7-0",
+            'cleaned_text' => "Consent Agenda approved 7-0.\n\nBoard of Bids and Contracts approved 7-0.",
             'title' => 'March 10 City Council Meeting recap',
             'renderer' => 'http',
         ]);
@@ -92,11 +84,11 @@ it('rehydrates teaser-only rss articles from their canonical page', function () 
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
 
     $this->artisan('articles:rehydrate-rss-bodies --limit=1')
-        ->expectsOutputToContain('Rehydrated 1 of 1 candidate article(s).')
+        ->expectsOutputToContain('Repaired 1 of 1 candidate article(s). 1 rehydrated from canonical HTML.')
         ->assertExitCode(0);
 
     $article->refresh();
-    $article->load(['body', 'explainer']);
+    $article->load('body');
 
     expect($article->body?->cleaned_text)
         ->toContain('Consent Agenda approved 7-0')
@@ -107,37 +99,29 @@ it('rehydrates teaser-only rss articles from their canonical page', function () 
     });
 });
 
-it('reruns ai enrichment for a targeted rss article even when hydration is no longer needed', function () {
+it('queues document extraction for document-like candidates', function () {
+    Queue::fake();
     config()->set('enrichment.enabled', true);
 
     $city = City::create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-    ]);
-
-    $scraper = Scraper::create([
-        'city_id' => $city->id,
-        'name' => 'Updates',
-        'slug' => 'updates',
-        'type' => 'rss',
-        'source_url' => 'https://example.com/feed',
+        'name' => 'Doc City',
+        'slug' => 'doc-city',
     ]);
 
     $article = Article::create([
         'city_id' => $city->id,
-        'scraper_id' => $scraper->id,
-        'title' => 'March 10 City Council Meeting recap',
-        'summary' => 'Yesterday at the City Council meeting, the Council heard the following items:',
+        'title' => 'Detour Notice',
+        'summary' => 'Routes will be detoured.',
         'status' => 'published',
         'content_type' => 'news',
-        'canonical_url' => 'https://example.com/article-598',
+        'canonical_url' => 'https://example.com/detour.pdf',
     ]);
 
     ArticleBody::create([
         'article_id' => $article->id,
-        'raw_html' => '<main><p>Consent Agenda approved 7-0.</p><p>Board of Bids and Contracts approved 7-0.</p></main>',
-        'raw_text' => "Consent Agenda approved 7-0.\n\nBoard of Bids and Contracts approved 7-0.",
-        'cleaned_text' => "Consent Agenda approved 7-0.\n\nBoard of Bids and Contracts approved 7-0.",
+        'raw_html' => 'Routes will be detoured.',
+        'raw_text' => 'Routes will be detoured.',
+        'cleaned_text' => 'Routes will be detoured.',
         'lang' => 'en',
         'extracted_at' => now(),
         'extraction_status' => 'success',
@@ -146,9 +130,62 @@ it('reruns ai enrichment for a targeted rss article even when hydration is no lo
     ArticleSource::create([
         'city_id' => $city->id,
         'article_id' => $article->id,
-        'source_url' => 'https://example.com/article-598',
+        'source_url' => 'https://example.com/detour.pdf',
         'source_type' => 'rss',
-        'source_uid' => 'guid-598',
+        'source_uid' => 'guid-doc',
+        'accessed_at' => now(),
+    ]);
+
+    $hydrator = \Mockery::mock(RssCanonicalBodyHydrator::class);
+    $hydrator->shouldReceive('shouldHydrate')->never();
+    $hydrator->shouldReceive('hydrate')->never();
+
+    app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
+
+    $this->artisan('articles:rehydrate-rss-bodies')
+        ->expectsOutputToContain('Repaired 1 of 1 candidate article(s). 1 queued for document extraction.')
+        ->assertExitCode(0);
+
+    Queue::assertPushed(ExtractPdfBody::class, function (ExtractPdfBody $job) use ($article) {
+        return $job->articleId === $article->id
+            && $job->pdfUrl === 'https://example.com/detour.pdf';
+    });
+});
+
+it('queues ai enrichment for full-body articles with weak explainers', function () {
+    Queue::fake();
+    config()->set('enrichment.enabled', true);
+
+    $city = City::create([
+        'name' => 'Explainer City',
+        'slug' => 'explainer-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Commission votes on housing proposals',
+        'summary' => 'Various items were discussed during the meeting.',
+        'status' => 'published',
+        'content_type' => 'news',
+        'canonical_url' => 'https://example.com/housing',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_html' => '<main>'.str_repeat('Commissioners debated housing proposals and scheduled next steps. ', 20).'</main>',
+        'raw_text' => str_repeat('Commissioners debated housing proposals and scheduled next steps. ', 20),
+        'cleaned_text' => str_repeat('Commissioners debated housing proposals and scheduled next steps. ', 20),
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    ArticleSource::create([
+        'city_id' => $city->id,
+        'article_id' => $article->id,
+        'source_url' => 'https://example.com/housing',
+        'source_type' => 'html',
+        'source_uid' => 'guid-enrich',
         'accessed_at' => now(),
     ]);
 
@@ -158,11 +195,10 @@ it('reruns ai enrichment for a targeted rss article even when hydration is no lo
         ->andReturnFalse();
     $hydrator->shouldReceive('hydrate')->never();
 
-    Queue::fake();
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
 
-    $this->artisan("articles:rehydrate-rss-bodies --article={$article->id}")
-        ->expectsOutputToContain('Rehydrated 1 of 1 article(s).')
+    $this->artisan('articles:rehydrate-rss-bodies')
+        ->expectsOutputToContain('Repaired 1 of 1 candidate article(s). 1 queued for AI enrichment.')
         ->assertExitCode(0);
 
     Queue::assertPushed(EnrichArticle::class, function (EnrichArticle $job) use ($article) {
@@ -170,35 +206,71 @@ it('reruns ai enrichment for a targeted rss article even when hydration is no lo
     });
 });
 
-it('continues bulk rehydration when one rss article fails', function () {
+it('reruns ai enrichment for a targeted article even when hydration is not needed', function () {
+    Queue::fake();
     config()->set('enrichment.enabled', true);
 
     $city = City::create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
+        'name' => 'Target City',
+        'slug' => 'target-city',
     ]);
 
-    $scraper = Scraper::create([
+    $article = Article::create([
         'city_id' => $city->id,
-        'name' => 'Updates',
-        'slug' => 'updates',
-        'type' => 'rss',
-        'source_url' => 'https://example.com/feed',
-    ]);
-
-    $completeArticle = Article::create([
-        'city_id' => $city->id,
-        'scraper_id' => $scraper->id,
-        'title' => 'Already complete article',
-        'summary' => 'Existing summary',
+        'title' => 'Targeted rerun article',
+        'summary' => 'A complete summary already exists.',
         'status' => 'published',
         'content_type' => 'news',
-        'canonical_url' => 'https://example.com/complete',
+        'canonical_url' => 'https://example.com/targeted',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'raw_html' => '<main>'.str_repeat('This article body is already complete and specific. ', 20).'</main>',
+        'raw_text' => str_repeat('This article body is already complete and specific. ', 20),
+        'cleaned_text' => str_repeat('This article body is already complete and specific. ', 20),
+        'lang' => 'en',
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    ArticleSource::create([
+        'city_id' => $city->id,
+        'article_id' => $article->id,
+        'source_url' => 'https://example.com/targeted',
+        'source_type' => 'html',
+        'source_uid' => 'guid-targeted',
+        'accessed_at' => now(),
+    ]);
+
+    $hydrator = \Mockery::mock(RssCanonicalBodyHydrator::class);
+    $hydrator->shouldReceive('shouldHydrate')
+        ->once()
+        ->andReturnFalse();
+    $hydrator->shouldReceive('hydrate')->never();
+
+    app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
+
+    $this->artisan("articles:rehydrate-rss-bodies --article={$article->id}")
+        ->expectsOutputToContain('Repaired 1 of 1 article(s).')
+        ->assertExitCode(0);
+
+    Queue::assertPushed(EnrichArticle::class, function (EnrichArticle $job) use ($article) {
+        return $job->articleId === $article->id;
+    });
+});
+
+it('continues bulk repair when one candidate fails', function () {
+    Queue::fake();
+    config()->set('enrichment.enabled', true);
+
+    $city = City::create([
+        'name' => 'Failure City',
+        'slug' => 'failure-city',
     ]);
 
     $firstArticle = Article::create([
         'city_id' => $city->id,
-        'scraper_id' => $scraper->id,
         'title' => 'Broken source article',
         'summary' => 'Yesterday at the City Council meeting, the Council heard the following items:',
         'status' => 'published',
@@ -208,7 +280,6 @@ it('continues bulk rehydration when one rss article fails', function () {
 
     $secondArticle = Article::create([
         'city_id' => $city->id,
-        'scraper_id' => $scraper->id,
         'title' => 'Recoverable source article',
         'summary' => 'Yesterday at the City Council meeting, the Council heard the following items:',
         'status' => 'published',
@@ -216,30 +287,7 @@ it('continues bulk rehydration when one rss article fails', function () {
         'canonical_url' => 'https://example.com/recoverable',
     ]);
 
-    ArticleBody::create([
-        'article_id' => $completeArticle->id,
-        'raw_html' => '<main>'.str_repeat('Completed article body. ', 30).'</main>',
-        'raw_text' => str_repeat('Completed article body. ', 30),
-        'cleaned_text' => str_repeat('Completed article body. ', 30),
-        'lang' => 'en',
-        'extracted_at' => now(),
-        'extraction_status' => 'success',
-    ]);
-
-    foreach ([$completeArticle, $firstArticle, $secondArticle] as $article) {
-        if ($article->is($completeArticle)) {
-            ArticleSource::create([
-                'city_id' => $city->id,
-                'article_id' => $article->id,
-                'source_url' => $article->canonical_url,
-                'source_type' => 'rss',
-                'source_uid' => 'guid-'.$article->id,
-                'accessed_at' => now(),
-            ]);
-
-            continue;
-        }
-
+    foreach ([$firstArticle, $secondArticle] as $article) {
         ArticleBody::create([
             'article_id' => $article->id,
             'raw_html' => 'Yesterday at the City Council meeting, the Council heard the following items:',
@@ -280,11 +328,10 @@ it('continues bulk rehydration when one rss article fails', function () {
             'renderer' => 'http',
         ]);
 
-    Queue::fake();
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
 
     $this->artisan('articles:rehydrate-rss-bodies')
-        ->expectsOutputToContain('Rehydrated 1 of 2 candidate article(s). Skipped 1 already complete. 1 could not be hydrated.')
+        ->expectsOutputToContain('Repaired 1 of 2 candidate article(s). 1 rehydrated from canonical HTML; 1 failed.')
         ->assertExitCode(0);
 
     Queue::assertPushed(EnrichArticle::class, function (EnrichArticle $job) use ($secondArticle) {
