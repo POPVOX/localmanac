@@ -48,7 +48,8 @@
                                 return;
                             }
 
-                            container.scrollTop = Math.max(latestAssistant.offsetTop - 8, 0);
+                            latestAssistant.scrollIntoView({ block: 'start', inline: 'nearest' });
+                            container.scrollTop = Math.max(container.scrollTop - 8, 0);
                         });
                     },
                     queueScrollToBottom() {
@@ -66,7 +67,7 @@
                         });
                     },
                 }"
-                x-init="scrollToBottom()"
+                x-init="if (hasMessages) { queueScrollToLatestAssistantStart() }"
                 class="flex flex-col"
             >
 
@@ -191,7 +192,7 @@
                 <div class="border-t border-zinc-100 px-6 pb-5 pt-4">
                     <form
                         wire:submit.prevent="ask"
-                        x-on:submit="pendingQuestion = ($refs.chatComposer?.querySelector('textarea')?.value ?? '').trim(); if (pendingQuestion) { hasMessages = true; setTimeout(() => { const input = $refs.chatComposer?.querySelector('textarea'); if (input) { input.value = ''; } }, 0); } queueScrollToBottom();"
+                        x-on:submit="pendingQuestion = ($refs.chatComposer?.querySelector('textarea')?.value ?? '').trim(); if (pendingQuestion) { hasMessages = true; setTimeout(() => { const input = $refs.chatComposer?.querySelector('textarea'); if (input) { input.value = ''; } }, 0); }"
                         class="space-y-3"
                     >
                         <flux:composer
