@@ -1,22 +1,20 @@
 <?php
 
+use App\Jobs\EnrichArticle;
 use App\Models\Article;
-use App\Models\ArticleAnalysis;
 use App\Models\ArticleBody;
 use App\Models\ArticleExplainer;
 use App\Models\ArticleSource;
 use App\Models\City;
 use App\Models\Scraper;
-use App\Services\Extraction\Enricher;
 use App\Services\Ingestion\RssCanonicalBodyHydrator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
 it('rehydrates teaser-only rss articles from their canonical page', function () {
     config()->set('enrichment.enabled', true);
-    config()->set('enrichment.model', 'test-model');
-    config()->set('enrichment.prompt_version', 'test-prompt');
 
     $city = City::create([
         'name' => 'Wichita',
@@ -90,57 +88,8 @@ it('rehydrates teaser-only rss articles from their canonical page', function () 
             'renderer' => 'http',
         ]);
 
+    Queue::fake();
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
-    app()->instance(Enricher::class, new class extends Enricher
-    {
-        public function __construct() {}
-
-        public function enrich(Article $article): array
-        {
-            return [
-                'analysis' => [
-                    'dimensions' => [
-                        'comprehensibility' => 0.8,
-                        'orientation' => 0.7,
-                        'representation' => 0.6,
-                        'agency' => 0.5,
-                        'relevance' => 0.7,
-                        'timeliness' => 0.8,
-                    ],
-                    'justifications' => [
-                        'comprehensibility' => 'Clear summary.',
-                        'orientation' => 'Explains the council actions.',
-                        'representation' => 'Includes affected actions.',
-                        'agency' => 'No immediate action requested.',
-                        'relevance' => 'Covers city council approvals.',
-                        'timeliness' => 'Recent recap.',
-                    ],
-                    'opportunities' => [],
-                    'confidence' => 0.82,
-                ],
-                'enrichment' => [
-                    'people' => [],
-                    'organizations' => [],
-                    'locations' => [],
-                    'keywords' => [],
-                    'issue_areas' => [],
-                    'confidence' => 0.75,
-                ],
-                'process_timeline' => [
-                    'items' => [],
-                    'current_key' => null,
-                ],
-                'explainer' => [
-                    'whats_happening' => 'The council approved most consent-agenda items, signed off on bids and contracts, and moved forward public improvement requests.',
-                    'why_it_matters' => 'These votes advance city contracts and public works decisions that affect Wichita projects and services.',
-                    'key_details' => null,
-                    'what_to_watch' => null,
-                    'evidence' => null,
-                ],
-                'confidence' => 0.8,
-            ];
-        }
-    });
 
     $this->artisan('articles:rehydrate-rss-bodies --limit=1')
         ->expectsOutputToContain('Rehydrated 1 of 1 article(s).')
@@ -153,23 +102,13 @@ it('rehydrates teaser-only rss articles from their canonical page', function () 
         ->toContain('Consent Agenda approved 7-0')
         ->toContain('Board of Bids and Contracts approved 7-0');
 
-    expect($article->summary)
-        ->toBe('The council approved most consent-agenda items, signed off on bids and contracts, and moved forward public improvement requests.');
-
-    expect($article->explainer?->whats_happening)
-        ->toBe('The council approved most consent-agenda items, signed off on bids and contracts, and moved forward public improvement requests.')
-        ->and($article->explainer?->why_it_matters)
-        ->toBe('These votes advance city contracts and public works decisions that affect Wichita projects and services.')
-        ->and($article->explainer?->source)
-        ->toBe('analysis_llm');
-
-    expect(ArticleAnalysis::query()->where('article_id', $article->id)->exists())->toBeTrue();
+    Queue::assertPushed(EnrichArticle::class, function (EnrichArticle $job) use ($article) {
+        return $job->articleId === $article->id;
+    });
 });
 
 it('reruns ai enrichment for a targeted rss article even when hydration is no longer needed', function () {
     config()->set('enrichment.enabled', true);
-    config()->set('enrichment.model', 'test-model');
-    config()->set('enrichment.prompt_version', 'test-prompt');
 
     $city = City::create([
         'name' => 'Wichita',
@@ -219,69 +158,14 @@ it('reruns ai enrichment for a targeted rss article even when hydration is no lo
         ->andReturnFalse();
     $hydrator->shouldReceive('hydrate')->never();
 
+    Queue::fake();
     app()->instance(RssCanonicalBodyHydrator::class, $hydrator);
-    app()->instance(Enricher::class, new class extends Enricher
-    {
-        public function __construct() {}
-
-        public function enrich(Article $article): array
-        {
-            return [
-                'analysis' => [
-                    'dimensions' => [
-                        'comprehensibility' => 0.8,
-                        'orientation' => 0.7,
-                        'representation' => 0.6,
-                        'agency' => 0.5,
-                        'relevance' => 0.7,
-                        'timeliness' => 0.8,
-                    ],
-                    'justifications' => [
-                        'comprehensibility' => 'Clear summary.',
-                        'orientation' => 'Explains the council actions.',
-                        'representation' => 'Includes affected actions.',
-                        'agency' => 'No immediate action requested.',
-                        'relevance' => 'Covers city council approvals.',
-                        'timeliness' => 'Recent recap.',
-                    ],
-                    'opportunities' => [],
-                    'confidence' => 0.82,
-                ],
-                'enrichment' => [
-                    'people' => [],
-                    'organizations' => [],
-                    'locations' => [],
-                    'keywords' => [],
-                    'issue_areas' => [],
-                    'confidence' => 0.75,
-                ],
-                'process_timeline' => [
-                    'items' => [],
-                    'current_key' => null,
-                ],
-                'explainer' => [
-                    'whats_happening' => 'The council approved bids and contract items during the March 10 meeting.',
-                    'why_it_matters' => 'Those votes move city purchasing and project work forward.',
-                    'key_details' => null,
-                    'what_to_watch' => null,
-                    'evidence' => null,
-                ],
-                'confidence' => 0.8,
-            ];
-        }
-    });
 
     $this->artisan("articles:rehydrate-rss-bodies --article={$article->id}")
         ->expectsOutputToContain('Rehydrated 1 of 1 article(s).')
         ->assertExitCode(0);
 
-    $article->refresh();
-    $article->load('explainer');
-
-    expect($article->summary)
-        ->toBe('The council approved bids and contract items during the March 10 meeting.')
-        ->and($article->explainer?->whats_happening)
-        ->toBe('The council approved bids and contract items during the March 10 meeting.')
-        ->and($article->explainer?->why_it_matters)
-        ->toBe('Those votes move city purchasing and project work forward.');
+    Queue::assertPushed(EnrichArticle::class, function (EnrichArticle $job) use ($article) {
+        return $job->articleId === $article->id;
+    });
 });

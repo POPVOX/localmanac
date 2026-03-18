@@ -94,7 +94,7 @@ class ArticlesRehydrateRssBodies extends Command
 
         if (! $hydrator->shouldHydrate($storedCleanedText, $storedSummary, $storedRawHtml, $sourceUrl)) {
             if ($refreshAiOnly && config('enrichment.enabled', true)) {
-                EnrichArticleJob::dispatchSync($article->id);
+                EnrichArticleJob::dispatch($article->id);
 
                 return true;
             }
@@ -143,7 +143,7 @@ class ArticlesRehydrateRssBodies extends Command
         $article->load('body');
 
         if (config('enrichment.enabled', true)) {
-            EnrichArticleJob::dispatchSync($article->id);
+            EnrichArticleJob::dispatch($article->id);
 
             return true;
         }
