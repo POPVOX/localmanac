@@ -21,6 +21,9 @@ class ArticleAnalysis extends Model
         'llm_scores',
         'final_scores',
         'civic_relevance_score',
+        'coverage_scope',
+        'local_relevance_score',
+        'locality_reason',
         'model',
         'prompt_version',
         'confidence',
@@ -35,6 +38,7 @@ class ArticleAnalysis extends Model
         'llm_scores' => 'array',
         'final_scores' => 'array',
         'civic_relevance_score' => 'decimal:3',
+        'local_relevance_score' => 'decimal:3',
         'confidence' => 'decimal:3',
         'last_scored_at' => 'datetime',
     ];

@@ -24,6 +24,9 @@ class Enricher
      *   analysis: array{
      *     dimensions: array{comprehensibility: float, orientation: float, representation: float, agency: float, relevance: float, timeliness: float},
      *     justifications: array{comprehensibility: string, orientation: string, representation: string, agency: string, relevance: string, timeliness: string},
+     *     coverage_scope: 'local'|'regional'|'statewide'|'national'|'unclear'|null,
+     *     local_relevance_score: float|null,
+     *     locality_reason: string|null,
      *     opportunities: array<int, array{type: string, date: string|null, time: string|null, location: string|null, url: string|null, description: string, evidence: array<int, array{quote: string, start?: int, end?: int}>}>,
      *     confidence: float
      *   },
@@ -211,6 +214,9 @@ class Enricher
      *   analysis: array{
      *     dimensions: array{comprehensibility: float, orientation: float, representation: float, agency: float, relevance: float, timeliness: float},
      *     justifications: array{comprehensibility: string, orientation: string, representation: string, agency: string, relevance: string, timeliness: string},
+     *     coverage_scope: 'local'|'regional'|'statewide'|'national'|'unclear'|null,
+     *     local_relevance_score: float|null,
+     *     locality_reason: string|null,
      *     opportunities: array<int, array{type: string, date: string|null, time: string|null, location: string|null, url: string|null, description: string, evidence: array<int, array{quote: string, start?: int, end?: int}>}>,
      *     confidence: float
      *   },
@@ -256,6 +262,9 @@ class Enricher
                     'relevance' => '',
                     'timeliness' => '',
                 ],
+                'coverage_scope' => null,
+                'local_relevance_score' => null,
+                'locality_reason' => null,
                 'opportunities' => [],
                 'confidence' => 0.0,
             ],
@@ -324,12 +333,19 @@ Provide a short evidence-based justification sentence per dimension. If unclear,
 Scoring anchors: 0.0 not present, 0.3 weak, 0.6 clear, 0.9 strong with specifics.
 If the text contains civic/process language or dates, you must not return 0.0 for all dimensions.
 
-2) OPPORTUNITIES
+2) LOCALITY
+Classify the article's geographic scope relative to the configured city.
+Return coverage_scope as one of: local, regional, statewide, national, unclear.
+Return local_relevance_score from 0.0 to 1.0 based on how directly the article concerns residents of the configured city.
+Return locality_reason as a short evidence-based explanation.
+Judge the article itself, not the publisher. A national story carried by a local station is still national if the text is not about the configured city.
+
+3) OPPORTUNITIES
 Extract explicit civic participation opportunities.
 Each includes: type (meeting|public_comment|deadline|application|other), date (YYYY-MM-DD or null), time (HH:MM or null), location (or null), url (or null), description, evidence.
 Return an empty array if none. Do not invent.
 
-3) PROCESS TIMELINE
+4) PROCESS TIMELINE
 Return process_timeline with items and current_key.
 Each item includes: key (snake_case), label, date (YYYY-MM-DD or null), status (completed|current|upcoming|unknown), badge_text (or null), note (or null), evidence.
 Only include explicitly mentioned steps. Do not infer.
@@ -484,6 +500,9 @@ PROMPT;
      *   analysis: array{
      *     dimensions: array{comprehensibility: float, orientation: float, representation: float, agency: float, relevance: float, timeliness: float},
      *     justifications: array{comprehensibility: string, orientation: string, representation: string, agency: string, relevance: string, timeliness: string},
+     *     coverage_scope: 'local'|'regional'|'statewide'|'national'|'unclear'|null,
+     *     local_relevance_score: float|null,
+     *     locality_reason: string|null,
      *     opportunities: array<int, array{type: string, date: string|null, time: string|null, location: string|null, url: string|null, description: string, evidence: array<int, array{quote: string, start?: int, end?: int}>}>,
      *     confidence: float
      *   },
@@ -646,6 +665,9 @@ PROMPT;
      * @return array{
      *   dimensions: array{comprehensibility: float, orientation: float, representation: float, agency: float, relevance: float, timeliness: float},
      *   justifications: array{comprehensibility: string, orientation: string, representation: string, agency: string, relevance: string, timeliness: string},
+     *   coverage_scope: 'local'|'regional'|'statewide'|'national'|'unclear'|null,
+     *   local_relevance_score: float|null,
+     *   locality_reason: string|null,
      *   opportunities: array<int, array{type: string, date: string|null, time: string|null, location: string|null, url: string|null, description: string, evidence: array<int, array{quote: string, start?: int, end?: int}>}>,
      *   confidence: float
      * }
@@ -691,9 +713,27 @@ PROMPT;
         return [
             'dimensions' => $normDimensions,
             'justifications' => $normJustifications,
+            'coverage_scope' => $this->normalizeCoverageScope($analysis['coverage_scope'] ?? null),
+            'local_relevance_score' => $this->clampNullableConfidence($analysis['local_relevance_score'] ?? null),
+            'locality_reason' => $this->stringValue($analysis['locality_reason'] ?? null),
             'opportunities' => $normOpportunities,
             'confidence' => $confidence,
         ];
+    }
+
+    private function normalizeCoverageScope(mixed $value): ?string
+    {
+        $scope = $this->stringValue($value);
+
+        if ($scope === null) {
+            return null;
+        }
+
+        $scope = strtolower($scope);
+
+        return in_array($scope, ['local', 'regional', 'statewide', 'national', 'unclear'], true)
+            ? $scope
+            : null;
     }
 
     /**
@@ -965,5 +1005,18 @@ PROMPT;
         $confidence = is_numeric($value) ? (float) $value : 0.0;
 
         return max(0.0, min(1.0, $confidence));
+    }
+
+    private function clampNullableConfidence(mixed $value): ?float
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        return $this->clampConfidence($value);
     }
 }

@@ -27,6 +27,8 @@ class Dashboard extends Component
 
     private const ARTICLE_PAGE_NAME = 'articles-page';
 
+    private const NATIONAL_STORY_LOCAL_RELEVANCE_MIN = 0.6;
+
     public string $question = '';
 
     /**
@@ -269,7 +271,7 @@ class Dashboard extends Component
 
     private function recentArticles(?City $city): LengthAwarePaginator
     {
-        return $this->applyArticleFilters($this->articleQuery($city))
+        return $this->applyRecentFeedFilters($this->applyArticleFilters($this->articleQuery($city)))
             ->with($this->articleRelations())
             ->orderByDesc(DB::raw('COALESCE(published_at, created_at)'))
             ->paginate(self::ARTICLE_RESULT_LIMIT, ['*'], self::ARTICLE_PAGE_NAME);
@@ -393,6 +395,19 @@ class Dashboard extends Component
         }
 
         return $query;
+    }
+
+    private function applyRecentFeedFilters(Builder $query): Builder
+    {
+        return $query->where(function (Builder $builder): void {
+            $builder->whereDoesntHave('analysis')
+                ->orWhereHas('analysis', function (Builder $analysisQuery): void {
+                    $analysisQuery->whereNull('coverage_scope')
+                        ->orWhere('coverage_scope', '!=', 'national')
+                        ->orWhereNull('local_relevance_score')
+                        ->orWhere('local_relevance_score', '>=', self::NATIONAL_STORY_LOCAL_RELEVANCE_MIN);
+                });
+        });
     }
 
     private function countArticlesForDate(Builder $baseQuery, string $timezone): int

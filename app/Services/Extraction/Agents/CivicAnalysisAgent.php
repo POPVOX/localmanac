@@ -46,6 +46,15 @@ class CivicAnalysisAgent implements Agent, HasStructuredOutput
                 'relevance' => $schema->string()->required(),
                 'timeliness' => $schema->string()->required(),
             ])->withoutAdditionalProperties()->required(),
+            'coverage_scope' => $schema
+                ->string()
+                ->enum(['local', 'regional', 'statewide', 'national', 'unclear'])
+                ->nullable()
+                ->required(),
+            'local_relevance_score' => $this->confidenceSchema($schema)
+                ->nullable()
+                ->required(),
+            'locality_reason' => $schema->string()->nullable()->required(),
             'opportunities' => $schema->array()->items(
                 $schema->object([
                     'type' => $schema

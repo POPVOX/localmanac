@@ -2,6 +2,7 @@
 
 use App\Livewire\Dashboard;
 use App\Models\Article;
+use App\Models\ArticleAnalysis;
 use App\Models\ArticleBody;
 use App\Models\ArticleIssueArea;
 use App\Models\City;
@@ -232,6 +233,102 @@ it('paginates dashboard feed results', function () {
         ->assertDontSee('Feed Entry 11');
 });
 
+it('hides clearly national stories from the default dashboard feed while keeping local and unanalyzed stories', function () {
+    config()->set('scout.driver', 'collection');
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $national = Article::create([
+        'city_id' => $city->id,
+        'title' => 'KWCH National Policy Update',
+        'summary' => 'National politics roundup.',
+        'status' => 'published',
+        'content_type' => 'html',
+        'published_at' => now()->subMinute(),
+    ]);
+
+    ArticleAnalysis::create([
+        'article_id' => $national->id,
+        'score_version' => 'crf_v1',
+        'status' => 'llm_done',
+        'coverage_scope' => 'national',
+        'local_relevance_score' => 0.2,
+        'locality_reason' => 'This article is not about Wichita.',
+    ]);
+
+    $local = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Wichita Water Main Project',
+        'summary' => 'City construction update.',
+        'status' => 'published',
+        'content_type' => 'html',
+        'published_at' => now()->subMinutes(2),
+    ]);
+
+    ArticleAnalysis::create([
+        'article_id' => $local->id,
+        'score_version' => 'crf_v1',
+        'status' => 'llm_done',
+        'coverage_scope' => 'local',
+        'local_relevance_score' => 0.95,
+        'locality_reason' => 'The project affects Wichita residents directly.',
+    ]);
+
+    Article::create([
+        'city_id' => $city->id,
+        'title' => 'Unanalyzed Neighborhood Notice',
+        'summary' => 'Still visible until classified.',
+        'status' => 'published',
+        'content_type' => 'html',
+        'published_at' => now()->subMinutes(3),
+    ]);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->assertDontSee('KWCH National Policy Update')
+        ->assertSee('Wichita Water Main Project')
+        ->assertSee('Unanalyzed Neighborhood Notice');
+});
+
+it('still returns clearly national stories in dashboard search results', function () {
+    config()->set('scout.driver', 'collection');
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $national = Article::create([
+        'city_id' => $city->id,
+        'title' => 'KWCH National Policy Update',
+        'summary' => 'National politics roundup.',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::factory()->create([
+        'article_id' => $national->id,
+        'cleaned_text' => 'KWCH national policy update with federal budget details.',
+    ]);
+
+    ArticleAnalysis::create([
+        'article_id' => $national->id,
+        'score_version' => 'crf_v1',
+        'status' => 'llm_done',
+        'coverage_scope' => 'national',
+        'local_relevance_score' => 0.2,
+        'locality_reason' => 'This article is not about Wichita.',
+    ]);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->set('articleSearch', 'federal budget details')
+        ->assertSee('KWCH National Policy Update');
+});
+
 it('renders dashboard feed dates as absolute labels', function () {
     config()->set('scout.driver', 'collection');
 
@@ -300,11 +397,14 @@ it('renders upcoming events on the dashboard when they exist', function () {
         'timezone' => 'America/Chicago',
     ]);
 
+    $startsAt = Carbon::now('America/Chicago')->addDays(2)->setTime(18, 0);
+    $endsAt = Carbon::now('America/Chicago')->addDays(2)->setTime(19, 0);
+
     Event::factory()->create([
         'city_id' => $city->id,
         'title' => 'Board Meeting',
-        'starts_at' => Carbon::parse('2026-03-18 18:00:00', 'America/Chicago')->utc(),
-        'ends_at' => Carbon::parse('2026-03-18 19:00:00', 'America/Chicago')->utc(),
+        'starts_at' => $startsAt->utc(),
+        'ends_at' => $endsAt->utc(),
         'all_day' => false,
         'event_url' => 'https://events.example.com/board-meeting',
     ]);
@@ -312,7 +412,7 @@ it('renders upcoming events on the dashboard when they exist', function () {
     Livewire::test(Dashboard::class)
         ->set('cityId', $city->id)
         ->assertSee('Board Meeting')
-        ->assertSee('Mar 18')
+        ->assertSee($startsAt->format('M j'))
         ->assertSee('6:00 PM - 7:00 PM')
         ->assertSee('href="https://events.example.com/board-meeting"', false)
         ->assertSee('target="_blank"', false)

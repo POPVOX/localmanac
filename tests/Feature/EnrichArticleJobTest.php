@@ -73,6 +73,9 @@ it('writes claims and projections when enrichment job runs', function () {
                 ScoreDimensions::COMPREHENSIBILITY => 'Clear writing.',
                 ScoreDimensions::AGENCY => 'Includes participation steps.',
             ],
+            'coverage_scope' => 'national',
+            'local_relevance_score' => 0.25,
+            'locality_reason' => 'The text concerns a national policy debate rather than city-specific activity.',
             'opportunities' => [],
             'confidence' => 0.81,
         ],
@@ -156,7 +159,10 @@ it('writes claims and projections when enrichment job runs', function () {
 
     expect($analysis)->not->toBeNull()
         ->and($analysis?->status)->toBe('llm_done')
-        ->and($analysis?->llm_scores)->toBe($analysisPayload);
+        ->and($analysis?->llm_scores)->toBe($analysisPayload)
+        ->and($analysis?->coverage_scope)->toBe('national')
+        ->and((float) $analysis?->local_relevance_score)->toBe(0.25)
+        ->and($analysis?->locality_reason)->toBe('The text concerns a national policy debate rather than city-specific activity.');
 
     expect((float) $analysis?->civic_relevance_score)
         ->toBeGreaterThanOrEqual($expectedScore - 0.001)

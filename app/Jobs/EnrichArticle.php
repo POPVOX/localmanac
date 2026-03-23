@@ -141,6 +141,15 @@ class EnrichArticle implements ShouldQueue
                 'llm_scores' => $analysisPayload,
                 'final_scores' => $analysisPayload,
                 'civic_relevance_score' => $calculator->compute($dimensions),
+                'coverage_scope' => is_string($analysis['coverage_scope'] ?? null)
+                    ? $analysis['coverage_scope']
+                    : null,
+                'local_relevance_score' => is_numeric($analysis['local_relevance_score'] ?? null)
+                    ? (float) $analysis['local_relevance_score']
+                    : null,
+                'locality_reason' => is_string($analysis['locality_reason'] ?? null)
+                    ? trim($analysis['locality_reason'])
+                    : null,
                 'model' => $model !== '' ? $model : null,
                 'prompt_version' => $promptVersion !== '' ? $promptVersion : null,
                 'confidence' => is_numeric($confidence) ? (float) $confidence : null,

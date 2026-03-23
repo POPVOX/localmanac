@@ -52,6 +52,9 @@ it('returns civic analysis and timeline when enrichment call fails', function ()
                 'relevance' => 'Civic process.',
                 'timeliness' => 'Upcoming date.',
             ],
+            'coverage_scope' => 'local',
+            'local_relevance_score' => 1.2,
+            'locality_reason' => 'The article is specifically about the city council in Test City.',
             'opportunities' => [
                 [
                     'type' => 'meeting',
@@ -99,10 +102,88 @@ it('returns civic analysis and timeline when enrichment call fails', function ()
     $payload = app(Enricher::class)->enrich($article->fresh());
 
     expect($payload['analysis']['dimensions']['agency'])->toBe(0.7)
+        ->and($payload['analysis']['coverage_scope'])->toBe('local')
+        ->and($payload['analysis']['local_relevance_score'])->toBe(1.0)
+        ->and($payload['analysis']['locality_reason'])->toBe('The article is specifically about the city council in Test City.')
         ->and($payload['process_timeline']['current_key'])->toBe('public_comment')
         ->and($payload['enrichment']['people'])->toBe([])
         ->and($payload['enrichment']['issue_areas'])->toBe([])
         ->and($payload['confidence'])->toBe(0.82);
+});
+
+it('defaults locality fields safely when civic analysis omits them', function () {
+    config()->set('enrichment.enabled', true);
+
+    $city = City::create([
+        'name' => 'Default City',
+        'slug' => 'default-city',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Parks update',
+        'status' => 'published',
+        'content_type' => 'html',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => str_repeat('Parks board update. ', 40),
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    CivicAnalysisAgent::fake([
+        [
+            'analysis' => [
+                'dimensions' => [
+                    'comprehensibility' => 0.5,
+                    'orientation' => 0.5,
+                    'representation' => 0.4,
+                    'agency' => 0.4,
+                    'relevance' => 0.6,
+                    'timeliness' => 0.6,
+                ],
+                'justifications' => [
+                    'comprehensibility' => 'Clear.',
+                    'orientation' => 'Concise.',
+                    'representation' => 'Names the board.',
+                    'agency' => 'Some context.',
+                    'relevance' => 'Local board update.',
+                    'timeliness' => 'Recent item.',
+                ],
+                'opportunities' => [],
+                'confidence' => 0.7,
+            ],
+            'process_timeline' => [
+                'items' => [],
+                'current_key' => null,
+            ],
+            'confidence' => 0.7,
+        ],
+    ]);
+    EntityEnrichmentAgent::fake([
+        [
+            'enrichment' => [
+                'people' => [],
+                'organizations' => [],
+                'locations' => [],
+                'keywords' => [],
+                'issue_areas' => [],
+                'confidence' => 0.6,
+            ],
+            'confidence' => 0.6,
+        ],
+    ]);
+    ExplainerAgent::fake([
+        ['explainer' => []],
+    ]);
+
+    $payload = app(Enricher::class)->enrich($article->fresh());
+
+    expect($payload['analysis']['coverage_scope'])->toBeNull()
+        ->and($payload['analysis']['local_relevance_score'])->toBeNull()
+        ->and($payload['analysis']['locality_reason'])->toBeNull();
 });
 
 it('merges enrichment results when the entity call succeeds', function () {
