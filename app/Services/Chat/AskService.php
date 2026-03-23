@@ -7,6 +7,7 @@ use App\Models\City;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -67,14 +68,21 @@ class AskService
             ];
         }
 
+        $sourcesSuppressed = false;
+
         if (! $this->shouldSurfaceSources($confidence, $citations)) {
+            $sourcesSuppressed = $citations !== [] || $resources !== [];
             $citations = [];
             $resources = [];
         }
 
         if ($answerIsNoAnswer || $answer === '') {
+            $this->logAnswerDiagnostics($question, $city, $sources, $confidence, 'fallback', $sourcesSuppressed);
+
             return $this->fallbackResponse($city, $sources, $question);
         }
+
+        $this->logAnswerDiagnostics($question, $city, $sources, $confidence, 'answer', $sourcesSuppressed);
 
         return [
             'answer' => $answer,
@@ -163,12 +171,16 @@ class AskService
             ];
         }
 
+        $sourcesSuppressed = false;
+
         if (! $this->shouldSurfaceSources($confidence, $citations)) {
+            $sourcesSuppressed = $citations !== [] || $resources !== [];
             $citations = [];
             $resources = [];
         }
 
         if ($answerIsNoAnswer || $answer === '') {
+            $this->logAnswerDiagnostics($question, $city, $sources, $confidence, 'fallback', $sourcesSuppressed);
             $fallback = $this->fallbackResponse($city, $sources, $question);
 
             return array_merge($fallback, [
@@ -177,6 +189,8 @@ class AskService
                     : $conversationId,
             ]);
         }
+
+        $this->logAnswerDiagnostics($question, $city, $sources, $confidence, 'answer', $sourcesSuppressed);
 
         return [
             'answer' => $answer,
@@ -548,6 +562,76 @@ class AskService
         }
 
         return max(0.0, min(1.0, (float) $confidence));
+    }
+
+    /**
+     * @param  Collection<int, \App\Models\ChatSource>  $sources
+     */
+    private function logAnswerDiagnostics(
+        string $question,
+        City $city,
+        Collection $sources,
+        float $confidence,
+        string $outcome,
+        bool $sourcesSuppressed,
+    ): void {
+        if (! $this->isProceduralQuestion($question) && ! $sourcesSuppressed && $outcome !== 'fallback') {
+            return;
+        }
+
+        Log::info('chat.answer.diagnostics', [
+            'city_id' => $city->id,
+            'city_slug' => $city->slug,
+            'question' => $question,
+            'procedural_question' => $this->isProceduralQuestion($question),
+            'outcome' => $outcome,
+            'confidence' => $confidence,
+            'sources_suppressed' => $sourcesSuppressed,
+            'selected_sources' => $sources
+                ->take(8)
+                ->map(fn ($source): array => [
+                    'id' => (int) $source->id,
+                    'name' => (string) $source->name,
+                    'source_url' => (string) $source->source_url,
+                ])
+                ->values()
+                ->all(),
+        ]);
+    }
+
+    private function isProceduralQuestion(string $question): bool
+    {
+        $question = mb_strtolower(trim($question));
+
+        if ($question === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(how do i|how can i|where do i|who do i call|what do i need)\b/i', $question) === 1) {
+            return true;
+        }
+
+        foreach ([
+            'permit',
+            'permits',
+            'license',
+            'licenses',
+            'apply',
+            'application',
+            'demolition',
+            'inspection',
+            'contractor',
+            'historic',
+            'review',
+            'approval',
+            'portal',
+        ] as $signal) {
+            if (str_contains($question, $signal)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function isNoAnswerMessage(string $answer): bool

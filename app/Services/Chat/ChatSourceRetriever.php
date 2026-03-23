@@ -426,13 +426,14 @@ class ChatSourceRetriever
     private function rerankRows(Collection $rows, string $question): Collection
     {
         $terms = $this->keywordTerms($question);
+        $isProceduralQuestion = $this->isProceduralQuestion($question);
 
         if ($terms === [] || $rows->isEmpty()) {
             return $rows;
         }
 
         return $rows
-            ->map(function (array $row) use ($terms, $question) {
+            ->map(function (array $row) use ($terms, $question, $isProceduralQuestion) {
                 $chunk = (string) ($row['chunk'] ?? '');
                 $title = (string) ($row['page_title'] ?? $row['source_name'] ?? '');
                 $url = (string) ($row['page_url'] ?? '');
@@ -448,6 +449,11 @@ class ChatSourceRetriever
                 // Extra boost when domain words appear in key operational phrasing.
                 if ($this->hasOperationalSignal($question, $chunk)) {
                     $boostScore += 3;
+                }
+
+                if ($isProceduralQuestion) {
+                    $boostScore += $this->proceduralBoostScore($question, $terms, $row);
+                    $boostScore -= $this->genericPagePenalty($row);
                 }
 
                 $baseScore = (int) ($row['score'] ?? 1);
@@ -532,6 +538,175 @@ class ChatSourceRetriever
         }
 
         return false;
+    }
+
+    /**
+     * @param  array<int, string>  $terms
+     * @param  array<string, mixed>  $row
+     */
+    private function proceduralBoostScore(string $question, array $terms, array $row): float
+    {
+        $chunk = mb_strtolower((string) ($row['chunk'] ?? ''));
+        $title = mb_strtolower((string) ($row['page_title'] ?? ''));
+        $sourceName = mb_strtolower((string) ($row['source_name'] ?? ''));
+        $url = mb_strtolower((string) ($row['page_url'] ?? ''));
+        $question = mb_strtolower($question);
+        $boost = 0.0;
+
+        $titleMatches = $this->countTermMatches($title.' '.$sourceName, $terms);
+        $urlMatches = $this->countTermMatches($url, $terms);
+        $boost += ($titleMatches * 2.5) + ($urlMatches * 1.5);
+
+        foreach ($this->proceduralSignals() as $signal) {
+            if (str_contains($chunk, $signal)) {
+                $boost += 1.25;
+            }
+
+            if (str_contains($title, $signal) || str_contains($sourceName, $signal)) {
+                $boost += 1.0;
+            }
+        }
+
+        foreach ($this->proceduralPhrases() as $phrase) {
+            if (str_contains($chunk, $phrase)) {
+                $boost += 2.0;
+            }
+        }
+
+        if ($this->countPhraseMatches($terms, $title.' '.$sourceName) > 0) {
+            $boost += 3.0;
+        }
+
+        if ($this->questionAndChunkShareProceduralFocus($question, $chunk, $title.' '.$sourceName.' '.$url)) {
+            $boost += 4.0;
+        }
+
+        return $boost;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function genericPagePenalty(array $row): float
+    {
+        $title = mb_strtolower((string) ($row['page_title'] ?? ''));
+        $sourceName = mb_strtolower((string) ($row['source_name'] ?? ''));
+        $chunk = mb_strtolower((string) ($row['chunk'] ?? ''));
+        $haystack = $title.' '.$sourceName.' '.$chunk;
+        $penalty = 0.0;
+
+        foreach ([
+            'frequently asked questions',
+            'faq',
+            'quick links',
+            'archive center',
+            'news flash',
+            'boards and committees',
+            'all content',
+            'facebook',
+            'twitter',
+            'pinterest',
+            'linkedin',
+            'city government',
+        ] as $signal) {
+            if (str_contains($haystack, $signal)) {
+                $penalty += 4.0;
+            }
+        }
+
+        return $penalty;
+    }
+
+    private function questionAndChunkShareProceduralFocus(string $question, string $chunk, string $context): bool
+    {
+        foreach ([
+            'demolition',
+            'permit',
+            'inspection',
+            'contractor',
+            'historic',
+            'license',
+            'review',
+            'portal',
+            'application',
+            'fee',
+        ] as $focus) {
+            if (str_contains($question, $focus) && (str_contains($chunk, $focus) || str_contains($context, $focus))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isProceduralQuestion(string $question): bool
+    {
+        $question = mb_strtolower(trim($question));
+
+        if ($question === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(how do i|how can i|where do i|who do i call|what do i need)\b/i', $question) === 1) {
+            return true;
+        }
+
+        foreach ($this->proceduralSignals() as $signal) {
+            if (str_contains($question, $signal)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function proceduralSignals(): array
+    {
+        return [
+            'apply',
+            'application',
+            'before you',
+            'required',
+            'must',
+            'contact',
+            'permit',
+            'permits',
+            'review',
+            'inspection',
+            'inspections',
+            'portal',
+            'fee',
+            'fees',
+            'demolition',
+            'contractor',
+            'historic',
+            'approval',
+            'submitted',
+            'submit',
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function proceduralPhrases(): array
+    {
+        return [
+            'step 1',
+            'step 2',
+            'first,',
+            'then,',
+            'before you apply',
+            'before submitting',
+            'you must',
+            'you will need',
+            'submit the application',
+            'apply online',
+            'permit portal',
+        ];
     }
 
     /**

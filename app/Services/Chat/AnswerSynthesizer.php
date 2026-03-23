@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Laravel\Ai\Providers\Tools\WebSearch;
 use Laravel\Ai\Streaming\Events\ProviderToolEvent;
 use Laravel\Ai\Streaming\Events\TextDelta;
@@ -50,11 +51,12 @@ class AnswerSynthesizer
     {
         $eventContext = $this->resolveEventContext($question, $city);
         $seedEvidence = $this->seedEvidence($sources, $question);
+        $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
         $usedSeedAnswer = false;
 
         $agent = StructuredChatAnswerAgent::make(
-            tools: $this->buildTools($city, $sources, $question, $eventContext),
+            tools: $this->buildTools($city, $sources, $question, $eventContext, $seedEvidence),
         );
 
         $response = $agent->prompt(
@@ -122,6 +124,19 @@ class AnswerSynthesizer
             $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
         }
 
+        $this->logRetrievalDiagnostics(
+            question: $question,
+            city: $city,
+            sources: $sources,
+            seedEvidence: $seedEvidence,
+            proceduralContext: $proceduralContext,
+            confidence: $confidence,
+            sourceMode: $sourceMode,
+            citations: $citations,
+            resources: $resources,
+            answer: $answer,
+        );
+
         return [
             'answer' => $answer,
             'citations' => $citations,
@@ -152,11 +167,12 @@ class AnswerSynthesizer
     ): array {
         $eventContext = $this->resolveEventContext($question, $city);
         $seedEvidence = $this->seedEvidence($sources, $question);
+        $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
         $usedSeedAnswer = false;
 
         $agent = StreamingChatAnswerAgent::make(
-            tools: $this->buildTools($city, $sources, $question, $eventContext),
+            tools: $this->buildTools($city, $sources, $question, $eventContext, $seedEvidence),
         );
 
         if ($conversationId) {
@@ -272,6 +288,19 @@ class AnswerSynthesizer
 
         $resources = $this->buildAnswerResources($question, $answer, $citations, $seedEvidence);
 
+        $this->logRetrievalDiagnostics(
+            question: $question,
+            city: $city,
+            sources: $sources,
+            seedEvidence: $seedEvidence,
+            proceduralContext: $proceduralContext,
+            confidence: $confidence,
+            sourceMode: $sourceMode,
+            citations: $citations,
+            resources: $resources,
+            answer: $answer,
+        );
+
         return [
             'answer' => $answer,
             'citations' => $citations,
@@ -289,7 +318,8 @@ class AnswerSynthesizer
     private function structuredPrompt(string $question, City $city, array $seedEvidence = [], array $eventContext = []): string
     {
         $mode = (string) config('chat.retrieval_mode', 'local_then_web');
-        $webEnabled = $this->isWebSearchEnabledForQuestion($question, $eventContext);
+        $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
+        $webEnabled = $this->isWebSearchEnabledForQuestion($question, $eventContext, $proceduralContext);
         $eventIntent = (bool) ($eventContext['intent'] ?? false);
         $eventWindow = $eventContext['window'] ?? null;
 
@@ -329,6 +359,17 @@ class AnswerSynthesizer
             $lines[] = 'Use local tool results first. Use web search only when local results are insufficient.';
         }
 
+        if ((bool) ($proceduralContext['intent'] ?? false)) {
+            $lines[] = '';
+            $lines[] = 'This is a civic how-to or permit-style question.';
+            $lines[] = 'When the evidence supports a process, answer with a short ordered step-by-step list.';
+            $lines[] = 'Prioritize approvals, required documents, submission points, fees, contact points, inspections, and caveats over generic summaries.';
+
+            if ((bool) ($proceduralContext['use_web_fallback'] ?? false)) {
+                $lines[] = 'Local evidence looks weak or generic. Use official-domain web search if needed to find the most specific procedural page.';
+            }
+        }
+
         if ($eventIntent) {
             $lines[] = '';
             $lines[] = 'Use EventSearchTool for local calendar events relevant to the question.';
@@ -361,7 +402,8 @@ class AnswerSynthesizer
     private function streamingPrompt(string $question, City $city, array $seedEvidence = [], array $eventContext = []): string
     {
         $mode = (string) config('chat.retrieval_mode', 'local_then_web');
-        $webEnabled = $this->isWebSearchEnabledForQuestion($question, $eventContext);
+        $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
+        $webEnabled = $this->isWebSearchEnabledForQuestion($question, $eventContext, $proceduralContext);
         $eventIntent = (bool) ($eventContext['intent'] ?? false);
         $eventWindow = $eventContext['window'] ?? null;
 
@@ -394,6 +436,17 @@ class AnswerSynthesizer
         if ($mode === 'local_then_web') {
             $lines[] = '';
             $lines[] = 'Use local tool results first. Use web search only when local results are insufficient.';
+        }
+
+        if ((bool) ($proceduralContext['intent'] ?? false)) {
+            $lines[] = '';
+            $lines[] = 'This is a civic how-to or permit-style question.';
+            $lines[] = 'When the evidence supports a process, answer with a short ordered step-by-step list.';
+            $lines[] = 'Prioritize approvals, required documents, submission points, fees, contact points, inspections, and caveats over generic summaries.';
+
+            if ((bool) ($proceduralContext['use_web_fallback'] ?? false)) {
+                $lines[] = 'Local evidence looks weak or generic. Use official-domain web search if needed to find the most specific procedural page.';
+            }
         }
 
         if ($eventIntent) {
@@ -452,11 +505,13 @@ class AnswerSynthesizer
     /**
      * @param  Collection<int, \App\Models\ChatSource>  $sources
      * @param  array<string, mixed>|null  $eventContext
+     * @param  array<int, array<string, mixed>>  $seedEvidence
      * @return array<int, \Laravel\Ai\Contracts\Tool|\Laravel\Ai\Providers\Tools\ProviderTool>
      */
-    private function buildTools(City $city, Collection $sources, string $question, ?array $eventContext = null): array
+    private function buildTools(City $city, Collection $sources, string $question, ?array $eventContext = null, array $seedEvidence = []): array
     {
         $eventContext = $eventContext ?? $this->resolveEventContext($question, $city);
+        $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
         $tools = [];
 
         if ((bool) config('chat.tools.similarity.enabled', true)) {
@@ -472,12 +527,12 @@ class AnswerSynthesizer
             );
         }
 
-        if ($this->isWebSearchEnabledForQuestion($question, $eventContext)) {
+        if ($this->isWebSearchEnabledForQuestion($question, $eventContext, $proceduralContext)) {
             $webSearch = new WebSearch(
                 maxSearches: (int) config('chat.tools.web_search.max_searches', 2),
             );
 
-            $allowedDomains = $this->webAllowedDomains($sources, $city, $eventContext);
+            $allowedDomains = $this->webAllowedDomains($sources, $city, $eventContext, $proceduralContext);
 
             if ($allowedDomains !== []) {
                 $webSearch->allow($allowedDomains);
@@ -812,9 +867,10 @@ class AnswerSynthesizer
     /**
      * @param  Collection<int, \App\Models\ChatSource>  $sources
      * @param  array<string, mixed>  $eventContext
+     * @param  array<string, mixed>  $proceduralContext
      * @return array<int, string>
      */
-    private function webAllowedDomains(Collection $sources, City $city, array $eventContext): array
+    private function webAllowedDomains(Collection $sources, City $city, array $eventContext, array $proceduralContext = []): array
     {
         if ((bool) ($eventContext['intent'] ?? false)) {
             return $this->eventWebAllowedDomains($city);
@@ -823,19 +879,25 @@ class AnswerSynthesizer
         $mode = (string) config('chat.tools.web_search.allowed_domains_mode', 'source_domains');
         $globalDomains = collect(config('chat.tools.web_search.allowed_domains', []))
             ->filter(fn ($domain): bool => is_string($domain) && trim($domain) !== '')
-            ->map(fn (string $domain): string => trim($domain))
+            ->map(fn (string $domain): string => $this->normalizeDomain($domain))
+            ->filter()
             ->values();
 
         $sourceDomains = $sources
             ->pluck('source_url')
             ->filter(fn ($url): bool => is_string($url) && trim($url) !== '')
-            ->map(function (string $url): ?string {
-                $host = parse_url($url, PHP_URL_HOST);
-
-                return is_string($host) && $host !== '' ? $host : null;
-            })
+            ->map(fn (string $url): string => $this->normalizeDomain($url))
             ->filter()
             ->values();
+
+        if ((bool) ($proceduralContext['use_web_fallback'] ?? false)) {
+            return $sourceDomains
+                ->merge($globalDomains)
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+        }
 
         return match ($mode) {
             'global' => $globalDomains->unique()->values()->all(),
@@ -846,8 +908,9 @@ class AnswerSynthesizer
 
     /**
      * @param  array<string, mixed>  $eventContext
+     * @param  array<string, mixed>  $proceduralContext
      */
-    private function isWebSearchEnabledForQuestion(string $question, array $eventContext = []): bool
+    private function isWebSearchEnabledForQuestion(string $question, array $eventContext = [], array $proceduralContext = []): bool
     {
         if (! (bool) config('chat.tools.web_search.enabled', true)) {
             return false;
@@ -868,7 +931,8 @@ class AnswerSynthesizer
         return match ((string) config('chat.retrieval_mode', 'local_then_web')) {
             'web_only' => true,
             'local_only' => false,
-            default => ! (bool) config('chat.tools.web_search.only_when_fresh_intent', true)
+            default => (bool) ($proceduralContext['use_web_fallback'] ?? false)
+                || ! (bool) config('chat.tools.web_search.only_when_fresh_intent', true)
                 || $this->hasFreshIntent($question),
         };
     }
@@ -896,6 +960,146 @@ class AnswerSynthesizer
         }
 
         return false;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $seedEvidence
+     * @return array{intent: bool, evidence_sparse: bool, evidence_generic: bool, use_web_fallback: bool}
+     */
+    private function resolveProceduralContext(string $question, array $seedEvidence): array
+    {
+        $intent = $this->isProceduralQuestion($question);
+
+        if (! $intent) {
+            return [
+                'intent' => false,
+                'evidence_sparse' => false,
+                'evidence_generic' => false,
+                'use_web_fallback' => false,
+            ];
+        }
+
+        $evidenceSparse = count($seedEvidence) < 2;
+        $evidenceGeneric = $this->evidenceLooksGeneric($seedEvidence);
+        $useWebFallback = match ((string) config('chat.retrieval_mode', 'local_then_web')) {
+            'web_only' => true,
+            'local_only' => false,
+            default => $evidenceSparse || $evidenceGeneric,
+        };
+
+        return [
+            'intent' => true,
+            'evidence_sparse' => $evidenceSparse,
+            'evidence_generic' => $evidenceGeneric,
+            'use_web_fallback' => $useWebFallback,
+        ];
+    }
+
+    private function isProceduralQuestion(string $question): bool
+    {
+        $question = mb_strtolower(trim($question));
+
+        if ($question === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(how do i|how can i|where do i|who do i call|what do i need)\b/i', $question) === 1) {
+            return true;
+        }
+
+        foreach ($this->proceduralSignals() as $signal) {
+            if (str_contains($question, $signal)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $seedEvidence
+     */
+    private function evidenceLooksGeneric(array $seedEvidence): bool
+    {
+        if ($seedEvidence === []) {
+            return true;
+        }
+
+        $proceduralHits = 0;
+        $genericHits = 0;
+
+        foreach ($seedEvidence as $item) {
+            $haystack = mb_strtolower(implode(' ', [
+                (string) ($item['title'] ?? ''),
+                (string) ($item['snippet'] ?? ''),
+                (string) ($item['source_url'] ?? ''),
+            ]));
+
+            foreach ($this->proceduralSignals() as $signal) {
+                if (str_contains($haystack, $signal)) {
+                    $proceduralHits++;
+                }
+            }
+
+            foreach ($this->genericEvidenceSignals() as $signal) {
+                if (str_contains($haystack, $signal)) {
+                    $genericHits++;
+                }
+            }
+        }
+
+        return $proceduralHits < 3 || $genericHits > $proceduralHits;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function proceduralSignals(): array
+    {
+        return [
+            'permit',
+            'permits',
+            'license',
+            'licenses',
+            'apply',
+            'application',
+            'submit',
+            'review',
+            'inspection',
+            'inspections',
+            'contractor',
+            'contractors',
+            'approval',
+            'historic',
+            'demolition',
+            'fee',
+            'fees',
+            'portal',
+            'contact',
+            'required',
+            'must',
+            'before you',
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function genericEvidenceSignals(): array
+    {
+        return [
+            'frequently asked questions',
+            'faq',
+            'quick links',
+            'archive center',
+            'boards and committees',
+            'news flash',
+            'all content',
+            'facebook',
+            'twitter',
+            'pinterest',
+            'linkedin',
+        ];
     }
 
     /**
@@ -1087,6 +1291,8 @@ class AnswerSynthesizer
             return '';
         }
 
+        $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
+
         $prompt = implode("\n", [
             'You are a civic information assistant.',
             'Answer only from the provided evidence excerpts.',
@@ -1106,6 +1312,12 @@ class AnswerSynthesizer
             'Question:',
             $question,
             '',
+            ...((bool) ($proceduralContext['intent'] ?? false) ? [
+                'This is a civic how-to or permit-style question.',
+                'When the evidence supports a process, answer with a short ordered step-by-step list.',
+                'Prioritize approvals, required documents, submission points, fees, contact points, inspections, and caveats over generic summaries.',
+                '',
+            ] : []),
             'Evidence excerpts:',
             json_encode($this->compactSeedEvidence($seedEvidence), JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) ?: '[]',
         ]);
@@ -1399,6 +1611,65 @@ class AnswerSynthesizer
     private function mapUrlForAddress(string $address): string
     {
         return 'https://www.google.com/maps/search/?api=1&query='.rawurlencode($address);
+    }
+
+    /**
+     * @param  Collection<int, \App\Models\ChatSource>  $sources
+     * @param  array<int, array<string, mixed>>  $seedEvidence
+     * @param  array<string, mixed>  $proceduralContext
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $citations
+     * @param  array<int, array{type: string, label: string, value: string, url: string}>  $resources
+     */
+    private function logRetrievalDiagnostics(
+        string $question,
+        City $city,
+        Collection $sources,
+        array $seedEvidence,
+        array $proceduralContext,
+        float $confidence,
+        string $sourceMode,
+        array $citations,
+        array $resources,
+        string $answer,
+    ): void {
+        $shouldLog = (bool) ($proceduralContext['intent'] ?? false)
+            || $this->isNoAnswerMessage($answer)
+            || $answer === '';
+
+        if (! $shouldLog) {
+            return;
+        }
+
+        Log::info('chat.retrieval.diagnostics', [
+            'city_id' => $city->id,
+            'city_slug' => $city->slug,
+            'question' => $question,
+            'procedural_context' => $proceduralContext,
+            'selected_sources' => $sources
+                ->take(8)
+                ->map(fn ($source): array => [
+                    'id' => (int) $source->id,
+                    'name' => (string) $source->name,
+                    'source_url' => (string) $source->source_url,
+                    'priority' => (int) $source->priority,
+                ])
+                ->values()
+                ->all(),
+            'seed_evidence' => collect($seedEvidence)
+                ->take(5)
+                ->map(fn (array $item): array => [
+                    'title' => (string) ($item['title'] ?? 'Source'),
+                    'source_url' => (string) ($item['source_url'] ?? ''),
+                    'score' => (float) ($item['score'] ?? 0.0),
+                ])
+                ->values()
+                ->all(),
+            'source_mode' => $sourceMode,
+            'confidence' => $confidence,
+            'citations_count' => count($citations),
+            'resources_count' => count($resources),
+            'no_answer' => $this->isNoAnswerMessage($answer) || $answer === '',
+        ]);
     }
 
     /**

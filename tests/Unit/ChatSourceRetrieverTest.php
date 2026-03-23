@@ -307,3 +307,73 @@ it('ignores infrastructure pages when retrieving evidence', function () {
         ->and($result['evidence'][0]['source_url'])->toBe('https://www.wichita.gov/m/faq')
         ->and($result['evidence'][0]['snippet'])->toContain('316-268-4421');
 });
+
+it('prioritizes focused procedural permit evidence over generic faq content', function () {
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.fts_enabled', true);
+    config()->set('chat.retrieval_chunk_limit', 8);
+    config()->set('chat.retrieval_neighbor_window', 0);
+    config()->set('chat.retrieval_max_evidence', 8);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $permitSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Building Permit Center',
+        'source_url' => 'https://example.com/demolition-permit',
+        'is_active' => true,
+    ]);
+
+    $faqSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita FAQ',
+        'source_url' => 'https://example.com/faq',
+        'is_active' => true,
+    ]);
+
+    $permitPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $permitSource->id,
+        'url' => 'https://example.com/demolition-permit',
+        'canonical_url' => 'https://example.com/demolition-permit',
+        'title' => 'Demolition Permit Application',
+        'content_text' => 'Before you apply for a demolition permit, submit the required contractor documents and schedule an inspection through the permit portal.',
+        'content_length' => 133,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $permitPage->id,
+        'chunk_index' => 0,
+        'content' => 'Before you apply for a demolition permit, submit the required contractor documents and schedule an inspection through the permit portal.',
+        'content_length' => 133,
+    ]);
+
+    $faqPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $faqSource->id,
+        'url' => 'https://example.com/faq',
+        'canonical_url' => 'https://example.com/faq',
+        'title' => 'Frequently Asked Questions',
+        'content_text' => 'FAQ. All content. Boards and committees. General permit questions are answered here.',
+        'content_length' => 84,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $faqPage->id,
+        'chunk_index' => 0,
+        'content' => 'FAQ. All content. Boards and committees. General permit questions are answered here.',
+        'content_length' => 84,
+    ]);
+
+    $retriever = app(ChatSourceRetriever::class);
+    $result = $retriever->retrieve(
+        collect([$permitSource, $faqSource]),
+        'How do I get a demolition permit and schedule an inspection?'
+    );
+
+    expect($result['evidence'])->not->toBeEmpty()
+        ->and($result['evidence'][0]['source_url'])->toBe('https://example.com/demolition-permit')
+        ->and($result['evidence'][0]['snippet'])->toContain('Before you apply for a demolition permit');
+});

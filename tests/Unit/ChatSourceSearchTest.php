@@ -131,3 +131,42 @@ it('falls back to priority-ordered database sources when scout search fails', fu
             $lowPriority->id,
         ]);
 });
+
+it('prefers procedural permit sources over broad city hubs for permit questions', function () {
+    config()->set('scout.driver', 'collection');
+
+    $city = City::factory()->create();
+
+    $genericHub = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'City Government',
+        'tags' => ['government', 'city'],
+        'priority' => 10,
+    ]);
+
+    $focusedPermitSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Building Permit Center',
+        'source_url' => 'https://example.com/demolition-permit',
+        'tags' => ['permits', 'demolition', 'building', 'historic'],
+        'priority' => 6,
+    ]);
+
+    $secondaryPermitSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Historic Preservation Review',
+        'source_url' => 'https://example.com/historic-demolition-review',
+        'tags' => ['historic', 'demolition', 'review'],
+        'priority' => 5,
+    ]);
+
+    $selector = app(ChatSourceSelector::class);
+    $results = $selector->select($city->id, 'How do I get a demolition permit?', 2);
+
+    expect($results)->toHaveCount(2)
+        ->and($results->pluck('id')->all())->toBe([
+            $focusedPermitSource->id,
+            $secondaryPermitSource->id,
+        ])
+        ->and($results->pluck('id'))->not->toContain($genericHub->id);
+});

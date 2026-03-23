@@ -79,3 +79,43 @@ it('does not add web search when fresh intent is required and the question is no
     expect($hasSimilaritySearch)->toBeTrue();
     expect($hasWebSearch)->toBeFalse();
 });
+
+it('adds web search for evergreen procedural questions when local evidence is weak', function () {
+    config()->set('chat.retrieval_mode', 'local_then_web');
+    config()->set('chat.tools.similarity.enabled', true);
+    config()->set('chat.tools.web_search.enabled', true);
+    config()->set('chat.tools.web_search.only_when_fresh_intent', true);
+    config()->set('chat.tools.web_search.allowed_domains', ['mabcd.com']);
+
+    $city = new City;
+    $city->name = 'Wichita';
+
+    $source = new ChatSource;
+    $source->id = 2;
+    $source->source_url = 'https://www.wichita.gov/958/Licenses-Permits';
+
+    $method = new ReflectionMethod(AnswerSynthesizer::class, 'buildTools');
+    $method->setAccessible(true);
+
+    $tools = collect($method->invoke(
+        app(AnswerSynthesizer::class),
+        $city,
+        collect([$source]),
+        'How do I get a demolition permit?',
+        [],
+        [[
+            'title' => 'Frequently Asked Questions',
+            'source_url' => 'https://www.wichita.gov/m/faq',
+            'snippet' => 'FAQ. All content. Boards and committees.',
+            'score' => 1.0,
+        ]],
+    ));
+
+    $webSearch = $tools->first(fn ($tool): bool => $tool instanceof WebSearch);
+
+    expect($webSearch)->toBeInstanceOf(WebSearch::class)
+        ->and(collect($webSearch->allowedDomains)->sort()->values()->all())->toBe([
+            'mabcd.com',
+            'wichita.gov',
+        ]);
+});

@@ -1,15 +1,17 @@
 <?php
 
 use App\Models\User;
+use Illuminate\Support\Facades\Route;
 use Livewire\Livewire;
 
 test('profile page is displayed', function () {
     $this->actingAs($user = User::factory()->create());
+    expect(Route::has('appearance.edit'))->toBeFalse();
 
     $this->get(route('profile.edit'))
         ->assertOk()
         ->assertDontSee(route('two-factor.show'), false)
-        ->assertDontSee(route('appearance.edit'), false);
+        ->assertDontSee('Appearance');
 });
 
 test('profile information can be updated', function () {

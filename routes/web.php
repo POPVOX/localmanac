@@ -39,8 +39,6 @@ Route::middleware(['auth'])->group(function () {
 
     Route::livewire('settings/profile', 'settings.profile')->name('profile.edit');
     Route::livewire('settings/password', 'settings.password')->name('user-password.edit');
-    Route::livewire('settings/appearance', 'settings.appearance')->name('appearance.edit');
-
     Route::livewire('settings/two-factor', 'settings.two-factor')
         ->middleware(
             when(
