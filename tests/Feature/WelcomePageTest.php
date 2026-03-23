@@ -9,11 +9,13 @@ test('guest sees landing page sections', function () {
     $response
         ->assertOk()
         ->assertSee('LocAlmanac')
-        ->assertSee('Today in your city')
         ->assertSee('Features')
         ->assertSee('How it works')
         ->assertSee('Get local info in one place.')
         ->assertSee('Coverage varies by city and source availability.')
+        ->assertDontSee('What you get')
+        ->assertDontSee('A practical daily civic brief')
+        ->assertDontSee('Today in your city')
         ->assertDontSee('Search')
         ->assertDontSee('Questions');
 

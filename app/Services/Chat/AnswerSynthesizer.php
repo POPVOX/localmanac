@@ -83,10 +83,21 @@ class AnswerSynthesizer
 
         $answer = trim((string) ($structured['answer'] ?? ''));
 
+        if ($answer !== ''
+            && ! $this->isNoAnswerMessage($answer)
+            && ! $this->isRefusalMessage($answer)
+            && ! $this->isAnswerGrounded($question, $answer, $city, $seedEvidence, $citations)
+        ) {
+            $answer = self::NO_ANSWER_MESSAGE;
+        }
+
         if (($answer === '' || $this->isNoAnswerMessage($answer)) && $seedEvidence !== []) {
             $seedAnswer = $this->answerFromSeedEvidence($question, $city, $seedEvidence);
 
-            if ($seedAnswer !== '' && ! $this->isNoAnswerMessage($seedAnswer)) {
+            if ($seedAnswer !== ''
+                && ! $this->isNoAnswerMessage($seedAnswer)
+                && $this->isAnswerGrounded($question, $seedAnswer, $city, $seedEvidence, $seedCitations)
+            ) {
                 $answer = $seedAnswer;
                 $usedSeedAnswer = true;
             }
@@ -247,10 +258,21 @@ class AnswerSynthesizer
             $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
         }
 
+        if ($answer !== ''
+            && ! $this->isNoAnswerMessage($answer)
+            && ! $this->isRefusalMessage($answer)
+            && ! $this->isAnswerGrounded($question, $answer, $city, $seedEvidence, $citations)
+        ) {
+            $answer = self::NO_ANSWER_MESSAGE;
+        }
+
         if (($answer === '' || $this->isNoAnswerMessage($answer)) && $seedEvidence !== []) {
             $seedAnswer = $this->answerFromSeedEvidence($question, $city, $seedEvidence);
 
-            if ($seedAnswer !== '' && ! $this->isNoAnswerMessage($seedAnswer)) {
+            if ($seedAnswer !== ''
+                && ! $this->isNoAnswerMessage($seedAnswer)
+                && $this->isAnswerGrounded($question, $seedAnswer, $city, $seedEvidence, $seedCitations)
+            ) {
                 $answer = $seedAnswer;
                 $usedSeedAnswer = true;
 
@@ -334,6 +356,8 @@ class AnswerSynthesizer
             'If you tell the user to call, show the actual phone number.',
             'If you tell the user to visit a site or GIS tool, show the exact URL.',
             'If you tell the user to go somewhere, show the exact address when the evidence provides one.',
+            'Do not name any department, agency, provider, company, office, or organization unless that exact name appears in retrieved evidence.',
+            'If the evidence supports the action but not the responsible entity, say you could not verify the exact organization from the sources.',
             'If you cannot find enough support, answer exactly: "'.self::NO_ANSWER_MESSAGE.'"',
             'Return concise, helpful, friendly language.',
             'Return JSON with keys: answer, citations, source_mode, confidence.',
@@ -418,6 +442,8 @@ class AnswerSynthesizer
             'If you tell the user to call, show the actual phone number.',
             'If you tell the user to visit a site or GIS tool, show the exact URL.',
             'If you tell the user to go somewhere, show the exact address when the evidence provides one.',
+            'Do not name any department, agency, provider, company, office, or organization unless that exact name appears in retrieved evidence.',
+            'If the evidence supports the action but not the responsible entity, say you could not verify the exact organization from the sources.',
             '',
             'Retrieval mode: '.$mode,
             'Web search available: '.($webEnabled ? 'yes' : 'no'),
@@ -1301,6 +1327,8 @@ class AnswerSynthesizer
             'If you tell the user to call, show the actual phone number.',
             'If you tell the user to visit a site or GIS tool, show the exact URL.',
             'If you tell the user to go somewhere, show the exact address when the evidence provides one.',
+            'Do not name any department, agency, provider, company, office, or organization unless that exact name appears in the evidence excerpts.',
+            'If the evidence supports the action but not the responsible entity, say you could not verify the exact organization from the sources.',
             'If the evidence is insufficient, answer exactly: "'.self::NO_ANSWER_MESSAGE.'"',
             '',
             'City:',
@@ -1875,6 +1903,193 @@ class AnswerSynthesizer
         $answer = preg_replace("/\n{3,}/", "\n\n", $answer) ?? $answer;
 
         return trim($answer);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $seedEvidence
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $citations
+     */
+    private function isAnswerGrounded(string $question, string $answer, City $city, array $seedEvidence, array $citations): bool
+    {
+        if ($answer === '' || $this->isNoAnswerMessage($answer) || $this->isRefusalMessage($answer)) {
+            return true;
+        }
+
+        $supportText = $this->answerSupportText($seedEvidence, $citations);
+        $supportHaystack = $this->normalizeSupportText($supportText);
+        $supportDigits = preg_replace('/\D+/', '', $supportText) ?? '';
+
+        if ($supportHaystack === '') {
+            return false;
+        }
+
+        foreach ($this->extractAnswerUrls($answer) as $url) {
+            if (! str_contains($supportHaystack, $this->normalizeSupportText($url))) {
+                return false;
+            }
+        }
+
+        foreach ($this->extractAnswerPhones($answer) as $digits) {
+            if (! str_contains($supportDigits, $digits)) {
+                return false;
+            }
+        }
+
+        foreach ($this->extractAnswerCurrencyValues($answer) as $value) {
+            if (! str_contains($supportHaystack, $this->normalizeSupportText($value))) {
+                return false;
+            }
+        }
+
+        foreach ($this->extractAnswerAddresses($answer) as $address) {
+            if (! str_contains($supportHaystack, $this->normalizeSupportText($address))) {
+                return false;
+            }
+        }
+
+        if (! $this->requiresStrictEntityGrounding($question, $answer)) {
+            return true;
+        }
+
+        foreach ($this->extractReferredEntities($answer, $city) as $entity) {
+            if (! str_contains($supportHaystack, $this->normalizeSupportText($entity))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $seedEvidence
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $citations
+     */
+    private function answerSupportText(array $seedEvidence, array $citations): string
+    {
+        return collect($seedEvidence)
+            ->map(fn (array $item): string => implode(' ', [
+                (string) ($item['title'] ?? ''),
+                (string) ($item['source_url'] ?? ''),
+                (string) ($item['snippet'] ?? ''),
+            ]))
+            ->merge(
+                collect($citations)->map(fn (array $citation): string => implode(' ', [
+                    (string) ($citation['title'] ?? ''),
+                    (string) ($citation['source_url'] ?? ''),
+                ]))
+            )
+            ->implode(' ');
+    }
+
+    private function normalizeSupportText(string $value): string
+    {
+        $value = mb_strtolower($value);
+        $value = preg_replace('/https?:\/\//', '', $value) ?? $value;
+        $value = preg_replace('/^www\./', '', $value) ?? $value;
+        $value = preg_replace('/[^a-z0-9]+/u', ' ', $value) ?? $value;
+        $value = preg_replace('/\s+/', ' ', $value) ?? $value;
+
+        return trim($value);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractAnswerUrls(string $answer): array
+    {
+        preg_match_all('/https?:\/\/[^\s)>\]]+/i', $answer, $matches);
+
+        return collect($matches[0] ?? [])
+            ->map(fn (string $url): string => rtrim(trim($url), '.,;:'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractAnswerPhones(string $answer): array
+    {
+        preg_match_all($this->phonePattern(), $answer, $matches);
+
+        return collect($matches[0] ?? [])
+            ->map(fn (string $value): ?string => $this->normalizePhoneNumber($value))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractAnswerCurrencyValues(string $answer): array
+    {
+        preg_match_all('/\$\d[\d,]*(?:\.\d{1,2})?/', $answer, $matches);
+
+        return collect($matches[0] ?? [])
+            ->map(fn (string $value): string => mb_strtolower(trim($value)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractAnswerAddresses(string $answer): array
+    {
+        preg_match_all($this->addressPattern(), $answer, $matches);
+
+        return collect($matches[0] ?? [])
+            ->map(fn (string $value): string => $this->cleanAddress($value))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function requiresStrictEntityGrounding(string $question, string $answer): bool
+    {
+        return $this->isProceduralQuestion($question)
+            || preg_match('/\b(call|contact|report|notify|reach|visit|go to|apply|submit|office|department|provider|company|agency|utility)\b/i', $question.' '.$answer) === 1;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extractReferredEntities(string $answer, City $city): array
+    {
+        preg_match_all(
+            '/(?i:\b(?:call|contact|report(?:\s+(?:it|them))?\s+to|notify|visit|reach(?:\s+out)?\s+to|go to|through|via)\s+(?:the\s+)?)([A-Z][A-Za-z&.\'-]*(?:\s+[A-Z][A-Za-z&.\'-]*){0,3})\b/',
+            $answer,
+            $matches
+        );
+
+        $ignored = collect([
+            $city->name,
+            'Monday',
+            'Tuesday',
+            'Wednesday',
+            'Thursday',
+            'Friday',
+            'Saturday',
+            'Sunday',
+            'Today',
+            'Tomorrow',
+            'Source',
+        ])->map(fn (string $value): string => $this->normalizeSupportText($value))->all();
+
+        return collect($matches[1] ?? [])
+            ->map(fn (string $value): string => trim($value))
+            ->filter(fn (string $value): bool => $value !== '')
+            ->reject(fn (string $value): bool => in_array($this->normalizeSupportText($value), $ignored, true))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**

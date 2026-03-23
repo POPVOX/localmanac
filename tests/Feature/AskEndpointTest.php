@@ -107,7 +107,7 @@ it('returns fallback answer when evidence is insufficient', function () {
         ->assertSeeText('I could not find the answer in the sources I checked.');
 });
 
-it('keeps an uncited answer but does not attach unrelated source links', function () {
+it('falls back when the answer includes unsupported claims', function () {
     Cache::flush();
     config()->set('scout.driver', 'collection');
     config()->set('chat.retrieval_mode', 'local_only');
@@ -142,9 +142,79 @@ it('keeps an uncited answer but does not attach unrelated source links', functio
         ]);
 
     $response->assertOk()
-        ->assertJsonPath('answer', 'Spirit AeroSystems is likely the largest employer in Wichita.')
+        ->assertJsonPath('answer', 'I could not find the answer in the sources I checked. Try a different wording or a more specific question.')
         ->assertJsonPath('citations', [])
         ->assertJsonPath('resources', []);
+});
+
+it('rejects unsupported named organizations in actionable answers', function () {
+    Cache::flush();
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.retrieval_mode', 'local_only');
+    config()->set('chat.tools.web_search.enabled', false);
+    config()->set('chat.vector_enabled', false);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Report a Gas Leak',
+        'source_url' => 'https://example.com/report-gas-leak',
+        'tags' => ['gas', 'leak', 'emergency'],
+        'priority' => 10,
+    ]);
+
+    $page = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id,
+        'url' => 'https://example.com/report-gas-leak',
+        'canonical_url' => 'https://example.com/report-gas-leak',
+        'title' => 'Report a Gas Leak',
+        'content_text' => 'If you suspect a gas leak, leave the area immediately and call 911. Contact your gas utility using the emergency number on your bill or provider website.',
+        'content_length' => 144,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $page->id,
+        'chunk_index' => 0,
+        'content' => 'If you suspect a gas leak, leave the area immediately and call 911. Contact your gas utility using the emergency number on your bill or provider website.',
+        'content_length' => 144,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'Call Evergy to report the gas leak.',
+            'citations' => [
+                [
+                    'title' => 'Report a Gas Leak',
+                    'source_url' => 'https://example.com/report-gas-leak',
+                    'type' => 'html',
+                ],
+            ],
+            'source_mode' => 'local',
+            'confidence' => 0.95,
+        ],
+    ]);
+
+    StreamingChatAnswerAgent::fake([
+        'If you suspect a gas leak, leave the area immediately and call 911. I could not verify the exact utility from the sources I checked.',
+    ]);
+
+    $response = $this->withoutMiddleware()
+        ->postJson('/ask', [
+            'question' => 'Who do I call to report a gas leak?',
+            'city_id' => $city->id,
+        ]);
+
+    $response->assertOk()
+        ->assertJsonPath('answer', 'If you suspect a gas leak, leave the area immediately and call 911. I could not verify the exact utility from the sources I checked.')
+        ->assertJsonPath('citations.0.source_url', 'https://example.com/report-gas-leak');
+
+    expect((string) $response->json('answer'))->not->toContain('Evergy');
 });
 
 it('returns a cited weekly digest fallback for broad local update asks', function () {
@@ -426,11 +496,30 @@ it('answers event asks and keeps ask response contract unchanged', function () {
         'timezone' => 'America/Chicago',
     ]);
 
-    ChatSource::factory()->create([
+    $parkingSource = ChatSource::factory()->create([
         'city_id' => $city->id,
-        'name' => 'City Services',
-        'source_url' => 'https://www.wichita.gov',
+        'name' => 'Parking Rates',
+        'source_url' => 'https://www.wichita.gov/parking',
+        'tags' => ['parking', 'downtown'],
         'is_active' => true,
+    ]);
+
+    $parkingPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $parkingSource->id,
+        'url' => 'https://www.wichita.gov/parking',
+        'canonical_url' => 'https://www.wichita.gov/parking',
+        'title' => 'Parking Rates',
+        'content_text' => 'Downtown parking meters cost $1 per hour.',
+        'content_length' => 41,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $parkingPage->id,
+        'chunk_index' => 0,
+        'content' => 'Downtown parking meters cost $1 per hour.',
+        'content_length' => 41,
+        'embedding' => null,
+        'embedding_model' => null,
     ]);
 
     Event::factory()->create([
@@ -585,11 +674,30 @@ it('returns combined answers for mixed civic and event asks', function () {
         'timezone' => 'America/Chicago',
     ]);
 
-    ChatSource::factory()->create([
+    $parkingSource = ChatSource::factory()->create([
         'city_id' => $city->id,
-        'name' => 'City Services',
-        'source_url' => 'https://www.wichita.gov',
+        'name' => 'Parking Rates',
+        'source_url' => 'https://www.wichita.gov/parking',
+        'tags' => ['parking', 'downtown'],
         'is_active' => true,
+    ]);
+
+    $parkingPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $parkingSource->id,
+        'url' => 'https://www.wichita.gov/parking',
+        'canonical_url' => 'https://www.wichita.gov/parking',
+        'title' => 'Parking Rates',
+        'content_text' => 'Downtown parking meters cost $1 per hour.',
+        'content_length' => 41,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $parkingPage->id,
+        'chunk_index' => 0,
+        'content' => 'Downtown parking meters cost $1 per hour.',
+        'content_length' => 41,
+        'embedding' => null,
+        'embedding_model' => null,
     ]);
 
     StructuredChatAnswerAgent::fake([
@@ -597,7 +705,7 @@ it('returns combined answers for mixed civic and event asks', function () {
             'answer' => 'This weekend there is a downtown jazz show, and parking meters cost $1 per hour downtown.',
             'citations' => [
                 [
-                    'title' => 'Downtown Events',
+                    'title' => 'Downtown jazz show',
                     'source_url' => 'https://events.wichita.gov/jazz',
                     'type' => 'html',
                 ],

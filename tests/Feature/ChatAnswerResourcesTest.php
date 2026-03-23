@@ -207,15 +207,15 @@ it('filters infrastructure citations out of answer resources', function () {
         'url' => 'https://www.wichita.gov/m/faq',
         'canonical_url' => 'https://www.wichita.gov/m/faq',
         'title' => 'Frequently Asked Questions',
-        'content_text' => 'Call 316-268-4421 for historic preservation assistance.',
-        'content_length' => 58,
+        'content_text' => 'Call the Planning Department at 316-268-4421 for historic preservation assistance.',
+        'content_length' => 82,
     ]);
 
     ChatSourceChunk::factory()->create([
         'chat_source_page_id' => $page->id,
         'chunk_index' => 0,
-        'content' => 'Call 316-268-4421 for historic preservation assistance.',
-        'content_length' => 58,
+        'content' => 'Call the Planning Department at 316-268-4421 for historic preservation assistance.',
+        'content_length' => 82,
         'embedding' => null,
         'embedding_model' => null,
     ]);

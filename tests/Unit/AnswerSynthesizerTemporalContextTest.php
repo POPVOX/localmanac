@@ -78,5 +78,6 @@ it('adds procedural step guidance for civic how-to prompts when evidence is weak
     expect($prompt)
         ->toContain('This is a civic how-to or permit-style question.')
         ->toContain('answer with a short ordered step-by-step list')
+        ->toContain('Do not name any department, agency, provider, company, office, or organization unless that exact name appears in retrieved evidence.')
         ->toContain('Use official-domain web search if needed to find the most specific procedural page.');
 });
