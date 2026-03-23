@@ -189,6 +189,62 @@ it('surfaces a phone resource when the answer tells people to call', function ()
     ))->toBeTrue();
 });
 
+it('omits a phone resource when the evidence does not include a grounded phone number', function () {
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Report a Water Leak',
+        'source_url' => 'https://example.com/report-water-leak',
+        'is_active' => true,
+    ]);
+
+    $page = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id,
+        'url' => 'https://example.com/report-water-leak',
+        'canonical_url' => 'https://example.com/report-water-leak',
+        'title' => 'Report a Water Leak',
+        'content_text' => 'To report a water leak, use the online service request form.',
+        'content_length' => 60,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $page->id,
+        'chunk_index' => 0,
+        'content' => 'To report a water leak, use the online service request form.',
+        'content_length' => 60,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'Contact water utilities for help with the leak.',
+            'citations' => [
+                [
+                    'title' => 'Report a Water Leak',
+                    'source_url' => 'https://example.com/report-water-leak',
+                    'type' => 'html',
+                ],
+            ],
+            'source_mode' => 'local',
+            'confidence' => 0.9,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'Who should I call about a water leak?',
+        'city_id' => $city->id,
+    ]);
+
+    expect(collect($response->json('resources'))->contains(
+        fn (array $resource): bool => $resource['type'] === 'phone'
+    ))->toBeFalse();
+});
+
 it('filters infrastructure citations out of answer resources', function () {
     $city = City::factory()->create([
         'name' => 'Wichita',

@@ -31,16 +31,22 @@ class AskService
     {
         $question = trim($question);
         $city = $this->resolveCity($cityId, $citySlug);
-        $sources = $this->selector->select($city->id, $question);
+        $normalizedQuestion = $this->normalizeQuestionForCity($question, $city);
+        $sources = $this->selector->select($city->id, $normalizedQuestion);
 
         if ($sources->isEmpty()) {
-            return $this->fallbackResponse($city, $sources, $question);
+            return $this->fallbackResponse($city, $sources, $normalizedQuestion);
         }
 
         try {
-            $answerPayload = $this->synthesizer->synthesize($question, $city, $sources);
+            $answerPayload = $this->synthesizer->synthesize(
+                question: $normalizedQuestion,
+                city: $city,
+                sources: $sources,
+                originalQuestion: $question,
+            );
         } catch (\Throwable) {
-            return $this->fallbackResponse($city, $sources, $question);
+            return $this->fallbackResponse($city, $sources, $normalizedQuestion);
         }
 
         $answer = trim((string) ($answerPayload['answer'] ?? ''));
@@ -77,12 +83,12 @@ class AskService
         }
 
         if ($answerIsNoAnswer || $answer === '') {
-            $this->logAnswerDiagnostics($question, $city, $sources, $confidence, 'fallback', $sourcesSuppressed);
+            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'fallback', $sourcesSuppressed);
 
-            return $this->fallbackResponse($city, $sources, $question);
+            return $this->fallbackResponse($city, $sources, $normalizedQuestion);
         }
 
-        $this->logAnswerDiagnostics($question, $city, $sources, $confidence, 'answer', $sourcesSuppressed);
+        $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'answer', $sourcesSuppressed);
 
         return [
             'answer' => $answer,
@@ -120,25 +126,27 @@ class AskService
     ): array {
         $question = trim($question);
         $city = $this->resolveCityFromSelector($citySelector);
-        $sources = $this->selector->select($city->id, $question);
+        $normalizedQuestion = $this->normalizeQuestionForCity($question, $city);
+        $sources = $this->selector->select($city->id, $normalizedQuestion);
 
         if ($sources->isEmpty()) {
-            $fallback = $this->fallbackResponse($city, $sources, $question);
+            $fallback = $this->fallbackResponse($city, $sources, $normalizedQuestion);
 
             return array_merge($fallback, ['conversation_id' => $conversationId]);
         }
 
         try {
             $answerPayload = $this->synthesizer->synthesizeStreaming(
-                question: $question,
+                question: $normalizedQuestion,
                 city: $city,
                 sources: $sources,
                 user: $user,
                 conversationId: $conversationId,
                 onDelta: $onDelta,
+                originalQuestion: $question,
             );
         } catch (\Throwable) {
-            $fallback = $this->fallbackResponse($city, $sources, $question);
+            $fallback = $this->fallbackResponse($city, $sources, $normalizedQuestion);
 
             return array_merge($fallback, ['conversation_id' => $conversationId]);
         }
@@ -180,8 +188,8 @@ class AskService
         }
 
         if ($answerIsNoAnswer || $answer === '') {
-            $this->logAnswerDiagnostics($question, $city, $sources, $confidence, 'fallback', $sourcesSuppressed);
-            $fallback = $this->fallbackResponse($city, $sources, $question);
+            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'fallback', $sourcesSuppressed);
+            $fallback = $this->fallbackResponse($city, $sources, $normalizedQuestion);
 
             return array_merge($fallback, [
                 'conversation_id' => is_string($answerPayload['conversation_id'] ?? null)
@@ -190,7 +198,7 @@ class AskService
             ]);
         }
 
-        $this->logAnswerDiagnostics($question, $city, $sources, $confidence, 'answer', $sourcesSuppressed);
+        $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'answer', $sourcesSuppressed);
 
         return [
             'answer' => $answer,
@@ -251,6 +259,28 @@ class AskService
         }
 
         return $this->resolveCity(null, null);
+    }
+
+    private function normalizeQuestionForCity(string $question, City $city): string
+    {
+        $question = trim($question);
+
+        if ($question === '') {
+            return '';
+        }
+
+        $cityName = trim($city->name);
+
+        if ($cityName === '') {
+            return $question;
+        }
+
+        $normalized = preg_replace('/\bmy city\b/i', $cityName, $question) ?? $question;
+        $normalized = preg_replace('/\bthe city\b/i', $cityName, $normalized) ?? $normalized;
+        $normalized = preg_replace('/\bour city\b/i', $cityName, $normalized) ?? $normalized;
+        $normalized = preg_replace('/\bthis city\b/i', $cityName, $normalized) ?? $normalized;
+
+        return preg_replace('/\s+/', ' ', trim($normalized)) ?? trim($normalized);
     }
 
     /**
@@ -568,22 +598,25 @@ class AskService
      * @param  Collection<int, \App\Models\ChatSource>  $sources
      */
     private function logAnswerDiagnostics(
-        string $question,
+        string $originalQuestion,
+        string $normalizedQuestion,
         City $city,
         Collection $sources,
         float $confidence,
         string $outcome,
         bool $sourcesSuppressed,
     ): void {
-        if (! $this->isProceduralQuestion($question) && ! $sourcesSuppressed && $outcome !== 'fallback') {
+        if (! $this->isProceduralQuestion($normalizedQuestion) && ! $sourcesSuppressed && $outcome !== 'fallback') {
             return;
         }
 
         Log::info('chat.answer.diagnostics', [
             'city_id' => $city->id,
             'city_slug' => $city->slug,
-            'question' => $question,
-            'procedural_question' => $this->isProceduralQuestion($question),
+            'question' => $normalizedQuestion,
+            'original_question' => $originalQuestion,
+            'normalized_question' => $normalizedQuestion,
+            'procedural_question' => $this->isProceduralQuestion($normalizedQuestion),
             'outcome' => $outcome,
             'confidence' => $confidence,
             'sources_suppressed' => $sourcesSuppressed,

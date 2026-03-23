@@ -47,12 +47,14 @@ class AnswerSynthesizer
      *     source_mode: string
      * }
      */
-    public function synthesize(string $question, City $city, Collection $sources): array
+    public function synthesize(string $question, City $city, Collection $sources, ?string $originalQuestion = null): array
     {
+        $originalQuestion ??= $question;
         $eventContext = $this->resolveEventContext($question, $city);
         $seedEvidence = $this->seedEvidence($sources, $question);
         $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
+        $eventCitations = $this->citationsFromLocalEvents($eventContext['local_events'] ?? []);
         $usedSeedAnswer = false;
 
         $agent = StructuredChatAnswerAgent::make(
@@ -70,23 +72,27 @@ class AnswerSynthesizer
         );
 
         $structured = is_array($response->structured ?? null) ? $response->structured : [];
-        $citations = $this->normalizeCitations($structured['citations'] ?? []);
+        $modelCitations = $this->normalizeCitations($structured['citations'] ?? []);
+        $metaCitations = $this->citationsFromMeta($response->meta->citations ?? new Collection);
+        $toolCitations = $this->citationsFromToolResults($response->toolResults ?? new Collection);
         $confidence = $this->normalizedConfidence($structured['confidence'] ?? 0.0);
 
-        if ($citations === []) {
-            $citations = $this->citationsFromMeta($response->meta->citations ?? new Collection);
-        }
-
-        if ($citations === []) {
-            $citations = $this->citationsFromToolResults($response->toolResults ?? new Collection);
-        }
-
         $answer = trim((string) ($structured['answer'] ?? ''));
+        $candidateCitations = $this->groundedCitationCandidates(
+            $seedCitations,
+            $metaCitations,
+            $toolCitations,
+            $modelCitations,
+            $seedEvidence,
+            $answer,
+            $eventCitations,
+            (bool) ($eventContext['intent'] ?? false),
+        );
 
         if ($answer !== ''
             && ! $this->isNoAnswerMessage($answer)
             && ! $this->isRefusalMessage($answer)
-            && ! $this->isAnswerGrounded($question, $answer, $city, $seedEvidence, $citations)
+            && ! $this->isAnswerGrounded($question, $answer, $city, $seedEvidence, $candidateCitations)
         ) {
             $answer = self::NO_ANSWER_MESSAGE;
         }
@@ -103,8 +109,8 @@ class AnswerSynthesizer
             }
         }
 
-        if (($usedSeedAnswer || $citations === []) && $seedCitations !== []) {
-            $citations = $seedCitations;
+        if (($usedSeedAnswer || $candidateCitations === []) && $seedCitations !== []) {
+            $candidateCitations = $seedCitations;
             $confidence = max($confidence, $this->deterministicSourceConfidence());
         }
 
@@ -113,8 +119,8 @@ class AnswerSynthesizer
                 $answer = $this->answerFromLocalEvents($city, $eventContext['window'] ?? null, $eventContext['local_events']);
                 $confidence = max($confidence, $this->deterministicSourceConfidence());
 
-                if ($citations === []) {
-                    $citations = $this->citationsFromLocalEvents($eventContext['local_events']);
+                if ($candidateCitations === []) {
+                    $candidateCitations = $this->citationsFromLocalEvents($eventContext['local_events']);
                 }
             } else {
                 $answer = $this->noEventsFoundMessage($city, $eventContext['window'] ?? null);
@@ -122,12 +128,24 @@ class AnswerSynthesizer
         }
 
         $answer = $this->cleanAnswerText($answer);
+        $citationSelection = $this->finalizeCitations(
+            question: $question,
+            answer: $answer,
+            seedEvidence: $seedEvidence,
+            candidateCitations: $candidateCitations,
+        );
+        $citations = $citationSelection['citations'];
+        $alignedEvidence = $citationSelection['aligned_evidence'];
+        $droppedCitations = $citationSelection['dropped'];
 
         if ($this->isRefusalMessage($answer)) {
             $citations = [];
+            $alignedEvidence = [];
         }
 
-        $resources = $this->buildAnswerResources($question, $answer, $citations, $seedEvidence);
+        $resourceSelection = $this->buildAnswerResources($question, $answer, $citations, $alignedEvidence);
+        $resources = $resourceSelection['resources'];
+        $droppedResources = $resourceSelection['dropped'];
 
         $sourceMode = $this->normalizeSourceMode($structured['source_mode'] ?? null);
 
@@ -137,14 +155,18 @@ class AnswerSynthesizer
 
         $this->logRetrievalDiagnostics(
             question: $question,
+            originalQuestion: $originalQuestion,
             city: $city,
             sources: $sources,
             seedEvidence: $seedEvidence,
+            alignedEvidence: $alignedEvidence,
             proceduralContext: $proceduralContext,
             confidence: $confidence,
             sourceMode: $sourceMode,
             citations: $citations,
             resources: $resources,
+            droppedCitations: $droppedCitations,
+            droppedResources: $droppedResources,
             answer: $answer,
         );
 
@@ -175,11 +197,14 @@ class AnswerSynthesizer
         User $user,
         ?string $conversationId,
         callable $onDelta,
+        ?string $originalQuestion = null,
     ): array {
+        $originalQuestion ??= $question;
         $eventContext = $this->resolveEventContext($question, $city);
         $seedEvidence = $this->seedEvidence($sources, $question);
         $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
+        $eventCitations = $this->citationsFromLocalEvents($eventContext['local_events'] ?? []);
         $usedSeedAnswer = false;
 
         $agent = StreamingChatAnswerAgent::make(
@@ -224,10 +249,11 @@ class AnswerSynthesizer
 
         if ($answer !== '') {
             $toolContext = $this->toolContextFromEvents($stream->events ?? new Collection);
-            $citations = $this->citationsFromToolContext($toolContext);
+            $toolCitations = $this->citationsFromToolContext($toolContext);
             $shouldRefineStreamingCitations = (bool) config('chat.streaming_refine_citations', false);
+            $modelCitations = [];
 
-            if ($citations === [] || $shouldRefineStreamingCitations) {
+            if ($toolCitations === [] || $shouldRefineStreamingCitations) {
                 try {
                     $citationResponse = $this->chatCitationAgent->prompt(
                         $this->citationPrompt($question, $city, $answer, $toolContext),
@@ -246,7 +272,7 @@ class AnswerSynthesizer
                     $normalized = $this->normalizeCitations($structured['citations'] ?? []);
 
                     if ($normalized !== []) {
-                        $citations = $normalized;
+                        $modelCitations = $normalized;
                     }
 
                     $confidence = $this->normalizedConfidence($structured['confidence'] ?? 0.0);
@@ -255,6 +281,16 @@ class AnswerSynthesizer
                 }
             }
 
+            $citations = $this->groundedCitationCandidates(
+                $seedCitations,
+                [],
+                $toolCitations,
+                $modelCitations,
+                $seedEvidence,
+                $answer,
+                $eventCitations,
+                (bool) ($eventContext['intent'] ?? false),
+            );
             $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
         }
 
@@ -303,23 +339,39 @@ class AnswerSynthesizer
         }
 
         $answer = $this->cleanAnswerText($answer);
+        $citationSelection = $this->finalizeCitations(
+            question: $question,
+            answer: $answer,
+            seedEvidence: $seedEvidence,
+            candidateCitations: $citations,
+        );
+        $citations = $citationSelection['citations'];
+        $alignedEvidence = $citationSelection['aligned_evidence'];
+        $droppedCitations = $citationSelection['dropped'];
 
         if ($this->isRefusalMessage($answer)) {
             $citations = [];
+            $alignedEvidence = [];
         }
 
-        $resources = $this->buildAnswerResources($question, $answer, $citations, $seedEvidence);
+        $resourceSelection = $this->buildAnswerResources($question, $answer, $citations, $alignedEvidence);
+        $resources = $resourceSelection['resources'];
+        $droppedResources = $resourceSelection['dropped'];
 
         $this->logRetrievalDiagnostics(
             question: $question,
+            originalQuestion: $originalQuestion,
             city: $city,
             sources: $sources,
             seedEvidence: $seedEvidence,
+            alignedEvidence: $alignedEvidence,
             proceduralContext: $proceduralContext,
             confidence: $confidence,
             sourceMode: $sourceMode,
             citations: $citations,
             resources: $resources,
+            droppedCitations: $droppedCitations,
+            droppedResources: $droppedResources,
             answer: $answer,
         );
 
@@ -1245,6 +1297,69 @@ class AnswerSynthesizer
     }
 
     /**
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $seedCitations
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $metaCitations
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $toolCitations
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $modelCitations
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $eventCitations
+     * @param  array<int, array<string, mixed>>  $seedEvidence
+     * @return array<int, array{title: string, source_url: string, type: string}>
+     */
+    private function groundedCitationCandidates(
+        array $seedCitations,
+        array $metaCitations,
+        array $toolCitations,
+        array $modelCitations,
+        array $seedEvidence,
+        string $answer,
+        array $eventCitations = [],
+        bool $allowModelOnlyCitations = false,
+    ): array {
+        $supportedUrls = collect($seedEvidence)
+            ->pluck('source_url')
+            ->merge(collect($seedCitations)->pluck('source_url'))
+            ->merge(collect($metaCitations)->pluck('source_url'))
+            ->merge(collect($toolCitations)->pluck('source_url'))
+            ->merge(collect($eventCitations)->pluck('source_url'))
+            ->filter(fn ($url): bool => is_string($url) && trim($url) !== '')
+            ->map(fn (string $url): string => trim($url))
+            ->unique()
+            ->values();
+
+        $keepGenericFallback = $seedEvidence === []
+            || $this->isNoAnswerMessage($answer)
+            || trim($answer) === '';
+
+        return collect(array_merge($seedCitations, $metaCitations, $toolCitations, $modelCitations))
+            ->filter(function (array $citation) use ($supportedUrls, $keepGenericFallback): bool {
+                $url = trim((string) ($citation['source_url'] ?? ''));
+
+                if ($url === '') {
+                    return false;
+                }
+
+                if (! $supportedUrls->contains($url)) {
+                    return false;
+                }
+
+                if ($keepGenericFallback) {
+                    return true;
+                }
+
+                return ! $this->isGenericCitation($citation);
+            })
+            ->when(
+                $allowModelOnlyCitations && $supportedUrls->isEmpty(),
+                fn ($collection) => $collection->merge(
+                    collect($modelCitations)->reject(fn (array $citation): bool => $this->isGenericCitation($citation))
+                )
+            )
+            ->unique('source_url')
+            ->values()
+            ->all();
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>  $seedEvidence
      * @return array<int, array{title: string, source_url: string, snippet: string}>
      */
@@ -1372,28 +1487,48 @@ class AnswerSynthesizer
      * @param  array<int, array<string, mixed>>  $seedEvidence
      * @return array<int, array{type: string, label: string, value: string, url: string}>
      */
-    private function buildAnswerResources(string $question, string $answer, array $citations, array $seedEvidence): array
+    private function buildAnswerResources(string $question, string $answer, array $citations, array $alignedEvidence): array
     {
         if ($this->isRefusalMessage($answer)) {
-            return [];
+            return [
+                'resources' => [],
+                'dropped' => [],
+            ];
         }
 
+        $resourceEvidence = $this->resourceEvidenceFromCitations($citations, $alignedEvidence);
+        $dropped = [];
         $linkResource = $this->bestLinkResource($question, $answer, $citations);
-        $phoneResource = $this->bestPhoneResource($question, $answer, $seedEvidence);
-        $addressResource = $this->bestAddressResource($question, $answer, $seedEvidence);
+        $phoneResource = $this->bestPhoneResource($question, $answer, $resourceEvidence);
+        $addressResource = $this->bestAddressResource($question, $answer, $resourceEvidence);
 
-        return collect([$phoneResource, $addressResource, $linkResource])
-            ->filter(fn ($resource): bool => is_array($resource))
-            ->sortByDesc(fn (array $resource): int => (int) ($resource['_score'] ?? 0))
-            ->map(function (array $resource): array {
-                unset($resource['_score']);
+        if ($this->shouldSurfacePhoneResource($question, $answer) && $phoneResource === null) {
+            $dropped[] = ['type' => 'phone', 'reason' => 'no_grounded_phone'];
+        }
 
-                return $resource;
-            })
-            ->unique(fn (array $resource): string => $resource['type'].'|'.$resource['url'])
-            ->take(3)
-            ->values()
-            ->all();
+        if ($this->shouldSurfaceAddressResource($question, $answer) && $addressResource === null) {
+            $dropped[] = ['type' => 'address', 'reason' => 'no_grounded_address'];
+        }
+
+        if ($this->shouldSurfaceLinkResource($question, $answer) && $linkResource === null) {
+            $dropped[] = ['type' => 'link', 'reason' => 'no_grounded_link'];
+        }
+
+        return [
+            'resources' => collect([$phoneResource, $addressResource, $linkResource])
+                ->filter(fn ($resource): bool => is_array($resource))
+                ->sortByDesc(fn (array $resource): int => (int) ($resource['_score'] ?? 0))
+                ->map(function (array $resource): array {
+                    unset($resource['_score']);
+
+                    return $resource;
+                })
+                ->unique(fn (array $resource): string => $resource['type'].'|'.$resource['url'])
+                ->take(3)
+                ->values()
+                ->all(),
+            'dropped' => $dropped,
+        ];
     }
 
     /**
@@ -1431,7 +1566,7 @@ class AnswerSynthesizer
                     '_score' => $score,
                 ];
             })
-            ->filter(fn (array $resource): bool => $resource['url'] !== '')
+            ->filter(fn (array $resource): bool => $resource['url'] !== '' && ! $this->isInfrastructureUrl($resource['url']))
             ->sortByDesc('_score')
             ->first();
 
@@ -1444,7 +1579,7 @@ class AnswerSynthesizer
      */
     private function bestPhoneResource(string $question, string $answer, array $seedEvidence): ?array
     {
-        if (! $this->shouldSurfacePhoneResource($question, $answer)) {
+        if (! $this->shouldSurfacePhoneResource($question, $answer) || $seedEvidence === []) {
             return null;
         }
 
@@ -1495,7 +1630,7 @@ class AnswerSynthesizer
      */
     private function bestAddressResource(string $question, string $answer, array $seedEvidence): ?array
     {
-        if (! $this->shouldSurfaceAddressResource($question, $answer)) {
+        if (! $this->shouldSurfaceAddressResource($question, $answer) || $seedEvidence === []) {
             return null;
         }
 
@@ -1642,6 +1777,36 @@ class AnswerSynthesizer
     }
 
     /**
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $citations
+     * @param  array<int, array<string, mixed>>  $alignedEvidence
+     * @return array<int, array<string, mixed>>
+     */
+    private function resourceEvidenceFromCitations(array $citations, array $alignedEvidence): array
+    {
+        if ($citations === []) {
+            return [];
+        }
+
+        $allowedUrls = collect($citations)
+            ->pluck('source_url')
+            ->filter(fn ($url): bool => is_string($url) && trim($url) !== '')
+            ->all();
+
+        return collect($alignedEvidence)
+            ->filter(fn (array $item): bool => in_array((string) ($item['source_url'] ?? ''), $allowedUrls, true))
+            ->values()
+            ->all();
+    }
+
+    private function isInfrastructureUrl(string $url): bool
+    {
+        $normalized = mb_strtolower(trim($url));
+
+        return str_contains($normalized, '/cdn-cgi/')
+            || str_contains($normalized, 'email-protection');
+    }
+
+    /**
      * @param  Collection<int, \App\Models\ChatSource>  $sources
      * @param  array<int, array<string, mixed>>  $seedEvidence
      * @param  array<string, mixed>  $proceduralContext
@@ -1650,14 +1815,18 @@ class AnswerSynthesizer
      */
     private function logRetrievalDiagnostics(
         string $question,
+        string $originalQuestion,
         City $city,
         Collection $sources,
         array $seedEvidence,
+        array $alignedEvidence,
         array $proceduralContext,
         float $confidence,
         string $sourceMode,
         array $citations,
         array $resources,
+        array $droppedCitations,
+        array $droppedResources,
         string $answer,
     ): void {
         $shouldLog = (bool) ($proceduralContext['intent'] ?? false)
@@ -1672,6 +1841,8 @@ class AnswerSynthesizer
             'city_id' => $city->id,
             'city_slug' => $city->slug,
             'question' => $question,
+            'original_question' => $originalQuestion,
+            'normalized_question' => $question,
             'procedural_context' => $proceduralContext,
             'selected_sources' => $sources
                 ->take(8)
@@ -1692,10 +1863,21 @@ class AnswerSynthesizer
                 ])
                 ->values()
                 ->all(),
+            'aligned_evidence' => collect($alignedEvidence)
+                ->take(5)
+                ->map(fn (array $item): array => [
+                    'title' => (string) ($item['title'] ?? 'Source'),
+                    'source_url' => (string) ($item['source_url'] ?? ''),
+                    'alignment_score' => (float) ($item['alignment_score'] ?? 0.0),
+                ])
+                ->values()
+                ->all(),
             'source_mode' => $sourceMode,
             'confidence' => $confidence,
             'citations_count' => count($citations),
             'resources_count' => count($resources),
+            'dropped_citations' => $droppedCitations,
+            'dropped_resources' => $droppedResources,
             'no_answer' => $this->isNoAnswerMessage($answer) || $answer === '',
         ]);
     }
@@ -1979,6 +2161,307 @@ class AnswerSynthesizer
                 ]))
             )
             ->implode(' ');
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $seedEvidence
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $candidateCitations
+     * @return array{
+     *     citations: array<int, array{title: string, source_url: string, type: string}>,
+     *     aligned_evidence: array<int, array<string, mixed>>,
+     *     dropped: array<int, array{source_url: string, reason: string}>
+     * }
+     */
+    private function finalizeCitations(string $question, string $answer, array $seedEvidence, array $candidateCitations): array
+    {
+        if ($this->isRefusalMessage($answer)) {
+            return [
+                'citations' => [],
+                'aligned_evidence' => [],
+                'dropped' => [],
+            ];
+        }
+
+        $alignedEvidence = $this->alignedEvidenceForAnswer($question, $answer, $seedEvidence);
+        $dropped = [];
+        $alignedUrls = collect($alignedEvidence)
+            ->pluck('source_url')
+            ->filter(fn ($url): bool => is_string($url) && trim($url) !== '')
+            ->unique()
+            ->values();
+
+        $evidenceCitations = collect($alignedEvidence)
+            ->map(function (array $item): array {
+                $sourceUrl = trim((string) ($item['source_url'] ?? ''));
+
+                return [
+                    'title' => trim((string) ($item['title'] ?? 'Source')) ?: 'Source',
+                    'source_url' => $sourceUrl,
+                    'type' => trim((string) ($item['type'] ?? $this->inferCitationType($sourceUrl))) ?: 'html',
+                    '_score' => (float) ($item['alignment_score'] ?? $item['score'] ?? 0.0),
+                ];
+            })
+            ->filter(fn (array $item): bool => $item['source_url'] !== '')
+            ->sortByDesc('_score')
+            ->unique('source_url')
+            ->values();
+
+        $preferredCitations = $evidenceCitations
+            ->reject(function (array $citation) use (&$dropped): bool {
+                $isGeneric = $this->isGenericCitation($citation);
+
+                if ($isGeneric) {
+                    $dropped[] = [
+                        'source_url' => (string) ($citation['source_url'] ?? ''),
+                        'reason' => 'generic_page',
+                    ];
+                }
+
+                return $isGeneric;
+            })
+            ->map(function (array $citation): array {
+                unset($citation['_score']);
+
+                return $citation;
+            })
+            ->values();
+
+        if ($preferredCitations->isEmpty() && $evidenceCitations->isNotEmpty()) {
+            $preferredCitations = $evidenceCitations
+                ->map(function (array $citation): array {
+                    unset($citation['_score']);
+
+                    return $citation;
+                })
+                ->values();
+        }
+
+        if ($preferredCitations->isEmpty()) {
+            $supportedCandidates = collect($candidateCitations)
+                ->filter(function (array $citation) use ($alignedUrls, &$dropped): bool {
+                    $url = trim((string) ($citation['source_url'] ?? ''));
+
+                    if ($url === '' || ($alignedUrls->isNotEmpty() && ! $alignedUrls->contains($url))) {
+                        $dropped[] = [
+                            'source_url' => $url,
+                            'reason' => 'weak_alignment',
+                        ];
+
+                        return false;
+                    }
+
+                    if ($this->isGenericCitation($citation) && $alignedUrls->isNotEmpty()) {
+                        $dropped[] = [
+                            'source_url' => $url,
+                            'reason' => 'generic_page',
+                        ];
+
+                        return false;
+                    }
+
+                    return true;
+                })
+                ->unique('source_url')
+                ->values();
+
+            if ($supportedCandidates->isEmpty() && $alignedUrls->isEmpty()) {
+                $supportedCandidates = collect($candidateCitations)
+                    ->filter(function (array $citation) use (&$dropped): bool {
+                        $url = trim((string) ($citation['source_url'] ?? ''));
+
+                        if ($url === '') {
+                            return false;
+                        }
+
+                        if ($this->isGenericCitation($citation)) {
+                            $dropped[] = [
+                                'source_url' => $url,
+                                'reason' => 'generic_page',
+                            ];
+
+                            return false;
+                        }
+
+                        return true;
+                    })
+                    ->unique('source_url')
+                    ->values();
+            }
+
+            if ($supportedCandidates->isEmpty()) {
+                $supportedCandidates = collect($candidateCitations)
+                    ->filter(fn (array $citation): bool => trim((string) ($citation['source_url'] ?? '')) !== '')
+                    ->unique('source_url')
+                    ->values();
+            }
+
+            $preferredCitations = $supportedCandidates;
+        }
+
+        return [
+            'citations' => $preferredCitations
+                ->take((int) config('chat.link_limit', 6))
+                ->values()
+                ->all(),
+            'aligned_evidence' => $alignedEvidence,
+            'dropped' => collect($dropped)
+                ->filter(fn (array $item): bool => ($item['source_url'] ?? '') !== '')
+                ->unique(fn (array $item): string => $item['source_url'].'|'.$item['reason'])
+                ->values()
+                ->all(),
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $seedEvidence
+     * @return array<int, array<string, mixed>>
+     */
+    private function alignedEvidenceForAnswer(string $question, string $answer, array $seedEvidence): array
+    {
+        if ($seedEvidence === []) {
+            return [];
+        }
+
+        $terms = $this->answerAlignmentTerms($question, $answer);
+        $isProcedural = $this->isProceduralQuestion($question);
+
+        $ranked = collect($seedEvidence)
+            ->map(function (array $item) use ($terms, $answer, $isProcedural): array {
+                $snippet = mb_strtolower((string) ($item['snippet'] ?? ''));
+                $title = mb_strtolower((string) ($item['title'] ?? ''));
+                $url = mb_strtolower((string) ($item['source_url'] ?? ''));
+                $score = (float) ($item['score'] ?? 0.0);
+                $alignmentScore = 0.0;
+
+                foreach ($terms as $term) {
+                    if (str_contains($snippet, $term)) {
+                        $alignmentScore += 3.0;
+                    }
+
+                    if (str_contains($title, $term)) {
+                        $alignmentScore += 1.5;
+                    }
+
+                    if (str_contains($url, $term)) {
+                        $alignmentScore += 0.5;
+                    }
+                }
+
+                foreach ($this->extractAnswerPhones($answer) as $digits) {
+                    if (str_contains(preg_replace('/\D+/', '', $snippet) ?? '', $digits)) {
+                        $alignmentScore += 5.0;
+                    }
+                }
+
+                foreach ($this->extractAnswerAddresses($answer) as $address) {
+                    if (str_contains($this->normalizeSupportText($snippet), $this->normalizeSupportText($address))) {
+                        $alignmentScore += 5.0;
+                    }
+                }
+
+                foreach ($this->extractAnswerUrls($answer) as $sourceUrl) {
+                    if (str_contains($url, mb_strtolower($sourceUrl))) {
+                        $alignmentScore += 5.0;
+                    }
+                }
+
+                if ($isProcedural) {
+                    foreach ($this->proceduralSignals() as $signal) {
+                        if (str_contains($snippet, $signal)) {
+                            $alignmentScore += 1.25;
+                        }
+                    }
+                }
+
+                $alignmentScore -= $this->genericEvidencePenalty($item);
+                $item['alignment_score'] = $alignmentScore + min($score, 10.0);
+
+                return $item;
+            })
+            ->sortByDesc('alignment_score')
+            ->values();
+
+        $matched = $ranked
+            ->filter(fn (array $item): bool => (float) ($item['alignment_score'] ?? 0.0) > 0.0)
+            ->values();
+
+        if ($matched->isNotEmpty()) {
+            return $matched->take((int) config('chat.link_limit', 6))->all();
+        }
+
+        return $ranked
+            ->take(min(3, max(1, count($seedEvidence))))
+            ->all();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function answerAlignmentTerms(string $question, string $answer): array
+    {
+        $terms = preg_split('/\W+/u', mb_strtolower($question.' '.$answer)) ?: [];
+        $stopwords = [
+            'the', 'and', 'for', 'with', 'that', 'this', 'from', 'what', 'when', 'where', 'which', 'who', 'whom',
+            'does', 'do', 'did', 'are', 'is', 'was', 'were', 'can', 'could', 'should', 'would', 'will', 'have',
+            'has', 'had', 'into', 'onto', 'about', 'your', 'my', 'our', 'their', 'them', 'they', 'you', 'its',
+            'a', 'an', 'of', 'to', 'in', 'on', 'at', 'by', 'or', 'if', 'as', 'city', 'local',
+            'call', 'visit', 'open', 'page', 'site', 'source', 'sources',
+        ];
+
+        return array_values(array_unique(array_filter(
+            $terms,
+            fn (string $term): bool => mb_strlen($term) >= 3 && ! in_array($term, $stopwords, true)
+        )));
+    }
+
+    /**
+     * @param  array<string, mixed>|array{title: string, source_url: string, type: string}  $item
+     */
+    private function isGenericCitation(array $item): bool
+    {
+        $haystack = mb_strtolower(implode(' ', [
+            (string) ($item['title'] ?? ''),
+            (string) ($item['source_url'] ?? ''),
+        ]));
+
+        foreach ([
+            'frequently asked questions',
+            'faq',
+            'quick links',
+            'government',
+            'city government',
+            'all content',
+            'boards and committees',
+            '/faq',
+            '/government',
+        ] as $signal) {
+            if (str_contains($haystack, $signal)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function genericEvidencePenalty(array $item): float
+    {
+        $haystack = mb_strtolower(implode(' ', [
+            (string) ($item['title'] ?? ''),
+            (string) ($item['snippet'] ?? ''),
+            (string) ($item['source_url'] ?? ''),
+        ]));
+        $penalty = 0.0;
+
+        foreach ($this->genericEvidenceSignals() as $signal) {
+            if (str_contains($haystack, $signal)) {
+                $penalty += 4.0;
+            }
+        }
+
+        return $penalty;
     }
 
     private function normalizeSupportText(string $value): string

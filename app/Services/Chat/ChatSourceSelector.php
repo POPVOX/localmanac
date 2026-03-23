@@ -52,9 +52,7 @@ class ChatSourceSelector
             return $this->rankProceduralSources($sources, $question, $limit);
         }
 
-        return $sources
-            ->take($limit)
-            ->values();
+        return $this->rankGeneralSources($sources, $question, $limit);
     }
 
     /**
@@ -114,6 +112,47 @@ class ChatSourceSelector
             ->concat(
                 $ranked->reject(fn (array $entry): bool => $matched->contains(fn (array $matchedEntry): bool => $matchedEntry['source']->is($entry['source'])))
             )
+            ->take($limit)
+            ->pluck('source')
+            ->values();
+    }
+
+    /**
+     * @param  Collection<int, ChatSource>  $sources
+     * @return Collection<int, ChatSource>
+     */
+    private function rankGeneralSources(Collection $sources, string $question, int $limit): Collection
+    {
+        $terms = $this->keywordTerms($question);
+
+        if ($terms === [] || $sources->isEmpty()) {
+            return $sources->take($limit)->values();
+        }
+
+        return $sources
+            ->values()
+            ->map(function (ChatSource $source, int $index) use ($terms): array {
+                $overlap = $this->sourceOverlap($source, $terms);
+                $genericPenalty = $this->genericSourcePenalty($source, $overlap);
+                $score = 0.0;
+                $score += ($overlap['tags'] * 8.0)
+                    + ($overlap['name'] * 7.0)
+                    + ($overlap['description'] * 4.0)
+                    + ($overlap['url'] * 2.0);
+                $score += min((int) $source->priority, 20) * 0.2;
+                $score -= $genericPenalty;
+
+                return [
+                    'source' => $source,
+                    'score' => $score,
+                    'overlap' => array_sum($overlap),
+                    'fallback_index' => $index,
+                ];
+            })
+            ->sort(function (array $left, array $right): int {
+                return [$right['score'], $right['overlap'], $right['source']->priority, -$right['fallback_index']]
+                    <=> [$left['score'], $left['overlap'], $left['source']->priority, -$left['fallback_index']];
+            })
             ->take($limit)
             ->pluck('source')
             ->values();
@@ -201,6 +240,11 @@ class ChatSourceSelector
             'faq',
             'government',
             'city government',
+            'city hall',
+            'departments',
+            'services',
+            'residents',
+            'visitors',
             'quick links',
             'news flash',
             'boards and committees',
@@ -212,6 +256,10 @@ class ChatSourceSelector
             if (str_contains($haystack, $genericSignal)) {
                 $penalty += $hasExplicitMatch ? 2.0 : 8.0;
             }
+        }
+
+        if (str_contains($haystack, '/faq') || str_contains($haystack, '/government')) {
+            $penalty += $hasExplicitMatch ? 3.0 : 10.0;
         }
 
         return $penalty;
@@ -249,6 +297,7 @@ class ChatSourceSelector
             'does', 'do', 'did', 'are', 'is', 'was', 'were', 'can', 'could', 'should', 'would', 'will', 'have',
             'has', 'had', 'into', 'onto', 'about', 'your', 'my', 'our', 'their', 'them', 'they', 'you', 'its',
             'a', 'an', 'of', 'to', 'in', 'on', 'at', 'by', 'or', 'if', 'as', 'i', 'get',
+            'city', 'local', 'municipal',
         ];
 
         return array_values(array_unique(array_filter(

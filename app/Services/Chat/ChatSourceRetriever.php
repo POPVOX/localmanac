@@ -454,6 +454,8 @@ class ChatSourceRetriever
                 if ($isProceduralQuestion) {
                     $boostScore += $this->proceduralBoostScore($question, $terms, $row);
                     $boostScore -= $this->genericPagePenalty($row);
+                } else {
+                    $boostScore -= $this->genericPagePenalty($row) * 0.4;
                 }
 
                 $baseScore = (int) ($row['score'] ?? 1);
@@ -599,6 +601,11 @@ class ChatSourceRetriever
             'frequently asked questions',
             'faq',
             'quick links',
+            'city hall',
+            'departments',
+            'services',
+            'residents',
+            'visitors',
             'archive center',
             'news flash',
             'boards and committees',
@@ -612,6 +619,10 @@ class ChatSourceRetriever
             if (str_contains($haystack, $signal)) {
                 $penalty += 4.0;
             }
+        }
+
+        if (str_contains($haystack, '/faq') || str_contains($haystack, '/government')) {
+            $penalty += 5.0;
         }
 
         return $penalty;
@@ -719,6 +730,7 @@ class ChatSourceRetriever
             'does', 'do', 'did', 'are', 'is', 'was', 'were', 'can', 'could', 'should', 'would', 'will', 'have',
             'has', 'had', 'into', 'onto', 'about', 'your', 'my', 'our', 'their', 'them', 'they', 'you', 'its',
             'a', 'an', 'of', 'to', 'in', 'on', 'at', 'by', 'or', 'if', 'as',
+            'city', 'local', 'municipal',
         ];
     }
 

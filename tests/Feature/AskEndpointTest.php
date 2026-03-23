@@ -482,6 +482,161 @@ it('uses seed evidence fallback when structured synthesis returns a no-answer me
         ->assertJsonPath('citations.0.source_url', 'https://example.com/garage-sale-permit');
 });
 
+it('prefers grounded service citations over broad faq citations', function () {
+    Cache::flush();
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.retrieval_mode', 'local_only');
+    config()->set('chat.tools.web_search.enabled', false);
+    config()->set('chat.vector_enabled', false);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $serviceSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Leaf Pickup Service',
+        'source_url' => 'https://example.com/leaf-pickup',
+        'tags' => ['leaf', 'pickup'],
+        'priority' => 10,
+    ]);
+
+    $faqSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita FAQ',
+        'source_url' => 'https://example.com/faq',
+        'tags' => ['faq', 'city'],
+        'priority' => 12,
+    ]);
+
+    $servicePage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $serviceSource->id,
+        'url' => 'https://example.com/leaf-pickup',
+        'canonical_url' => 'https://example.com/leaf-pickup',
+        'title' => 'Leaf Pickup Service',
+        'content_text' => 'Leaf pickup requests are handled through the leaf pickup service page at https://example.com/leaf-pickup.',
+        'content_length' => 103,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $servicePage->id,
+        'chunk_index' => 0,
+        'content' => 'Leaf pickup requests are handled through the leaf pickup service page at https://example.com/leaf-pickup.',
+        'content_length' => 103,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    $faqPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $faqSource->id,
+        'url' => 'https://example.com/faq',
+        'canonical_url' => 'https://example.com/faq',
+        'title' => 'Frequently Asked Questions',
+        'content_text' => 'FAQ. City services and quick links.',
+        'content_length' => 35,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $faqPage->id,
+        'chunk_index' => 0,
+        'content' => 'FAQ. City services and quick links.',
+        'content_length' => 35,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'Use the leaf pickup service page to submit your request.',
+            'citations' => [
+                [
+                    'title' => 'Frequently Asked Questions',
+                    'source_url' => 'https://example.com/faq',
+                    'type' => 'html',
+                ],
+            ],
+            'source_mode' => 'local',
+            'confidence' => 0.93,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'How do I request leaf pickup?',
+        'city_id' => $city->id,
+    ]);
+
+    $response->assertSuccessful()
+        ->assertJsonPath('citations.0.source_url', 'https://example.com/leaf-pickup');
+
+    expect(collect($response->json('citations'))->pluck('source_url'))->not->toContain('https://example.com/faq');
+});
+
+it('returns step by step demolition permit guidance from focused seed evidence fallback', function () {
+    Cache::flush();
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.retrieval_mode', 'local_only');
+    config()->set('chat.tools.web_search.enabled', false);
+    config()->set('chat.vector_enabled', false);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Building Permit Center',
+        'source_url' => 'https://example.com/demolition-permit',
+        'tags' => ['demolition', 'permit', 'inspection'],
+        'priority' => 10,
+    ]);
+
+    $page = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id,
+        'url' => 'https://example.com/demolition-permit',
+        'canonical_url' => 'https://example.com/demolition-permit',
+        'title' => 'Demolition Permit Application',
+        'content_text' => 'Before you apply for a demolition permit, submit the required contractor documents, use the permit portal, and schedule the inspection after approval.',
+        'content_length' => 146,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $page->id,
+        'chunk_index' => 0,
+        'content' => 'Before you apply for a demolition permit, submit the required contractor documents, use the permit portal, and schedule the inspection after approval.',
+        'content_length' => 146,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'I could not find the answer in the sources I checked.',
+            'citations' => [],
+            'source_mode' => 'none',
+            'confidence' => 0.0,
+        ],
+    ]);
+
+    StreamingChatAnswerAgent::fake([
+        "1. Submit the required contractor documents.\n2. Apply through the permit portal.\n3. Schedule the inspection after approval.",
+    ]);
+
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'How do I get a demolition permit?',
+        'city_id' => $city->id,
+    ]);
+
+    $response->assertSuccessful()
+        ->assertJsonPath('citations.0.source_url', 'https://example.com/demolition-permit');
+
+    expect((string) $response->json('answer'))
+        ->toContain('1. Submit the required contractor documents.')
+        ->toContain('2. Apply through the permit portal.')
+        ->toContain('3. Schedule the inspection after approval.');
+});
+
 it('answers event asks and keeps ask response contract unchanged', function () {
     Cache::flush();
     config()->set('scout.driver', 'collection');
@@ -840,6 +995,7 @@ it('caps response citations to link limit', function () {
     config()->set('scout.driver', 'collection');
     config()->set('chat.retrieval_mode', 'local_only');
     config()->set('chat.tools.web_search.enabled', false);
+    config()->set('chat.vector_enabled', false);
     config()->set('chat.link_limit', 3);
 
     $city = City::factory()->create([
@@ -847,12 +1003,32 @@ it('caps response citations to link limit', function () {
         'slug' => 'wichita',
     ]);
 
-    ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'City Services',
-        'source_url' => 'https://www.wichita.gov',
-        'is_active' => true,
-    ]);
+    foreach (range(1, 5) as $index) {
+        $source = ChatSource::factory()->create([
+            'city_id' => $city->id,
+            'name' => 'Service Update '.$index,
+            'source_url' => 'https://example.com/service-update-'.$index,
+            'is_active' => true,
+        ]);
+
+        $page = ChatSourcePage::factory()->create([
+            'chat_source_id' => $source->id,
+            'url' => 'https://example.com/service-update-'.$index,
+            'canonical_url' => 'https://example.com/service-update-'.$index,
+            'title' => 'Service Update '.$index,
+            'content_text' => 'Service update '.$index.' for Wichita city services.',
+            'content_length' => 43,
+        ]);
+
+        ChatSourceChunk::factory()->create([
+            'chat_source_page_id' => $page->id,
+            'chunk_index' => 0,
+            'content' => 'Service update '.$index.' for Wichita city services.',
+            'content_length' => 43,
+            'embedding' => null,
+            'embedding_model' => null,
+        ]);
+    }
 
     StructuredChatAnswerAgent::fake([
         [

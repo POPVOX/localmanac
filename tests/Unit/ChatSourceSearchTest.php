@@ -170,3 +170,32 @@ it('prefers procedural permit sources over broad city hubs for permit questions'
         ])
         ->and($results->pluck('id'))->not->toContain($genericHub->id);
 });
+
+it('does not let generic city phrasing outrank focused civic sources', function () {
+    config()->set('scout.driver', 'collection');
+
+    $city = City::factory()->create();
+
+    $genericHub = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'City Government',
+        'source_url' => 'https://example.com/government',
+        'tags' => ['government', 'city', 'services'],
+        'priority' => 10,
+    ]);
+
+    $focusedSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Tenant Rights Guide',
+        'source_url' => 'https://example.com/tenant-rights',
+        'tags' => ['tenant', 'housing', 'rights'],
+        'priority' => 6,
+    ]);
+
+    $selector = app(ChatSourceSelector::class);
+    $results = $selector->select($city->id, 'What are tenant rights in the city?', 2);
+
+    expect($results)->toHaveCount(2)
+        ->and($results->pluck('id')->first())->toBe($focusedSource->id)
+        ->and($results->pluck('id'))->toContain($genericHub->id);
+});
