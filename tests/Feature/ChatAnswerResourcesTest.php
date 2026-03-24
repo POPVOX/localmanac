@@ -462,3 +462,95 @@ it('does not surface off target landfill resources for demolition permit answers
             && $resource['url'] === 'tel:3162684421'
     ))->toBeTrue();
 });
+
+it('prefers the phone number already grounded in the answer over other evidence phones', function () {
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $permitSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Apply For',
+        'source_url' => 'https://example.com/demolition-permit',
+        'is_active' => true,
+    ]);
+
+    $landfillSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Brooks Landfill',
+        'source_url' => 'https://example.com/brooks-landfill',
+        'is_active' => true,
+    ]);
+
+    $permitPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $permitSource->id,
+        'url' => 'https://example.com/demolition-permit',
+        'canonical_url' => 'https://example.com/demolition-permit',
+        'title' => 'Demolition Permit Application',
+        'content_text' => 'For historic review questions call 316-268-4421 before submitting the demolition permit application.',
+        'content_length' => 101,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $permitPage->id,
+        'chunk_index' => 0,
+        'content' => 'For historic review questions call 316-268-4421 before submitting the demolition permit application.',
+        'content_length' => 101,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    $landfillPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $landfillSource->id,
+        'url' => 'https://example.com/brooks-landfill',
+        'canonical_url' => 'https://example.com/brooks-landfill',
+        'title' => 'Brooks Landfill',
+        'content_text' => 'Construction and demolition debris may be taken to Brooks Landfill. Call 316-350-3225 for disposal rules.',
+        'content_length' => 103,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $landfillPage->id,
+        'chunk_index' => 0,
+        'content' => 'Construction and demolition debris may be taken to Brooks Landfill. Call 316-350-3225 for disposal rules.',
+        'content_length' => 103,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'Call 316-268-4421 before submitting the demolition permit application.',
+            'citations' => [
+                [
+                    'title' => 'Demolition Permit Application',
+                    'source_url' => 'https://example.com/demolition-permit',
+                    'type' => 'html',
+                ],
+                [
+                    'title' => 'Brooks Landfill',
+                    'source_url' => 'https://example.com/brooks-landfill',
+                    'type' => 'html',
+                ],
+            ],
+            'source_mode' => 'local',
+            'confidence' => 0.95,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'How do I get a demolition permit?',
+        'city_id' => $city->id,
+    ]);
+
+    expect(collect($response->json('resources'))->contains(
+        fn (array $resource): bool => $resource['type'] === 'phone'
+            && $resource['url'] === 'tel:3162684421'
+    ))->toBeTrue();
+
+    expect(collect($response->json('resources'))->contains(
+        fn (array $resource): bool => $resource['type'] === 'phone'
+            && $resource['url'] === 'tel:3163503225'
+    ))->toBeFalse();
+});

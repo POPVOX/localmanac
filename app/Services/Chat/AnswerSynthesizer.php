@@ -1693,6 +1693,7 @@ class AnswerSynthesizer
         }
 
         $best = null;
+        $answerPhones = $this->extractAnswerPhones($answer);
 
         foreach ($seedEvidence as $item) {
             $snippet = (string) ($item['snippet'] ?? '');
@@ -1712,8 +1713,12 @@ class AnswerSynthesizer
 
                 $score = 90;
 
-                if ($this->containsPhoneNumber($answer)) {
-                    $score -= 25;
+                if ($answerPhones !== []) {
+                    if (in_array($normalized, $answerPhones, true)) {
+                        $score += 25;
+                    } else {
+                        $score -= 40;
+                    }
                 }
 
                 $candidate = [
@@ -1903,6 +1908,7 @@ class AnswerSynthesizer
 
         return collect($alignedEvidence)
             ->filter(fn (array $item): bool => in_array((string) ($item['source_url'] ?? ''), $allowedUrls, true))
+            ->sortByDesc(fn (array $item): float => (float) ($item['alignment_score'] ?? $item['score'] ?? 0.0))
             ->values()
             ->all();
     }
@@ -2292,6 +2298,7 @@ class AnswerSynthesizer
         }
 
         $alignedEvidence = $this->alignedEvidenceForAnswer($question, $answer, $seedEvidence);
+        $alignedEvidence = $this->filterProceduralAlignedEvidence($question, $alignedEvidence);
         $dropped = [];
         $alignedUrls = collect($alignedEvidence)
             ->pluck('source_url')
@@ -2335,6 +2342,8 @@ class AnswerSynthesizer
             })
             ->values();
 
+        $preferredCitations = $this->filterProceduralCitations($question, $preferredCitations, $alignedEvidence, $dropped);
+
         if ($preferredCitations->isEmpty() && $evidenceCitations->isNotEmpty()) {
             $preferredCitations = $evidenceCitations
                 ->map(function (array $citation): array {
@@ -2372,6 +2381,8 @@ class AnswerSynthesizer
                 })
                 ->unique('source_url')
                 ->values();
+
+            $supportedCandidates = $this->filterProceduralCitations($question, $supportedCandidates, $alignedEvidence, $dropped);
 
             if ($supportedCandidates->isEmpty() && $alignedUrls->isEmpty()) {
                 $supportedCandidates = collect($candidateCitations)
@@ -2505,6 +2516,111 @@ class AnswerSynthesizer
         return $ranked
             ->take(min(3, max(1, count($seedEvidence))))
             ->all();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $alignedEvidence
+     * @return array<int, array<string, mixed>>
+     */
+    private function filterProceduralAlignedEvidence(string $question, array $alignedEvidence): array
+    {
+        if (! $this->questionRequiresProceduralSteps($question) || $alignedEvidence === []) {
+            return $alignedEvidence;
+        }
+
+        $filtered = collect($alignedEvidence)
+            ->filter(fn (array $item): bool => $this->supportsProceduralEvidence($question, $item))
+            ->values();
+
+        return $filtered->isNotEmpty() ? $filtered->all() : $alignedEvidence;
+    }
+
+    /**
+     * @param  array<int, array{title: string, source_url: string, type: string}>  $citations
+     * @param  array<int, array<string, mixed>>  $alignedEvidence
+     * @param  array<int, array{source_url: string, reason: string}>  $dropped
+     * @return \Illuminate\Support\Collection<int, array{title: string, source_url: string, type: string}>
+     */
+    private function filterProceduralCitations(string $question, Collection $citations, array $alignedEvidence, array &$dropped): Collection
+    {
+        if (! $this->questionRequiresProceduralSteps($question) || $citations->isEmpty()) {
+            return $citations;
+        }
+
+        $supportedUrls = collect($alignedEvidence)
+            ->filter(fn (array $item): bool => $this->supportsProceduralEvidence($question, $item))
+            ->pluck('source_url')
+            ->filter(fn ($url): bool => is_string($url) && trim($url) !== '')
+            ->unique()
+            ->values();
+
+        if ($supportedUrls->isEmpty()) {
+            return $citations;
+        }
+
+        $filtered = $citations
+            ->filter(function (array $citation) use ($supportedUrls, &$dropped): bool {
+                $url = trim((string) ($citation['source_url'] ?? ''));
+
+                if (! $supportedUrls->contains($url)) {
+                    $dropped[] = [
+                        'source_url' => $url,
+                        'reason' => 'procedural_mismatch',
+                    ];
+
+                    return false;
+                }
+
+                return true;
+            })
+            ->values();
+
+        return $filtered->isNotEmpty() ? $filtered : $citations;
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function supportsProceduralEvidence(string $question, array $item): bool
+    {
+        if (! $this->questionRequiresProceduralSteps($question)) {
+            return true;
+        }
+
+        $focusTerms = $this->proceduralFocusTerms($question);
+
+        if ($focusTerms === []) {
+            return true;
+        }
+
+        $snippet = mb_strtolower((string) ($item['snippet'] ?? ''));
+        $title = mb_strtolower((string) ($item['title'] ?? ''));
+        $url = mb_strtolower((string) ($item['source_url'] ?? ''));
+        $context = $title.' '.$url;
+        $focusInSnippet = false;
+        $focusInContext = false;
+
+        foreach ($focusTerms as $term) {
+            if (str_contains($snippet, $term)) {
+                $focusInSnippet = true;
+            }
+
+            if (str_contains($context, $term)) {
+                $focusInContext = true;
+            }
+        }
+
+        $processSignals = $this->proceduralProcessSignalCount($snippet.' '.$context);
+
+        if ($this->genericEvidencePenalty($item) >= 4.0 && ! $focusInContext) {
+            return false;
+        }
+
+        if ($focusInContext) {
+            return true;
+        }
+
+        return $focusInSnippet && $processSignals >= 2;
     }
 
     /**
