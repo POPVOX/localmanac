@@ -65,7 +65,7 @@
                 </flux:table.column>
                 <flux:table.column class="w-[112px]">{{ __('Active') }}</flux:table.column>
                 <flux:table.column>{{ __('Last scraped') }}</flux:table.column>
-                <flux:table.column align="end">{{ __('Actions') }}</flux:table.column>
+                <flux:table.column align="end" class="w-[84px] min-w-[84px]">{{ __('Actions') }}</flux:table.column>
             </flux:table.columns>
 
             <flux:table.rows>
@@ -116,29 +116,36 @@
                                 @endif
                             </div>
                         </flux:table.cell>
-                        <flux:table.cell align="end" class="flex flex-wrap gap-2 justify-end">
-                            <flux:button size="sm" variant="ghost" :href="route('admin.scrapers.show', $scraper)" wire:navigate>
-                                {{ __('View') }}
-                            </flux:button>
-                            <flux:button size="sm" variant="ghost" :href="route('admin.scrapers.edit', $scraper)" wire:navigate>
-                                {{ __('Edit') }}
-                            </flux:button>
-                            <flux:button
-                                size="sm"
-                                variant="primary"
-                                wire:click="queueRun({{ $scraper->id }})"
-                                wire:loading.attr="disabled"
-                                wire:target="queueRun({{ $scraper->id }})"
-                                :disabled="$isActiveRun"
-                            >
-                                <span class="inline-flex items-center justify-center w-12 h-8">
-                                    @if ($isActiveRun)
-                                        <flux:icon.loading class="size-4" />
-                                    @else
-                                        {{ __('Run') }}
-                                    @endif
-                                </span>
-                            </flux:button>
+                        <flux:table.cell align="end" class="w-[84px] min-w-[84px] pr-2">
+                            <div class="flex justify-end">
+                                <flux:dropdown position="bottom" align="end">
+                                    <flux:button size="sm" variant="ghost" icon="ellipsis-horizontal" aria-label="{{ __('Scraper actions') }}" />
+
+                                    <flux:menu class="w-[176px]">
+                                        <flux:menu.item :href="route('admin.scrapers.show', $scraper)" icon="eye" wire:navigate>
+                                            {{ __('View') }}
+                                        </flux:menu.item>
+                                        <flux:menu.item :href="route('admin.scrapers.edit', $scraper)" icon="pencil-square" wire:navigate>
+                                            {{ __('Edit') }}
+                                        </flux:menu.item>
+                                        <flux:menu.separator />
+                                        @if ($isActiveRun)
+                                            <flux:menu.item icon="arrow-path" class="pointer-events-none opacity-60">
+                                                {{ $latestStatus === 'queued' ? __('Queued') : __('Running') }}
+                                            </flux:menu.item>
+                                        @else
+                                            <flux:menu.item
+                                                wire:click="queueRun({{ $scraper->id }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="queueRun({{ $scraper->id }})"
+                                                icon="play"
+                                            >
+                                                {{ __('Run') }}
+                                            </flux:menu.item>
+                                        @endif
+                                    </flux:menu>
+                                </flux:dropdown>
+                            </div>
                         </flux:table.cell>
                     </flux:table.row>
                 @empty

@@ -13,7 +13,7 @@ class ChatSourceIngestionRun extends Model
     /** @use HasFactory<\Database\Factories\ChatSourceIngestionRunFactory> */
     use HasFactory;
 
-    public const STALE_QUEUED_MINUTES = 10;
+    public const STALE_QUEUED_MINUTES = 360;
 
     public const STALE_RUNNING_MINUTES = 30;
 

@@ -129,8 +129,8 @@ it('expires stale queued and running runs before queueing a fresh scheduled run'
         'status' => 'queued',
         'started_at' => null,
         'finished_at' => null,
-        'created_at' => $nowUtc->subMinutes(11),
-        'updated_at' => $nowUtc->subMinutes(11),
+        'created_at' => $nowUtc->subMinutes(ChatSourceIngestionRun::STALE_QUEUED_MINUTES + 1),
+        'updated_at' => $nowUtc->subMinutes(ChatSourceIngestionRun::STALE_QUEUED_MINUTES + 1),
     ]);
 
     $runningRun = ChatSourceIngestionRun::factory()->create([

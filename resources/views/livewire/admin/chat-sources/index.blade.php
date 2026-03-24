@@ -122,10 +122,10 @@
         </details>
     </flux:card>
 
-    <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
+        <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
         <flux:table :paginate="$sources">
             <flux:table.columns sticky>
-                <flux:table.column sticky class="w-[360px]">
+                <flux:table.column sticky class="w-[320px] min-w-[320px]">
                     <flux:table.sortable
                         :sorted="$sortField === 'chat_sources.name'"
                         :direction="$sortDirection"
@@ -134,8 +134,8 @@
                         <div>{{ __('Name') }}</div>
                     </flux:table.sortable>
                 </flux:table.column>
-                <flux:table.column>{{ __('City') }}</flux:table.column>
-                <flux:table.column align="center">
+                <flux:table.column class="w-[140px] min-w-[140px]">{{ __('City') }}</flux:table.column>
+                <flux:table.column align="center" class="w-[96px] min-w-[96px]">
                     <flux:table.sortable
                         :sorted="$sortField === 'chat_sources.priority'"
                         :direction="$sortDirection"
@@ -146,8 +146,8 @@
                     </flux:table.sortable>
                 </flux:table.column>
                 <flux:table.column class="w-[112px]">{{ __('Active') }}</flux:table.column>
-                <flux:table.column>{{ __('Last run') }}</flux:table.column>
-                <flux:table.column align="end">{{ __('Actions') }}</flux:table.column>
+                <flux:table.column class="w-[168px] min-w-[168px]">{{ __('Last run') }}</flux:table.column>
+                <flux:table.column align="end" class="w-[84px] min-w-[84px]">{{ __('Actions') }}</flux:table.column>
             </flux:table.columns>
 
             <flux:table.rows>
@@ -160,7 +160,7 @@
                         $tz = $source->city?->timezone ?? config('app.timezone', 'UTC');
                     @endphp
                     <flux:table.row :key="$source->id">
-                        <flux:table.cell variant="strong" sticky class="w-[360px]">
+                        <flux:table.cell variant="strong" sticky class="w-[320px] min-w-[320px]">
                             <div class="space-y-1">
                                 <div>{{ $source->name }}</div>
                                 <flux:link href="{{ $source->source_url }}" target="_blank" class="block truncate text-sm font-normal text-zinc-500">
@@ -190,29 +190,37 @@
                                 <flux:text variant="subtle">{{ __('Never') }}</flux:text>
                             @endif
                         </flux:table.cell>
-                        <flux:table.cell align="end" class="flex items-center justify-end gap-2 whitespace-nowrap">
-                            <flux:button size="sm" variant="ghost" :href="route('admin.chat-sources.show', $source)" wire:navigate>
-                                {{ __('View') }}
-                            </flux:button>
-                            <flux:button size="sm" variant="ghost" :href="route('admin.chat-sources.edit', $source)" wire:navigate>
-                                {{ __('Edit') }}
-                            </flux:button>
-                            <flux:button
-                                size="sm"
-                                variant="primary"
-                                wire:click="queueRun({{ $source->id }})"
-                                wire:loading.attr="disabled"
-                                wire:target="queueRun({{ $source->id }})"
-                                :disabled="! $source->is_active || $isActiveRun"
-                            >
-                                <span class="inline-flex items-center justify-center w-16 h-8">
-                                    @if ($isActiveRun)
-                                        <flux:icon.loading class="size-4" />
-                                    @else
-                                        {{ __('Run') }}
-                                    @endif
-                                </span>
-                            </flux:button>
+                        <flux:table.cell align="end" class="w-[84px] min-w-[84px] pr-2">
+                            <div class="flex justify-end">
+                                <flux:dropdown position="bottom" align="end">
+                                    <flux:button size="sm" variant="ghost" icon="ellipsis-horizontal" aria-label="{{ __('Source actions') }}" />
+
+                                    <flux:menu class="w-[176px]">
+                                        <flux:menu.item :href="route('admin.chat-sources.show', $source)" icon="eye" wire:navigate>
+                                            {{ __('View') }}
+                                        </flux:menu.item>
+                                        <flux:menu.item :href="route('admin.chat-sources.edit', $source)" icon="pencil-square" wire:navigate>
+                                            {{ __('Edit') }}
+                                        </flux:menu.item>
+                                        <flux:menu.separator />
+                                        @if ($isActiveRun)
+                                            <flux:menu.item icon="arrow-path" class="pointer-events-none opacity-60">
+                                                {{ $latestStatus === 'queued' ? __('Queued') : __('Running') }}
+                                            </flux:menu.item>
+                                        @else
+                                            <flux:menu.item
+                                                wire:click="queueRun({{ $source->id }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="queueRun({{ $source->id }})"
+                                                icon="play"
+                                                :class="! $source->is_active ? 'pointer-events-none opacity-60' : ''"
+                                            >
+                                                {{ __('Run') }}
+                                            </flux:menu.item>
+                                        @endif
+                                    </flux:menu>
+                                </flux:dropdown>
+                            </div>
                         </flux:table.cell>
                     </flux:table.row>
                 @empty

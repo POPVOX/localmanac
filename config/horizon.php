@@ -203,9 +203,9 @@ return [
     */
 
     'defaults' => [
-        'supervisor-1' => [
+        'supervisor-default' => [
             'connection' => 'redis',
-            'queue' => ['default', 'scraping', 'analysis', 'calendar'],
+            'queue' => ['default'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,
@@ -216,22 +216,9 @@ return [
             'timeout' => 60,
             'nice' => 0,
         ],
-        'supervisor-enrichment' => [
+        'supervisor-background' => [
             'connection' => 'redis',
-            'queue' => ['enrichment'],
-            'balance' => 'auto',
-            'autoScalingStrategy' => 'time',
-            'maxProcesses' => 1,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 256,
-            'tries' => 1,
-            'timeout' => 180,
-            'nice' => 0,
-        ],
-        'supervisor-ingestion' => [
-            'connection' => 'redis',
-            'queue' => ['ingestion'],
+            'queue' => ['calendar', 'analysis', 'enrichment', 'embedding', 'scraping', 'ingestion'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,
@@ -242,50 +229,25 @@ return [
             'timeout' => (int) env('CHAT_CRAWL_JOB_TIMEOUT', 1200),
             'nice' => 0,
         ],
-        'supervisor-embedding' => [
-            'connection' => 'redis',
-            'queue' => ['embedding'],
-            'balance' => 'auto',
-            'autoScalingStrategy' => 'time',
-            'maxProcesses' => 1,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 256,
-            'tries' => 1,
-            'timeout' => 600,
-            'nice' => 0,
-        ],
     ],
 
     'environments' => [
         'production' => [
-            'supervisor-1' => [
-                'maxProcesses' => 10,
+            'supervisor-default' => [
+                'maxProcesses' => 1,
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],
-            'supervisor-enrichment' => [
-                'maxProcesses' => 4,
-            ],
-            'supervisor-ingestion' => [
-                'maxProcesses' => 2,
-            ],
-            'supervisor-embedding' => [
-                'maxProcesses' => 5,
+            'supervisor-background' => [
+                'maxProcesses' => 1,
             ],
         ],
 
         'local' => [
-            'supervisor-1' => [
+            'supervisor-default' => [
                 'maxProcesses' => 1,
             ],
-            'supervisor-enrichment' => [
-                'maxProcesses' => 1,
-            ],
-            'supervisor-ingestion' => [
-                'maxProcesses' => 1,
-            ],
-            'supervisor-embedding' => [
+            'supervisor-background' => [
                 'maxProcesses' => 1,
             ],
         ],
