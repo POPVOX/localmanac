@@ -6,7 +6,7 @@ use App\Models\User;
 use App\Services\Chat\AskService;
 use Livewire\Livewire;
 
-it('continues existing dashboard conversation and can clear it', function () {
+it('does not reuse stored dashboard conversation memory and can clear the thread', function () {
     config()->set('chat.streaming_enabled', true);
     config()->set('chat.memory_enabled', true);
     config()->set('chat.memory_session_key', 'chat.conversation_id');
@@ -35,7 +35,7 @@ it('continues existing dashboard conversation and can clear it', function () {
             expect($question)->toBe('Any updates?')
                 ->and($citySelector)->toBe($city->id)
                 ->and($requestUser->is($user))->toBeTrue()
-                ->and($conversationId)->toBe('conv_existing')
+                ->and($conversationId)->toBeNull()
                 ->and($fallbackIntent)->toBeNull();
 
             $onDelta('Here ');
@@ -64,11 +64,11 @@ it('continues existing dashboard conversation and can clear it', function () {
         ->set('cityId', $city->id)
         ->set('question', 'Any updates?')
         ->call('ask')
-        ->assertSet('conversationId', 'conv_existing')
+        ->assertSet('conversationId', null)
         ->assertSee('Here are updates.')
         ->call('startNewConversation')
         ->assertSet('conversationId', null)
         ->assertSet('messages', []);
 
-    expect(session()->has('chat.conversation_id'))->toBeFalse();
+    expect(session()->get('chat.conversation_id'))->toBe('conv_existing');
 });

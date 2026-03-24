@@ -119,3 +119,51 @@ it('adds web search for evergreen procedural questions when local evidence is we
             'wichita.gov',
         ]);
 });
+
+it('adds web search when local procedural evidence is off target for the question focus', function () {
+    config()->set('chat.retrieval_mode', 'local_then_web');
+    config()->set('chat.tools.similarity.enabled', true);
+    config()->set('chat.tools.web_search.enabled', true);
+    config()->set('chat.tools.web_search.only_when_fresh_intent', true);
+
+    $city = new City;
+    $city->name = 'Wichita';
+
+    $sourceA = new ChatSource;
+    $sourceA->id = 6;
+    $sourceA->source_url = 'https://www.wichita.gov/958/Licenses-Permits';
+
+    $sourceB = new ChatSource;
+    $sourceB->id = 8;
+    $sourceB->source_url = 'https://www.sedgwickcounty.org/how-do-i/';
+
+    $method = new ReflectionMethod(AnswerSynthesizer::class, 'buildTools');
+    $method->setAccessible(true);
+
+    $tools = collect($method->invoke(
+        app(AnswerSynthesizer::class),
+        $city,
+        collect([$sourceA, $sourceB]),
+        'How do I get a demolition permit?',
+        [],
+        [[
+            'title' => 'Burn Permits | Sedgwick County, Kansas',
+            'source_url' => 'https://www.sedgwickcounty.org/fire/forms/burn-permits/',
+            'snippet' => 'Open burns and burn permit requirements.',
+            'score' => 48.0,
+        ], [
+            'title' => 'Traffic, Street & Construction Permitting | Wichita, KS',
+            'source_url' => 'https://www.wichita.gov/1311/Traffic-Street-Construction-Permitting',
+            'snippet' => 'Right-of-way and street construction permits.',
+            'score' => 44.0,
+        ]],
+    ));
+
+    $webSearch = $tools->first(fn ($tool): bool => $tool instanceof WebSearch);
+
+    expect($webSearch)->toBeInstanceOf(WebSearch::class)
+        ->and(collect($webSearch->allowedDomains)->sort()->values()->all())->toBe([
+            'sedgwickcounty.org',
+            'wichita.gov',
+        ]);
+});

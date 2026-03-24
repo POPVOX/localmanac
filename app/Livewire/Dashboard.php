@@ -54,10 +54,6 @@ class Dashboard extends Component
     public function mount(): void
     {
         $this->cityId = request()->integer('city_id') ?: null;
-
-        if ($this->memoryEnabled()) {
-            $this->conversationId = session()->get($this->conversationSessionKey());
-        }
     }
 
     public function ask(): void
@@ -82,20 +78,10 @@ class Dashboard extends Component
                     question: $question,
                     citySelector: $city?->id,
                     user: auth()->user(),
-                    conversationId: $this->memoryEnabled() ? $this->conversationId : null,
+                    conversationId: null,
                     onDelta: static fn (string $delta): null => null,
                     fallbackIntent: $this->fallbackIntent,
                 );
-
-                if ($this->memoryEnabled()) {
-                    $this->conversationId = is_string($response['conversation_id'] ?? null)
-                        ? $response['conversation_id']
-                        : null;
-
-                    if ($this->conversationId) {
-                        session()->put($this->conversationSessionKey(), $this->conversationId);
-                    }
-                }
             } else {
                 $response = app(AskService::class)->answer(
                     question: $question,
@@ -127,9 +113,7 @@ class Dashboard extends Component
 
     public function startNewConversation(): void
     {
-        $this->conversationId = null;
         $this->fallbackIntent = null;
-        session()->forget($this->conversationSessionKey());
         $this->messages = [];
         $this->dispatch('chat-reset');
     }
@@ -237,16 +221,6 @@ class Dashboard extends Component
             ->where('slug', 'wichita')
             ->first()
             ?? City::query()->first();
-    }
-
-    private function memoryEnabled(): bool
-    {
-        return (bool) config('chat.memory_enabled', true) && auth()->check();
-    }
-
-    private function conversationSessionKey(): string
-    {
-        return (string) config('chat.memory_session_key', 'chat.conversation_id');
     }
 
     private function resolveTimezone(?City $city): string

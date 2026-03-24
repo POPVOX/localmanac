@@ -6,7 +6,7 @@ use App\Models\User;
 use App\Services\Chat\AskService;
 use Livewire\Livewire;
 
-it('streams answers for authenticated dashboard users and persists conversation id', function () {
+it('streams answers for authenticated dashboard users without reusing conversation memory', function () {
     config()->set('chat.streaming_enabled', true);
     config()->set('chat.memory_enabled', true);
     config()->set('chat.memory_session_key', 'chat.conversation_id');
@@ -76,13 +76,13 @@ it('streams answers for authenticated dashboard users and persists conversation 
         ->set('cityId', $city->id)
         ->set('question', 'When is trash pickup?')
         ->call('ask')
-        ->assertSet('conversationId', 'conv_123')
+        ->assertSet('conversationId', null)
         ->assertSee('Trash pickup is on Monday.')
         ->assertSee('Open source page')
         ->assertSee('Recycling & Trash')
         ->assertSeeHtml('data-chat-role="assistant"');
 
-    expect(session()->get('chat.conversation_id'))->toBe('conv_123');
+    expect(session()->has('chat.conversation_id'))->toBeFalse();
 });
 
 it('passes explicit fallback intent for unchanged prompt chips', function () {

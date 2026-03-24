@@ -1042,7 +1042,7 @@ class AnswerSynthesizer
 
     /**
      * @param  array<int, array<string, mixed>>  $seedEvidence
-     * @return array{intent: bool, evidence_sparse: bool, evidence_generic: bool, use_web_fallback: bool}
+     * @return array{intent: bool, evidence_sparse: bool, evidence_generic: bool, evidence_off_target: bool, use_web_fallback: bool}
      */
     private function resolveProceduralContext(string $question, array $seedEvidence): array
     {
@@ -1053,22 +1053,25 @@ class AnswerSynthesizer
                 'intent' => false,
                 'evidence_sparse' => false,
                 'evidence_generic' => false,
+                'evidence_off_target' => false,
                 'use_web_fallback' => false,
             ];
         }
 
         $evidenceSparse = count($seedEvidence) < 2;
         $evidenceGeneric = $this->evidenceLooksGeneric($seedEvidence);
+        $evidenceOffTarget = $this->evidenceLooksOffTarget($question, $seedEvidence);
         $useWebFallback = match ((string) config('chat.retrieval_mode', 'local_then_web')) {
             'web_only' => true,
             'local_only' => false,
-            default => $evidenceSparse || $evidenceGeneric,
+            default => $evidenceSparse || $evidenceGeneric || $evidenceOffTarget,
         };
 
         return [
             'intent' => true,
             'evidence_sparse' => $evidenceSparse,
             'evidence_generic' => $evidenceGeneric,
+            'evidence_off_target' => $evidenceOffTarget,
             'use_web_fallback' => $useWebFallback,
         ];
     }
@@ -1127,6 +1130,83 @@ class AnswerSynthesizer
         }
 
         return $proceduralHits < 3 || $genericHits > $proceduralHits;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $seedEvidence
+     */
+    private function evidenceLooksOffTarget(string $question, array $seedEvidence): bool
+    {
+        if ($seedEvidence === []) {
+            return true;
+        }
+
+        $focusTerms = $this->proceduralFocusTerms($question);
+
+        if ($focusTerms === []) {
+            return false;
+        }
+
+        $matchingEvidence = collect($seedEvidence)
+            ->filter(function (array $item) use ($focusTerms): bool {
+                $haystack = mb_strtolower(implode(' ', [
+                    (string) ($item['title'] ?? ''),
+                    (string) ($item['snippet'] ?? ''),
+                    (string) ($item['source_url'] ?? ''),
+                ]));
+
+                foreach ($focusTerms as $term) {
+                    if (str_contains($haystack, $term)) {
+                        return true;
+                    }
+                }
+
+                return false;
+            })
+            ->count();
+
+        return $matchingEvidence === 0;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function proceduralFocusTerms(string $question): array
+    {
+        $questionTerms = $this->keywordTerms($question);
+        $broadProceduralTerms = [
+            'apply',
+            'application',
+            'approval',
+            'city',
+            'contractor',
+            'contractors',
+            'fee',
+            'fees',
+            'get',
+            'historic',
+            'how',
+            'inspection',
+            'inspections',
+            'license',
+            'licenses',
+            'local',
+            'municipal',
+            'need',
+            'permit',
+            'permits',
+            'portal',
+            'review',
+            'submit',
+            'what',
+            'where',
+            'who',
+        ];
+
+        return array_values(array_filter(
+            $questionTerms,
+            fn (string $term): bool => ! in_array($term, $broadProceduralTerms, true)
+        ));
     }
 
     /**
