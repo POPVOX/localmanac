@@ -4,6 +4,7 @@ use App\Models\ChatSource;
 use App\Models\City;
 use App\Services\Chat\ChatSourceSelector;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Database\Eloquent\Factories\Sequence;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Illuminate\Support\LazyCollection;
@@ -198,4 +199,88 @@ it('does not let generic city phrasing outrank focused civic sources', function 
     expect($results)->toHaveCount(2)
         ->and($results->pluck('id')->first())->toBe($focusedSource->id)
         ->and($results->pluck('id'))->toContain($genericHub->id);
+});
+
+it('broadens procedural fallback candidates when scout misses permit sources', function () {
+    config()->set('scout.driver', 'fake');
+
+    $engine = new class extends Engine
+    {
+        public function update(mixed $models): void {}
+
+        public function delete(mixed $models): void {}
+
+        public function search(Builder $builder): array
+        {
+            throw new \RuntimeException('Scout unavailable');
+        }
+
+        public function paginate(Builder $builder, mixed $perPage, mixed $page): array
+        {
+            return $this->search($builder);
+        }
+
+        public function mapIds(mixed $results): Collection
+        {
+            return collect();
+        }
+
+        public function map(Builder $builder, mixed $results, mixed $model): EloquentCollection
+        {
+            return $model->newCollection();
+        }
+
+        public function lazyMap(Builder $builder, mixed $results, mixed $model): LazyCollection
+        {
+            return $this->map($builder, $results, $model)->lazy();
+        }
+
+        public function getTotalCount(mixed $results): int
+        {
+            return 0;
+        }
+
+        public function flush(mixed $model): void {}
+
+        public function createIndex(mixed $name, array $options = []): mixed
+        {
+            return null;
+        }
+
+        public function deleteIndex(mixed $name): mixed
+        {
+            return null;
+        }
+    };
+
+    $engineManager = app(EngineManager::class);
+    $engineManager->forgetDrivers();
+    $engineManager->extend('fake', fn () => $engine);
+
+    $city = City::factory()->create();
+
+    ChatSource::factory()->count(50)->sequence(
+        fn (Sequence $sequence): array => [
+            'city_id' => $city->id,
+            'name' => 'City Government',
+            'source_url' => 'https://example.com/government-'.$sequence->index,
+            'tags' => ['government', 'city'],
+            'priority' => 10,
+            'is_active' => true,
+        ],
+    )->create();
+
+    $focusedPermitSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Licenses & Permits',
+        'source_url' => 'https://example.com/licenses-permits',
+        'tags' => ['permit', 'demolition', 'apply'],
+        'priority' => 2,
+        'is_active' => true,
+    ]);
+
+    $selector = app(ChatSourceSelector::class);
+    $results = $selector->select($city->id, 'How do I get a demolition permit?', 12);
+
+    expect($results->pluck('id')->first())->toBe($focusedPermitSource->id);
 });

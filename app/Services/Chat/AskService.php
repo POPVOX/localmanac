@@ -55,7 +55,7 @@ class AskService
         $city = $this->resolveCity($cityId, $citySlug);
         $normalizedQuestion = $this->normalizeQuestionForCity($question, $city);
         $fallbackIntent = $this->normalizeFallbackIntent($fallbackIntent);
-        $sources = $this->selector->select($city->id, $normalizedQuestion);
+        $sources = $this->selectSourcesForQuestion($city->id, $normalizedQuestion);
 
         if ($sources->isEmpty()) {
             $fallback = $this->resolveFallbackResponse($city, $sources, $fallbackIntent);
@@ -203,7 +203,7 @@ class AskService
         $city = $this->resolveCityFromSelector($citySelector);
         $normalizedQuestion = $this->normalizeQuestionForCity($question, $city);
         $fallbackIntent = $this->normalizeFallbackIntent($fallbackIntent);
-        $sources = $this->selector->select($city->id, $normalizedQuestion);
+        $sources = $this->selectSourcesForQuestion($city->id, $normalizedQuestion);
 
         if ($sources->isEmpty()) {
             $fallback = $this->resolveFallbackResponse($city, $sources, $fallbackIntent);
@@ -416,6 +416,22 @@ class AskService
         return in_array($fallbackIntent, self::allowedFallbackIntents(), true)
             ? $fallbackIntent
             : null;
+    }
+
+    /**
+     * @return Collection<int, \App\Models\ChatSource>
+     */
+    private function selectSourcesForQuestion(int $cityId, string $question): Collection
+    {
+        if ($this->isProceduralQuestion($question)) {
+            return $this->selector->select(
+                $cityId,
+                $question,
+                max((int) config('chat.max_sources', 12), 24),
+            );
+        }
+
+        return $this->selector->select($cityId, $question);
     }
 
     /**

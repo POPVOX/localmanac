@@ -34,12 +34,16 @@ class ChatSourceSelector
         $fallback = collect();
 
         if ($sources->count() < $limit || $isProceduralQuestion) {
+            $fallbackLimit = $isProceduralQuestion
+                ? max($limit * 4, 64)
+                : max($limit * 2, $limit);
+
             $fallback = ChatSource::query()
                 ->where('city_id', $cityId)
                 ->where('is_active', true)
                 ->orderByDesc('priority')
                 ->orderBy('id')
-                ->take(max($limit * 2, $limit))
+                ->take($fallbackLimit)
                 ->get();
         }
 
