@@ -19,7 +19,8 @@ it('uses the configured crawl job timeout', function () {
 
     $job = new IngestChatSource(123);
 
-    expect($job->timeout)->toBe(1800);
+    expect($job->timeout)->toBe(1800)
+        ->and($job->queue)->toBe('ingestion');
 });
 
 it('purges blocked infrastructure pages and their chunks during reingest', function () {

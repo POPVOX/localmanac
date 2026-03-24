@@ -6,6 +6,10 @@ use App\Models\City;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Laravel\Ai\Contracts\ConversationStore;
+use Laravel\Ai\Messages\Message;
+use Laravel\Ai\Messages\MessageRole;
 use RuntimeException;
 
 /**
@@ -25,6 +29,7 @@ class AskService
     public function __construct(
         private readonly ChatSourceSelector $selector,
         private readonly AnswerSynthesizer $synthesizer,
+        private readonly ?ConversationStore $conversationStore = null,
     ) {}
 
     /**
@@ -46,13 +51,14 @@ class AskService
         $question = trim($question);
         $city = $this->resolveCityFromSelector($citySelector);
         $normalizedQuestion = $this->normalizeQuestionForCity($question, $city);
+        $effectiveConversationId = $this->resolveConversationIdForQuestion($question, $conversationId);
         $sources = $this->selector->select($city->id, $normalizedQuestion);
 
         if ($sources->isEmpty()) {
             $fallback = $this->resolveFallbackResponse($city, $sources);
             $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, 0.0, 'fallback', false, 'sources_empty');
 
-            return array_merge($fallback, ['conversation_id' => $conversationId]);
+            return array_merge($fallback, ['conversation_id' => $effectiveConversationId]);
         }
 
         try {
@@ -61,7 +67,7 @@ class AskService
                 city: $city,
                 sources: $sources,
                 user: $user,
-                conversationId: $conversationId,
+                conversationId: $effectiveConversationId,
                 onDelta: $onDelta,
                 originalQuestion: $question,
             );
@@ -69,12 +75,12 @@ class AskService
             $fallback = $this->resolveFallbackResponse($city, $sources);
             $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, 0.0, 'fallback', false, 'streaming_synthesizer_exception');
 
-            return array_merge($fallback, ['conversation_id' => $conversationId]);
+            return array_merge($fallback, ['conversation_id' => $effectiveConversationId]);
         }
 
         $resolvedConversationId = is_string($answerPayload['conversation_id'] ?? null)
             ? $answerPayload['conversation_id']
-            : $conversationId;
+            : $effectiveConversationId;
 
         $final = $this->finalizeAnswer(
             originalQuestion: $question,
@@ -148,6 +154,165 @@ class AskService
         $normalized = preg_replace('/\bthis city\b/i', $cityName, $normalized) ?? $normalized;
 
         return preg_replace('/\s+/', ' ', trim($normalized)) ?? trim($normalized);
+    }
+
+    private function resolveConversationIdForQuestion(string $question, ?string $conversationId): ?string
+    {
+        if (! (bool) config('chat.memory_enabled', true)) {
+            return null;
+        }
+
+        if (! is_string($conversationId) || trim($conversationId) === '') {
+            return null;
+        }
+
+        $latestQuestion = $this->latestQuestionFromConversation($conversationId);
+
+        if ($latestQuestion === null) {
+            return null;
+        }
+
+        return $this->shouldReuseConversation($question, $latestQuestion)
+            ? $conversationId
+            : null;
+    }
+
+    private function latestQuestionFromConversation(string $conversationId): ?string
+    {
+        try {
+            $messages = ($this->conversationStore ?? app(ConversationStore::class))
+                ->getLatestConversationMessages($conversationId, 12);
+        } catch (\Throwable $exception) {
+            Log::warning('chat.memory.lookup_failed', [
+                'conversation_id' => $conversationId,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        $latestUserMessage = $messages
+            ->reverse()
+            ->first(fn (Message $message): bool => $message->role === MessageRole::User && trim((string) $message->content) !== '');
+
+        if (! $latestUserMessage instanceof Message) {
+            return null;
+        }
+
+        $content = trim((string) $latestUserMessage->content);
+
+        return $content !== '' ? $content : null;
+    }
+
+    private function shouldReuseConversation(string $question, string $latestQuestion): bool
+    {
+        $normalizedQuestion = $this->normalizeConversationText($question);
+        $normalizedLatestQuestion = $this->normalizeConversationText($latestQuestion);
+
+        if ($normalizedQuestion === '' || $normalizedLatestQuestion === '') {
+            return false;
+        }
+
+        if ($normalizedQuestion === $normalizedLatestQuestion) {
+            return true;
+        }
+
+        $questionTokens = $this->significantConversationTokens($normalizedQuestion);
+        $latestQuestionTokens = $this->significantConversationTokens($normalizedLatestQuestion);
+        $overlap = array_values(array_intersect($questionTokens, $latestQuestionTokens));
+
+        if ($overlap !== []) {
+            return true;
+        }
+
+        if (! $this->hasFollowUpCue($normalizedQuestion)) {
+            return false;
+        }
+
+        if ($this->containsContextualReference($normalizedQuestion)) {
+            return true;
+        }
+
+        if ($questionTokens === [] || count($questionTokens) === 1) {
+            return true;
+        }
+
+        return $this->tokensAreTemporalOnly($questionTokens);
+    }
+
+    private function normalizeConversationText(string $question): string
+    {
+        $normalized = mb_strtolower($question);
+        $normalized = preg_replace('/[^\pL\pN\s]/u', ' ', $normalized) ?? $normalized;
+
+        return preg_replace('/\s+/', ' ', trim($normalized)) ?? trim($normalized);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function significantConversationTokens(string $question): array
+    {
+        $stopWords = [
+            'a', 'about', 'an', 'and', 'any', 'are', 'as', 'at', 'be', 'but', 'by', 'can',
+            'could', 'did', 'do', 'does', 'for', 'from', 'get', 'had', 'has', 'have', 'how',
+            'i', 'if', 'in', 'is', 'it', 'its', 'just', 'me', 'more', 'my', 'of', 'on', 'or',
+            'our', 'show', 'tell', 'than', 'that', 'the', 'their', 'them', 'then', 'there',
+            'these', 'they', 'this', 'those', 'to', 'up', 'us', 'was', 'we', 'what', 'when',
+            'where', 'which', 'who', 'why', 'will', 'with', 'would', 'you', 'your',
+        ];
+
+        return collect(preg_split('/\s+/', $question) ?: [])
+            ->map(fn (string $token): string => Str::singular(trim($token)))
+            ->filter(fn (string $token): bool => $token !== '' && ! in_array($token, $stopWords, true))
+            ->values()
+            ->all();
+    }
+
+    private function hasFollowUpCue(string $question): bool
+    {
+        $trimmedQuestion = trim($question);
+
+        foreach ([
+            'what about',
+            'how about',
+            'what time',
+            'where is',
+            'where are',
+            'when is it',
+            'when are they',
+            'tell me more',
+            'anything else',
+            'any updates',
+            'more details',
+            'expand on',
+        ] as $phrase) {
+            if (str_starts_with($trimmedQuestion, $phrase) || str_contains($trimmedQuestion, $phrase)) {
+                return true;
+            }
+        }
+
+        return str_starts_with($trimmedQuestion, 'and ')
+            || str_starts_with($trimmedQuestion, 'also ');
+    }
+
+    private function containsContextualReference(string $question): bool
+    {
+        return preg_match('/\b(it|its|that|those|them|they|there|same|another|again|more|else)\b/u', $question) === 1;
+    }
+
+    /**
+     * @param  array<int, string>  $tokens
+     */
+    private function tokensAreTemporalOnly(array $tokens): bool
+    {
+        $temporalTokens = [
+            'today', 'tomorrow', 'yesterday', 'tonight', 'week', 'weekend', 'month',
+            'day', 'next', 'upcoming', 'soon', 'later', 'morning', 'afternoon', 'evening',
+        ];
+
+        return collect($tokens)->every(fn (string $token): bool => in_array($token, $temporalTokens, true));
     }
 
     private function finalizeAnswer(
