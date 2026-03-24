@@ -2433,9 +2433,10 @@ class AnswerSynthesizer
 
         $terms = $this->answerAlignmentTerms($question, $answer);
         $isProcedural = $this->isProceduralQuestion($question);
+        $proceduralFocusTerms = $isProcedural ? $this->proceduralFocusTerms($question) : [];
 
         $ranked = collect($seedEvidence)
-            ->map(function (array $item) use ($terms, $answer, $isProcedural): array {
+            ->map(function (array $item) use ($terms, $answer, $isProcedural, $question, $proceduralFocusTerms): array {
                 $snippet = mb_strtolower((string) ($item['snippet'] ?? ''));
                 $title = mb_strtolower((string) ($item['title'] ?? ''));
                 $url = mb_strtolower((string) ($item['source_url'] ?? ''));
@@ -2475,6 +2476,9 @@ class AnswerSynthesizer
                 }
 
                 if ($isProcedural) {
+                    $alignmentScore += $this->proceduralEvidenceAlignmentBoost($proceduralFocusTerms, $item);
+                    $alignmentScore -= $this->proceduralEvidenceMismatchPenalty($question, $proceduralFocusTerms, $item);
+
                     foreach ($this->proceduralSignals() as $signal) {
                         if (str_contains($snippet, $signal)) {
                             $alignmentScore += 1.25;
@@ -2482,7 +2486,7 @@ class AnswerSynthesizer
                     }
                 }
 
-                $alignmentScore -= $this->genericEvidencePenalty($item);
+                $alignmentScore -= $this->genericEvidencePenalty($item) * ($isProcedural ? 1.5 : 1.0);
                 $item['alignment_score'] = $alignmentScore + min($score, 10.0);
 
                 return $item;
@@ -2504,6 +2508,80 @@ class AnswerSynthesizer
     }
 
     /**
+     * @param  array<int, string>  $focusTerms
+     * @param  array<string, mixed>  $item
+     */
+    private function proceduralEvidenceAlignmentBoost(array $focusTerms, array $item): float
+    {
+        if ($focusTerms === []) {
+            return 0.0;
+        }
+
+        $snippet = mb_strtolower((string) ($item['snippet'] ?? ''));
+        $title = mb_strtolower((string) ($item['title'] ?? ''));
+        $url = mb_strtolower((string) ($item['source_url'] ?? ''));
+        $context = $title.' '.$url;
+        $boost = 0.0;
+
+        foreach ($focusTerms as $term) {
+            if (str_contains($snippet, $term)) {
+                $boost += 4.0;
+            }
+
+            if (str_contains($context, $term)) {
+                $boost += 8.0;
+            }
+        }
+
+        $boost += $this->proceduralProcessSignalCount($snippet.' '.$context) * 1.5;
+
+        return $boost;
+    }
+
+    /**
+     * @param  array<int, string>  $focusTerms
+     * @param  array<string, mixed>  $item
+     */
+    private function proceduralEvidenceMismatchPenalty(string $question, array $focusTerms, array $item): float
+    {
+        if (! $this->questionRequiresProceduralSteps($question) || $focusTerms === []) {
+            return 0.0;
+        }
+
+        $snippet = mb_strtolower((string) ($item['snippet'] ?? ''));
+        $title = mb_strtolower((string) ($item['title'] ?? ''));
+        $url = mb_strtolower((string) ($item['source_url'] ?? ''));
+        $context = $title.' '.$url;
+        $focusInSnippet = false;
+        $focusInContext = false;
+
+        foreach ($focusTerms as $term) {
+            if (str_contains($snippet, $term)) {
+                $focusInSnippet = true;
+            }
+
+            if (str_contains($context, $term)) {
+                $focusInContext = true;
+            }
+        }
+
+        $processSignals = $this->proceduralProcessSignalCount($snippet.' '.$context);
+        $penalty = 0.0;
+
+        if ($focusInSnippet && ! $focusInContext) {
+            $penalty += 18.0;
+        }
+
+        if ($processSignals === 0) {
+            $penalty += 18.0;
+        } elseif ($processSignals === 1) {
+            $penalty += 8.0;
+        }
+
+        return $penalty;
+    }
+
+    /**
      * @return array<int, string>
      */
     private function answerAlignmentTerms(string $question, string $answer): array
@@ -2521,6 +2599,70 @@ class AnswerSynthesizer
             $terms,
             fn (string $term): bool => mb_strlen($term) >= 3 && ! in_array($term, $stopwords, true)
         )));
+    }
+
+    private function questionRequiresProceduralSteps(string $question): bool
+    {
+        $question = mb_strtolower($question);
+
+        if (preg_match('/\b(how do i|how can i|where do i|what do i need)\b/i', $question) === 1) {
+            return true;
+        }
+
+        foreach ([
+            'permit',
+            'permits',
+            'application',
+            'apply',
+            'submit',
+            'inspection',
+            'inspections',
+            'approval',
+            'approved',
+            'required',
+            'requirements',
+            'documents',
+        ] as $signal) {
+            if (str_contains($question, $signal)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function proceduralProcessSignalCount(string $content): int
+    {
+        $content = mb_strtolower($content);
+        $matches = 0;
+
+        foreach ([
+            'apply',
+            'application',
+            'submit',
+            'submitted',
+            'approval',
+            'approved',
+            'inspection',
+            'inspections',
+            'required',
+            'requirements',
+            'document',
+            'documents',
+            'portal',
+            'contractor',
+            'review',
+            'certificate',
+            'office',
+            'department',
+            'bond',
+        ] as $signal) {
+            if (str_contains($content, $signal)) {
+                $matches++;
+            }
+        }
+
+        return $matches;
     }
 
     /**

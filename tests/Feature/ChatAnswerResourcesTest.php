@@ -365,3 +365,100 @@ it('does not surface citations or resources for refusal answers', function () {
         ->assertJsonPath('citations', [])
         ->assertJsonPath('resources', []);
 });
+
+it('does not surface off target landfill resources for demolition permit answers', function () {
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.fts_enabled', true);
+    config()->set('chat.retrieval_chunk_limit', 8);
+    config()->set('chat.retrieval_neighbor_window', 0);
+    config()->set('chat.retrieval_max_evidence', 8);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $permitSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Apply For',
+        'source_url' => 'https://example.com/demolition-permit',
+        'is_active' => true,
+    ]);
+
+    $landfillSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Brooks Landfill',
+        'source_url' => 'https://example.com/brooks-landfill',
+        'is_active' => true,
+    ]);
+
+    $permitPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $permitSource->id,
+        'url' => 'https://example.com/demolition-permit',
+        'canonical_url' => 'https://example.com/demolition-permit',
+        'title' => 'Demolition Permit Application',
+        'content_text' => 'Submit the demolition permit application and contractor documents through the permit portal. For historic review questions call 316-268-4421.',
+        'content_length' => 136,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $permitPage->id,
+        'chunk_index' => 0,
+        'content' => 'Submit the demolition permit application and contractor documents through the permit portal. For historic review questions call 316-268-4421.',
+        'content_length' => 136,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    $landfillPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $landfillSource->id,
+        'url' => 'https://example.com/brooks-landfill',
+        'canonical_url' => 'https://example.com/brooks-landfill',
+        'title' => 'Brooks Landfill',
+        'content_text' => 'Construction and demolition debris may be taken to Brooks Landfill. Call 316-350-3225 for disposal rules.',
+        'content_length' => 103,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $landfillPage->id,
+        'chunk_index' => 0,
+        'content' => 'Construction and demolition debris may be taken to Brooks Landfill. Call 316-350-3225 for disposal rules.',
+        'content_length' => 103,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'To get a demolition permit, submit the application and required contractor documents. For historic review questions call 316-268-4421.',
+            'citations' => [
+                [
+                    'title' => 'Brooks Landfill',
+                    'source_url' => 'https://example.com/brooks-landfill',
+                    'type' => 'html',
+                ],
+            ],
+            'source_mode' => 'local',
+            'confidence' => 0.92,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'How do I get a demolition permit?',
+        'city_id' => $city->id,
+    ]);
+
+    $response->assertSuccessful()
+        ->assertJsonPath('citations.0.source_url', 'https://example.com/demolition-permit');
+
+    expect(collect($response->json('resources'))->contains(
+        fn (array $resource): bool => $resource['type'] === 'phone'
+            && $resource['url'] === 'tel:3163503225'
+    ))->toBeFalse();
+
+    expect(collect($response->json('resources'))->contains(
+        fn (array $resource): bool => $resource['type'] === 'phone'
+            && $resource['url'] === 'tel:3162684421'
+    ))->toBeTrue();
+});

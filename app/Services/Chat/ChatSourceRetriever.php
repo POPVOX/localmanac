@@ -64,6 +64,7 @@ class ChatSourceRetriever
         $rows = $this->expandNeighborChunks($rows);
         $rows = $this->rerankRows($rows, $question);
         $rows = $this->deduplicateRows($rows)
+            ->pipe(fn (Collection $items): Collection => $this->filterSeverelyMismatchedProceduralRows($items, $question))
             ->filter(fn (array $row): bool => ! $this->isBlockedRow($row))
             ->take((int) config('chat.retrieval_max_evidence', 24));
 
@@ -344,7 +345,7 @@ class ChatSourceRetriever
     private function mapEvidence(array $row): array
     {
         $sourceUrl = $row['canonical_url'] ?: $row['page_url'];
-        $effectiveScore = (float) ($row['combined_score'] ?? ($row['score'] ?? 1));
+        $effectiveScore = min((float) ($row['combined_score'] ?? ($row['score'] ?? 1)), 25.0);
 
         return [
             'id' => 'chunk_'.$row['chunk_id'],
@@ -535,14 +536,15 @@ class ChatSourceRetriever
                     $boostScore += $this->proceduralBoostScore($question, $terms, $row);
                     $boostScore += $this->proceduralFocusBoostScore($proceduralFocusTerms, $row);
                     $boostScore -= $this->proceduralFocusMismatchPenalty($proceduralFocusTerms, $row);
+                    $boostScore -= $this->proceduralIntentMismatchPenalty($question, $proceduralFocusTerms, $row);
                     $boostScore -= $this->genericPagePenalty($row);
                 } else {
                     $boostScore -= $this->genericPagePenalty($row) * 0.4;
                 }
 
-                $baseScore = (int) ($row['score'] ?? 1);
+                $baseScore = $this->normalizedRetrievalScore($row);
                 $row['combined_score'] = $baseScore + $boostScore;
-                $row['score'] = max($baseScore, (int) ceil($row['combined_score']));
+                $row['score'] = max(1, (int) ceil($row['combined_score']));
 
                 return $row;
             })
@@ -598,6 +600,61 @@ class ChatSourceRetriever
     }
 
     /**
+     * @param  array<int, string>  $focusTerms
+     * @param  array<string, mixed>  $row
+     */
+    private function proceduralIntentMismatchPenalty(string $question, array $focusTerms, array $row): float
+    {
+        if (! $this->questionRequiresProceduralSteps($question) || $focusTerms === []) {
+            return 0.0;
+        }
+
+        $chunk = mb_strtolower((string) ($row['chunk'] ?? ''));
+        $title = mb_strtolower((string) ($row['page_title'] ?? ''));
+        $sourceName = mb_strtolower((string) ($row['source_name'] ?? ''));
+        $url = mb_strtolower((string) ($row['page_url'] ?? ''));
+        $context = $title.' '.$sourceName.' '.$url;
+        $focusInChunk = $this->countTermMatches($chunk, $focusTerms) > 0;
+        $focusInContext = $this->countTermMatches($context, $focusTerms) > 0;
+        $processSignals = $this->countProceduralProcessSignals($chunk.' '.$context);
+        $penalty = 0.0;
+
+        if ($focusInChunk && ! $focusInContext) {
+            $penalty += 18.0;
+        }
+
+        if ($processSignals === 0) {
+            $penalty += 18.0;
+        } elseif ($processSignals === 1) {
+            $penalty += 8.0;
+        }
+
+        return $penalty;
+    }
+
+    /**
+     * @param  array<int, string>  $focusTerms
+     * @param  array<string, mixed>  $row
+     */
+    private function isSeverelyProceduralMismatch(string $question, array $focusTerms, array $row): bool
+    {
+        if (! $this->questionRequiresProceduralSteps($question)) {
+            return false;
+        }
+
+        $chunk = mb_strtolower((string) ($row['chunk'] ?? ''));
+        $title = mb_strtolower((string) ($row['page_title'] ?? ''));
+        $sourceName = mb_strtolower((string) ($row['source_name'] ?? ''));
+        $url = mb_strtolower((string) ($row['page_url'] ?? ''));
+        $context = $title.' '.$sourceName.' '.$url;
+        $focusInChunk = $this->countTermMatches($chunk, $focusTerms) > 0;
+        $focusInContext = $this->countTermMatches($context, $focusTerms) > 0;
+        $processSignals = $this->countProceduralProcessSignals($chunk.' '.$context);
+
+        return $focusInChunk && ! $focusInContext && $processSignals === 0;
+    }
+
+    /**
      * @param  array<int, string>  $terms
      */
     private function countPhraseMatches(array $terms, string $content): int
@@ -634,6 +691,23 @@ class ChatSourceRetriever
                 return md5($url.'|'.$snippet);
             })
             ->values();
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $rows
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function filterSeverelyMismatchedProceduralRows(Collection $rows, string $question): Collection
+    {
+        $focusTerms = $this->proceduralFocusTerms($question);
+
+        if (! $this->questionRequiresProceduralSteps($question) || $focusTerms === [] || $rows->isEmpty()) {
+            return $rows;
+        }
+
+        $filtered = $rows->reject(fn (array $row): bool => $this->isSeverelyProceduralMismatch($question, $focusTerms, $row));
+
+        return $filtered->isNotEmpty() ? $filtered->values() : $rows;
     }
 
     /**
@@ -718,6 +792,16 @@ class ChatSourceRetriever
     /**
      * @param  array<string, mixed>  $row
      */
+    private function normalizedRetrievalScore(array $row): float
+    {
+        $score = (float) ($row['score'] ?? 1.0);
+
+        return max(1.0, min($score, 12.0));
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
     private function genericPagePenalty(array $row): float
     {
         $title = mb_strtolower((string) ($row['page_title'] ?? ''));
@@ -755,6 +839,50 @@ class ChatSourceRetriever
         }
 
         return $penalty;
+    }
+
+    private function questionRequiresProceduralSteps(string $question): bool
+    {
+        $question = mb_strtolower($question);
+
+        if (preg_match('/\b(how do i|how can i|where do i|what do i need)\b/i', $question) === 1) {
+            return true;
+        }
+
+        foreach ([
+            'permit',
+            'permits',
+            'application',
+            'apply',
+            'submit',
+            'inspection',
+            'inspections',
+            'approval',
+            'approved',
+            'required',
+            'requirements',
+            'documents',
+        ] as $signal) {
+            if (str_contains($question, $signal)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function countProceduralProcessSignals(string $content): int
+    {
+        $content = mb_strtolower($content);
+        $matches = 0;
+
+        foreach ($this->proceduralProcessSignals() as $signal) {
+            if (str_contains($content, $signal)) {
+                $matches++;
+            }
+        }
+
+        return $matches;
     }
 
     private function questionAndChunkShareProceduralFocus(string $question, string $chunk, string $context): bool
@@ -889,6 +1017,34 @@ class ChatSourceRetriever
             'submit the application',
             'apply online',
             'permit portal',
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function proceduralProcessSignals(): array
+    {
+        return [
+            'apply',
+            'application',
+            'submit',
+            'submitted',
+            'approval',
+            'approved',
+            'inspection',
+            'inspections',
+            'required',
+            'requirements',
+            'document',
+            'documents',
+            'portal',
+            'contractor',
+            'review',
+            'certificate',
+            'office',
+            'department',
+            'bond',
         ];
     }
 

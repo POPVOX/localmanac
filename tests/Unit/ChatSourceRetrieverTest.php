@@ -463,3 +463,96 @@ it('demotes unrelated permit pages when a specific permit type is requested', fu
         ->and($result['evidence'][0]['source_url'])->toBe('https://example.com/demolition-permit')
         ->and($result['evidence'][0]['title'])->toBe('Demolition Permit Application');
 });
+
+it('demotes topical but non procedural chunks for permit process questions', function () {
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.fts_enabled', true);
+    config()->set('chat.retrieval_chunk_limit', 8);
+    config()->set('chat.retrieval_neighbor_window', 0);
+    config()->set('chat.retrieval_max_evidence', 8);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $permitSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Apply For',
+        'source_url' => 'https://example.com/apply-for',
+        'is_active' => true,
+    ]);
+
+    $landfillSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Brooks Landfill',
+        'source_url' => 'https://example.com/brooks-landfill',
+        'is_active' => true,
+    ]);
+
+    $faqSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita FAQ',
+        'source_url' => 'https://example.com/faq',
+        'is_active' => true,
+    ]);
+
+    $permitPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $permitSource->id,
+        'url' => 'https://example.com/demolition-permit',
+        'canonical_url' => 'https://example.com/demolition-permit',
+        'title' => 'Demolition Permit Application',
+        'content_text' => 'Submit the demolition permit application, required contractor documents, and inspection request through the permit portal.',
+        'content_length' => 118,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $permitPage->id,
+        'chunk_index' => 0,
+        'content' => 'Submit the demolition permit application, required contractor documents, and inspection request through the permit portal.',
+        'content_length' => 118,
+    ]);
+
+    $landfillPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $landfillSource->id,
+        'url' => 'https://example.com/brooks-landfill',
+        'canonical_url' => 'https://example.com/brooks-landfill',
+        'title' => 'Brooks Landfill',
+        'content_text' => 'Construction and demolition debris may be taken to Brooks Landfill. Call 316-350-3225 for disposal rules.',
+        'content_length' => 103,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $landfillPage->id,
+        'chunk_index' => 0,
+        'content' => 'Construction and demolition debris may be taken to Brooks Landfill. Call 316-350-3225 for disposal rules.',
+        'content_length' => 103,
+    ]);
+
+    $faqPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $faqSource->id,
+        'url' => 'https://example.com/faq',
+        'canonical_url' => 'https://example.com/faq',
+        'title' => 'Frequently Asked Questions',
+        'content_text' => 'For demolition permit questions, contact city staff for general guidance.',
+        'content_length' => 69,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $faqPage->id,
+        'chunk_index' => 0,
+        'content' => 'For demolition permit questions, contact city staff for general guidance.',
+        'content_length' => 69,
+    ]);
+
+    $retriever = app(ChatSourceRetriever::class);
+    $result = $retriever->retrieve(
+        collect([$permitSource, $landfillSource, $faqSource]),
+        'How do I get a demolition permit?'
+    );
+
+    expect($result['evidence'])->not->toBeEmpty()
+        ->and($result['evidence'][0]['source_url'])->toBe('https://example.com/demolition-permit')
+        ->and(collect($result['evidence'])->take(2)->pluck('source_url')->all())->not->toContain('https://example.com/brooks-landfill');
+});
