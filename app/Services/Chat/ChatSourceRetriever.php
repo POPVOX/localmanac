@@ -2,9 +2,11 @@
 
 namespace App\Services\Chat;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class ChatSourceRetriever
 {
@@ -66,6 +68,7 @@ class ChatSourceRetriever
         $rows = $this->deduplicateRows($rows)
             ->pipe(fn (Collection $items): Collection => $this->filterSeverelyMismatchedProceduralRows($items, $question))
             ->filter(fn (array $row): bool => ! $this->isBlockedRow($row))
+            ->pipe(fn (Collection $items): Collection => $this->promoteDistinctPagesForAggregationQueries($items, $question))
             ->take((int) config('chat.retrieval_max_evidence', 24));
 
         $evidence = $rows
@@ -137,6 +140,9 @@ class ChatSourceRetriever
                 'page_title' => $row->page_title ? (string) $row->page_title : null,
                 'content_type' => $row->content_type ? (string) $row->content_type : null,
                 'source_name' => (string) $row->source_name,
+                'page_fetched_at' => $row->page_fetched_at ? (string) $row->page_fetched_at : null,
+                'page_updated_at' => $row->page_updated_at ? (string) $row->page_updated_at : null,
+                'page_created_at' => $row->page_created_at ? (string) $row->page_created_at : null,
                 'score' => max(12, 10 + ($matches * 8) + min($proceduralSignals, 4)),
             ];
         })->all();
@@ -319,6 +325,9 @@ class ChatSourceRetriever
                 'pages.canonical_url',
                 'pages.title as page_title',
                 'pages.content_type',
+                'pages.fetched_at as page_fetched_at',
+                'pages.updated_at as page_updated_at',
+                'pages.created_at as page_created_at',
                 'sources.name as source_name',
             ]);
     }
@@ -397,6 +406,9 @@ class ChatSourceRetriever
                     'pages.canonical_url',
                     'pages.title as page_title',
                     'pages.content_type',
+                    'pages.fetched_at as page_fetched_at',
+                    'pages.updated_at as page_updated_at',
+                    'pages.created_at as page_created_at',
                     'sources.name as source_name',
                 ])
                 ->get()
@@ -411,6 +423,9 @@ class ChatSourceRetriever
                         'page_title' => $neighbor->page_title ? (string) $neighbor->page_title : null,
                         'content_type' => $neighbor->content_type ? (string) $neighbor->content_type : null,
                         'source_name' => (string) $neighbor->source_name,
+                        'page_fetched_at' => $neighbor->page_fetched_at ? (string) $neighbor->page_fetched_at : null,
+                        'page_updated_at' => $neighbor->page_updated_at ? (string) $neighbor->page_updated_at : null,
+                        'page_created_at' => $neighbor->page_created_at ? (string) $neighbor->page_created_at : null,
                         'score' => (int) ($row['score'] ?? 1),
                     ];
                 });
@@ -508,13 +523,14 @@ class ChatSourceRetriever
         $terms = $this->keywordTerms($question);
         $isProceduralQuestion = $this->isProceduralQuestion($question);
         $proceduralFocusTerms = $this->proceduralFocusTerms($question);
+        $aggregationWindowDays = $this->aggregationRecencyWindowDays($question);
 
         if ($terms === [] || $rows->isEmpty()) {
             return $rows;
         }
 
         return $rows
-            ->map(function (array $row) use ($terms, $question, $isProceduralQuestion, $proceduralFocusTerms) {
+            ->map(function (array $row) use ($terms, $question, $isProceduralQuestion, $proceduralFocusTerms, $aggregationWindowDays) {
                 $chunk = (string) ($row['chunk'] ?? '');
                 $title = (string) ($row['page_title'] ?? $row['source_name'] ?? '');
                 $url = (string) ($row['page_url'] ?? '');
@@ -540,6 +556,11 @@ class ChatSourceRetriever
                     $boostScore -= $this->genericPagePenalty($row);
                 } else {
                     $boostScore -= $this->genericPagePenalty($row) * 0.4;
+                }
+
+                if ($aggregationWindowDays !== null) {
+                    $boostScore += $this->aggregationRecencyBoostScore($row, $aggregationWindowDays);
+                    $boostScore -= $this->aggregationGenericPagePenalty($row, $aggregationWindowDays);
                 }
 
                 $baseScore = $this->normalizedRetrievalScore($row);
@@ -954,5 +975,296 @@ class ChatSourceRetriever
     private function shortKeywordAllowlist(): array
     {
         return ['id', 'am', 'pm'];
+    }
+
+    private function aggregationRecencyWindowDays(string $question): ?int
+    {
+        $normalized = mb_strtolower($question);
+
+        if (! $this->isAggregationRecencyQuery($normalized)) {
+            return null;
+        }
+
+        if (preg_match('/\b(?:last|past|previous)\s+(\d{1,2})\s+days?\b/u', $normalized, $matches) === 1) {
+            return max(1, (int) ($matches[1] ?? 0));
+        }
+
+        if (preg_match('/\b(?:last|past|previous)\s+(\d{1,2})\s+weeks?\b/u', $normalized, $matches) === 1) {
+            return max(1, (int) ($matches[1] ?? 0)) * 7;
+        }
+
+        if (preg_match('/\b(?:this|last|past|previous)\s+week\b/u', $normalized) === 1) {
+            return 7;
+        }
+
+        if (preg_match('/\b(?:this|last|past|previous)\s+month\b/u', $normalized) === 1) {
+            return 30;
+        }
+
+        if (preg_match('/\b(?:today|latest|recent|recently)\b/u', $normalized) === 1) {
+            return 7;
+        }
+
+        return 7;
+    }
+
+    private function isAggregationRecencyQuery(string $question): bool
+    {
+        return preg_match('/\b(what(?:\'s| is)? new|newest|latest|recent|recently|updates?|announcements?|alerts?|service alerts?|filed|approved|status changes?|changed|change|released)\b/u', $question) === 1;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function aggregationRecencyBoostScore(array $row, int $windowDays): float
+    {
+        $boost = 0.0;
+        $updateSignalCount = $this->aggregationUpdateSignalCount($row);
+        $mentionedDate = $this->rowMentionedDate($row);
+        $pageTimestamp = $this->rowPageTimestamp($row);
+
+        if ($mentionedDate instanceof CarbonImmutable) {
+            if ($this->isWithinAggregationWindow($mentionedDate, $windowDays)) {
+                $daysOld = max(0, CarbonImmutable::now()->diffInDays($mentionedDate, false) * -1);
+                $boost += 14.0 - min((float) $daysOld * 2.5, 10.0);
+            } elseif ($mentionedDate->lessThan(CarbonImmutable::now()->subDays($windowDays))) {
+                $boost -= min(8.0, max(2.0, (float) $mentionedDate->diffInDays(CarbonImmutable::now()->subDays($windowDays))));
+            }
+        } elseif ($pageTimestamp instanceof CarbonImmutable && $this->isWithinAggregationWindow($pageTimestamp, $windowDays)) {
+            $boost += $updateSignalCount > 0 ? 4.0 : 1.0;
+        }
+
+        if ($updateSignalCount > 0) {
+            $boost += min(6.0, $updateSignalCount * 2.0);
+        }
+
+        if ($this->rowHasTimestampSignal($row)) {
+            $boost += 2.5;
+        }
+
+        return $boost;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function aggregationGenericPagePenalty(array $row, int $windowDays): float
+    {
+        if (! $this->isAggregationGenericPage($row)) {
+            return 0.0;
+        }
+
+        if ($this->rowHasExplicitRecentUpdateEvidence($row, $windowDays)) {
+            return 4.0;
+        }
+
+        if ($this->aggregationUpdateSignalCount($row) > 0) {
+            return 8.0;
+        }
+
+        return 14.0;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function isAggregationGenericPage(array $row): bool
+    {
+        $title = mb_strtolower((string) ($row['page_title'] ?? ''));
+        $sourceName = mb_strtolower((string) ($row['source_name'] ?? ''));
+        $url = mb_strtolower((string) ($row['page_url'] ?? ''));
+        $haystack = $title.' '.$sourceName.' '.$url;
+
+        foreach ([
+            'current projects',
+            'apply for',
+            'licenses & permits',
+            'licences & permits',
+            'licenses and permits',
+            'licences and permits',
+        ] as $signal) {
+            if (str_contains($haystack, $signal)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function rowHasExplicitRecentUpdateEvidence(array $row, int $windowDays): bool
+    {
+        $mentionedDate = $this->rowMentionedDate($row);
+
+        if ($mentionedDate instanceof CarbonImmutable && $this->isWithinAggregationWindow($mentionedDate, $windowDays)) {
+            return true;
+        }
+
+        $pageTimestamp = $this->rowPageTimestamp($row);
+
+        return $pageTimestamp instanceof CarbonImmutable
+            && $this->isWithinAggregationWindow($pageTimestamp, $windowDays)
+            && $this->aggregationUpdateSignalCount($row) > 0;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function aggregationUpdateSignalCount(array $row): int
+    {
+        $chunk = mb_strtolower((string) ($row['chunk'] ?? ''));
+        $title = mb_strtolower((string) ($row['page_title'] ?? ''));
+        $sourceName = mb_strtolower((string) ($row['source_name'] ?? ''));
+        $haystack = $chunk.' '.$title.' '.$sourceName;
+        $matches = 0;
+
+        foreach ([
+            'announcement',
+            'announced',
+            'update',
+            'updated',
+            'posted',
+            'published',
+            'release',
+            'released',
+            'service alert',
+            'alert',
+            'notice',
+            'bulletin',
+            'filed',
+            'approved',
+            'approval',
+            'agenda',
+            'minutes',
+        ] as $signal) {
+            if (str_contains($haystack, $signal)) {
+                $matches++;
+            }
+        }
+
+        return $matches;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function rowHasTimestampSignal(array $row): bool
+    {
+        $text = (string) ($row['page_title'] ?? '').' '.(string) ($row['chunk'] ?? '');
+
+        return preg_match('/\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4}\b/i', $text) === 1
+            || preg_match('/\b\d{4}-\d{2}-\d{2}\b/', $text) === 1
+            || preg_match('/\b\d{1,2}\/\d{1,2}\/\d{4}\b/', $text) === 1;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function rowMentionedDate(array $row): ?CarbonImmutable
+    {
+        $text = trim((string) ($row['page_title'] ?? '').' '.(string) ($row['chunk'] ?? ''));
+
+        if ($text === '') {
+            return null;
+        }
+
+        foreach ([
+            '/\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4}(?:\s+\d{1,2}:\d{2}(?:\s?[AP]M)?)?/i',
+            '/\b\d{4}-\d{2}-\d{2}\b/',
+            '/\b\d{1,2}\/\d{1,2}\/\d{4}\b/',
+        ] as $pattern) {
+            if (preg_match($pattern, $text, $matches) !== 1) {
+                continue;
+            }
+
+            $candidate = trim((string) ($matches[0] ?? ''));
+
+            if ($candidate === '') {
+                continue;
+            }
+
+            try {
+                return CarbonImmutable::parse($candidate, config('app.timezone'));
+            } catch (Throwable) {
+                continue;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function rowPageTimestamp(array $row): ?CarbonImmutable
+    {
+        foreach (['page_updated_at', 'page_fetched_at', 'page_created_at'] as $key) {
+            $value = $row[$key] ?? null;
+
+            if (! is_string($value) || trim($value) === '') {
+                continue;
+            }
+
+            try {
+                return CarbonImmutable::parse($value);
+            } catch (Throwable) {
+                continue;
+            }
+        }
+
+        return null;
+    }
+
+    private function isWithinAggregationWindow(CarbonImmutable $timestamp, int $windowDays): bool
+    {
+        $now = CarbonImmutable::now();
+
+        return $timestamp->betweenIncluded($now->subDays($windowDays), $now->addDay());
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $rows
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function promoteDistinctPagesForAggregationQueries(Collection $rows, string $question): Collection
+    {
+        if ($this->aggregationRecencyWindowDays($question) === null || $rows->count() < 2) {
+            return $rows;
+        }
+
+        $leaders = $rows
+            ->groupBy(fn (array $row): string => $this->rowPageKey($row))
+            ->map(function (Collection $group): array {
+                /** @var array<string, mixed> $row */
+                $row = $group->sortByDesc('combined_score')->first();
+
+                return $row;
+            })
+            ->sortByDesc('combined_score')
+            ->values();
+
+        $leaderChunkIds = $leaders->pluck('chunk_id')->all();
+
+        return $leaders
+            ->concat(
+                $rows->reject(fn (array $row): bool => in_array($row['chunk_id'] ?? null, $leaderChunkIds, true))->values()
+            )
+            ->values();
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function rowPageKey(array $row): string
+    {
+        $url = (string) ($row['canonical_url'] ?? $row['page_url'] ?? '');
+
+        if ($url !== '') {
+            return mb_strtolower($url);
+        }
+
+        return 'page:'.(string) ($row['page_id'] ?? '0');
     }
 }

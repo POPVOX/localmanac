@@ -151,6 +151,78 @@ it('applies optional keyword filtering', function () {
         ->and($result['events'][0]['title'])->toBe('Downtown rock concert');
 });
 
+it('filters meeting-focused queries to civic meetings and excludes library programs', function () {
+    $city = City::factory()->create([
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $window = [
+        'start_at' => Carbon::parse('2026-03-24 00:00:00', 'America/Chicago'),
+        'end_at' => Carbon::parse('2026-04-07 23:59:59', 'America/Chicago'),
+        'label' => 'next 14 days',
+        'is_explicit' => true,
+        'parse_confidence' => 1.0,
+    ];
+
+    $agendaSource = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita Agenda Center',
+        'source_url' => 'https://www.wichita.gov/AgendaCenter/Wichita-City-Council-Meetings-34',
+        'is_active' => true,
+    ]);
+
+    $librarySource = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita Public Library',
+        'source_url' => 'https://wichitalibrary.org/events',
+        'is_active' => true,
+    ]);
+
+    $meeting = Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'City Council Workshop',
+        'starts_at' => Carbon::parse('2026-04-02 09:00:00', 'America/Chicago'),
+        'ends_at' => Carbon::parse('2026-04-02 11:00:00', 'America/Chicago'),
+        'event_url' => 'https://www.wichita.gov/AgendaCenter/Wichita-City-Council-Meetings-34',
+        'source_hash' => sha1('city-council-workshop'),
+    ]);
+
+    EventSourceItem::factory()->create([
+        'event_id' => $meeting->id,
+        'event_source_id' => $agendaSource->id,
+        'source_url' => 'https://www.wichita.gov/AgendaCenter/Wichita-City-Council-Meetings-34',
+        'fetched_at' => Carbon::parse('2026-03-24 12:00:00', 'America/Chicago'),
+    ]);
+
+    $libraryEvent = Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Tuesday Topics: Understanding Immigration',
+        'starts_at' => Carbon::parse('2026-03-24 18:00:00', 'America/Chicago'),
+        'ends_at' => Carbon::parse('2026-03-24 19:00:00', 'America/Chicago'),
+        'event_url' => 'https://wichitalibrary.libnet.info/event/15409343',
+        'source_hash' => sha1('library-topic'),
+    ]);
+
+    EventSourceItem::factory()->create([
+        'event_id' => $libraryEvent->id,
+        'event_source_id' => $librarySource->id,
+        'source_url' => 'https://wichitalibrary.libnet.info/event/15409343',
+        'fetched_at' => Carbon::parse('2026-03-24 12:05:00', 'America/Chicago'),
+    ]);
+
+    $result = app(EventSearchService::class)->search(
+        city: $city,
+        window: $window,
+        question: 'What city council, board, and public meetings are coming up in Wichita in the next 14 days? Include dates, times, and where to find the agenda.',
+        limit: 8,
+    );
+
+    expect($result['total'])->toBe(1)
+        ->and($result['events'])->toHaveCount(1)
+        ->and($result['events'][0]['title'])->toBe('City Council Workshop')
+        ->and(collect($result['events'])->pluck('title')->all())->not->toContain('Tuesday Topics: Understanding Immigration');
+});
+
 it('uses citation url fallback chain from event to source item to source home', function () {
     $city = City::factory()->create([
         'timezone' => 'America/Chicago',

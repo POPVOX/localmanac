@@ -42,6 +42,17 @@ test('dashboard scrolls to the start of the latest assistant answer', function (
         ->assertSee('scrollToLatestAssistantStart()', false);
 });
 
+test('dashboard queues a bottom scroll when a follow-up question is submitted', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $response = $this->get(route('dashboard'));
+
+    $response->assertOk()
+        ->assertSee('handleSubmit()', false)
+        ->assertSee('queueScrollToBottom()', false);
+});
+
 test('dashboard shows task-oriented chat prompt chips', function () {
     $user = User::factory()->create();
     $this->actingAs($user);
@@ -81,6 +92,21 @@ test('dashboard renders assistant markdown links as clickable anchors', function
         ->assertSeeHtml('href="https://www.wichita.gov/208/Economic-Development"')
         ->assertSeeHtml('target="_blank"')
         ->assertSeeHtml('rel="noopener noreferrer"');
+});
+
+test('dashboard spaces paragraphs after markdown lists in assistant answers', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    Livewire::test(\App\Livewire\Dashboard::class)
+        ->set('messages', [
+            [
+                'role' => 'assistant',
+                'content' => "1. First item\n2. Second item\n\nFollow-up paragraph.",
+            ],
+        ])
+        ->assertSeeHtml('[&_ol+p]:mt-3')
+        ->assertSeeHtml('[&_ul+p]:mt-3');
 });
 
 test('dashboard no longer renders legacy answer resources', function () {

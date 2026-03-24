@@ -13,7 +13,9 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Throwable;
@@ -34,9 +36,10 @@ class Dashboard extends Component
 
     /**
      * @var array<int, array{
+     *     id: string,
      *     role: string,
      *     content: string,
-     *     citations?: array<int, array{title: string, source_url: string, type: string}>
+     *     citations: array<int, array{title: string, source_url: string, type: string}>
      * }>
      */
     public array $messages = [];
@@ -63,10 +66,8 @@ class Dashboard extends Component
             return;
         }
 
-        $this->messages[] = [
-            'role' => 'user',
-            'content' => $question,
-        ];
+        $this->appendMessage('user', $question);
+        $assistantMessageId = $this->appendMessage('assistant');
 
         try {
             $city = $this->resolveCity();
@@ -81,7 +82,11 @@ class Dashboard extends Component
                 citySelector: $city?->id,
                 user: $user,
                 conversationId: $this->storedConversationId(),
-                onDelta: static fn (string $delta): null => null,
+                onDelta: function (string $delta) use ($assistantMessageId): null {
+                    $this->appendAssistantDelta($assistantMessageId, $delta);
+
+                    return null;
+                },
             );
 
             $this->conversationId = is_string($response['conversation_id'] ?? null)
@@ -90,18 +95,18 @@ class Dashboard extends Component
 
             $this->storeConversationId($this->conversationId);
 
-            $this->messages[] = [
-                'role' => 'assistant',
-                'content' => (string) ($response['answer'] ?? ''),
-                'citations' => $response['citations'] ?? [],
-            ];
+            $this->replaceMessage(
+                messageId: $assistantMessageId,
+                content: $this->resolvedAssistantContent($assistantMessageId, $response),
+                citations: $this->normalizedCitations($response['citations'] ?? []),
+            );
         } catch (Throwable $exception) {
             report($exception);
 
-            $this->messages[] = [
-                'role' => 'assistant',
-                'content' => __('Sorry, something went wrong while answering that.'),
-            ];
+            $this->replaceMessage(
+                messageId: $assistantMessageId,
+                content: __('Sorry, something went wrong while answering that.'),
+            );
         }
 
         $this->question = '';
@@ -196,6 +201,122 @@ class Dashboard extends Component
                 'locationLabel' => $city?->name ?? '—',
             ],
         ])->layout('layouts.app-dashboard');
+    }
+
+    private function appendMessage(string $role, string $content = '', array $citations = []): string
+    {
+        $messageId = (string) Str::uuid();
+
+        $this->messages[] = [
+            'id' => $messageId,
+            'role' => $role,
+            'content' => $content,
+            'citations' => $this->normalizedCitations($citations),
+        ];
+
+        return $messageId;
+    }
+
+    private function appendAssistantDelta(string $messageId, string $delta): void
+    {
+        if ($delta === '') {
+            return;
+        }
+
+        $messageIndex = $this->messageIndex($messageId);
+
+        if ($messageIndex === null) {
+            return;
+        }
+
+        $message = $this->messages[$messageIndex];
+
+        $this->messages[$messageIndex] = [
+            'id' => $message['id'],
+            'role' => $message['role'],
+            'content' => (string) ($message['content'] ?? '').$delta,
+            'citations' => $message['citations'] ?? [],
+        ];
+    }
+
+    private function replaceMessage(string $messageId, string $content, array $citations = []): void
+    {
+        $messageIndex = $this->messageIndex($messageId);
+
+        if ($messageIndex === null) {
+            return;
+        }
+
+        $message = $this->messages[$messageIndex];
+
+        $this->messages[$messageIndex] = [
+            'id' => $message['id'],
+            'role' => $message['role'],
+            'content' => $content,
+            'citations' => $this->normalizedCitations($citations),
+        ];
+    }
+
+    private function messageIndex(string $messageId): ?int
+    {
+        foreach ($this->messages as $index => $message) {
+            if (($message['id'] ?? null) === $messageId) {
+                return $index;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolvedAssistantContent(string $messageId, array $response): string
+    {
+        $answer = trim((string) ($response['answer'] ?? ''));
+
+        if ($answer !== '') {
+            return $answer;
+        }
+
+        $messageIndex = $this->messageIndex($messageId);
+
+        if ($messageIndex !== null) {
+            $streamedContent = trim((string) ($this->messages[$messageIndex]['content'] ?? ''));
+
+            if ($streamedContent !== '') {
+                return $streamedContent;
+            }
+        }
+
+        return __('Sorry, I could not find an answer for that question.');
+    }
+
+    /**
+     * @param  array<int, mixed>  $citations
+     * @return array<int, array{title: string, source_url: string, type: string}>
+     */
+    private function normalizedCitations(array $citations): array
+    {
+        return collect($citations)
+            ->map(function (mixed $citation): ?array {
+                if (! is_array($citation)) {
+                    return null;
+                }
+
+                $title = trim((string) ($citation['title'] ?? ''));
+                $sourceUrl = trim((string) ($citation['source_url'] ?? ''));
+
+                if ($title === '' || $sourceUrl === '') {
+                    return null;
+                }
+
+                return [
+                    'title' => $title,
+                    'source_url' => $sourceUrl,
+                    'type' => trim((string) ($citation['type'] ?? 'html')) ?: 'html',
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
     }
 
     private function resolveCity(): ?City
@@ -503,7 +624,7 @@ class Dashboard extends Component
     /**
      * @return \Illuminate\Support\Collection<int, Event>
      */
-    private function upcomingEvents(?City $city, string $timezone): \Illuminate\Support\Collection
+    private function upcomingEvents(?City $city, string $timezone): Collection
     {
         if (! $city) {
             return collect();

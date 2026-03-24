@@ -4,12 +4,45 @@ use App\Models\ChatSource;
 use App\Models\ChatSourceChunk;
 use App\Models\ChatSourcePage;
 use App\Models\City;
+use App\Models\Event;
 use App\Models\User;
 use App\Services\Chat\Agents\StreamingChatAnswerAgent;
 use App\Services\Chat\AnswerSynthesizer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
+
+it('does not classify event-style meeting questions as procedural questions', function () {
+    $synthesizer = app(AnswerSynthesizer::class);
+    $method = new ReflectionMethod(AnswerSynthesizer::class, 'isProceduralQuestion');
+    $method->setAccessible(true);
+
+    expect($method->invoke(
+        $synthesizer,
+        'What city council, board, and public meetings are coming up in Wichita in the next 14 days? Include dates, times, and where to find the agenda.'
+    ))->toBeFalse()
+        ->and($method->invoke($synthesizer, 'How do I get a demolition permit?'))->toBeTrue();
+});
+
+it('does not trigger the procedural guard for event-intent meeting queries', function () {
+    $synthesizer = app(AnswerSynthesizer::class);
+    $method = new ReflectionMethod(AnswerSynthesizer::class, 'shouldConstrainProceduralAnswer');
+    $method->setAccessible(true);
+
+    $question = 'What city council, board, and public meetings are coming up in Wichita in the next 14 days? Include dates, times, and where to find the agenda.';
+    $answer = "1. Submit the application.\n2. Wait for permit review.\n3. Schedule the final inspection.";
+    $evidence = [
+        [
+            'title' => 'Agenda Center • Wichita, KS • CivicEngage',
+            'snippet' => 'City council meeting agendas are posted in the Agenda Center before each meeting.',
+            'source_url' => 'https://www.wichita.gov/AgendaCenter/Wichita-City-Council-Meetings-34',
+            'score' => 9.5,
+        ],
+    ];
+
+    expect($method->invoke($synthesizer, $question, $answer, $evidence, $evidence, true))->toBeFalse()
+        ->and($method->invoke($synthesizer, 'How do I get a demolition permit?', $answer, $evidence, $evidence, false))->toBeTrue();
+});
 
 it('narrows procedural answers when ordinance-style evidence does not support a complete process', function () {
     config()->set('chat.vector_enabled', false);
@@ -112,4 +145,170 @@ it('narrows procedural answers when ordinance-style evidence does not support a 
         ->not->toContain('The sources mention:')
         ->not->toContain('subsection')
         ->and($result['citations'])->not->toBeEmpty();
+});
+
+it('keeps exact meeting queries on the event path instead of the procedural fallback summary', function () {
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.tools.web_search.enabled', false);
+    config()->set('chat.tools.similarity.enabled', false);
+    config()->set('chat.retrieval_neighbor_window', 0);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $user = User::factory()->create();
+
+    Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Wichita City Council Workshop',
+        'starts_at' => now('America/Chicago')->addDays(5)->setTime(9, 0),
+        'ends_at' => now('America/Chicago')->addDays(5)->setTime(11, 0),
+        'all_day' => false,
+        'location_name' => 'City Hall',
+        'description' => 'City council workshop with agenda posted online.',
+        'event_url' => 'https://www.wichita.gov/AgendaCenter/Wichita-City-Council-Meetings-34',
+        'source_hash' => 'city-council-workshop',
+    ]);
+
+    StreamingChatAnswerAgent::fake([
+        "1. Submit the application.\n2. Wait for permit review.\n3. Schedule the final inspection.",
+    ]);
+
+    $query = 'What city council, board, and public meetings are coming up in Wichita in the next 14 days? Include dates, times, and where to find the agenda.';
+
+    $result = app(AnswerSynthesizer::class)->synthesizeStreaming(
+        question: $query,
+        city: $city,
+        sources: collect(),
+        user: $user,
+        conversationId: null,
+        onDelta: fn (string $delta): null => null,
+        originalQuestion: $query,
+    );
+
+    expect($result['answer'])
+        ->toContain('Wichita City Council Workshop')
+        ->not->toContain('permit or formal review may be required')
+        ->not->toContain('Submit the application')
+        ->not->toContain('final inspection')
+        ->and($result['citations'])->not->toBeEmpty()
+        ->and(collect($result['citations'])->pluck('source_url')->all())
+        ->toContain('https://www.wichita.gov/AgendaCenter/Wichita-City-Council-Meetings-34');
+});
+
+it('returns a clean civic meetings fallback when only unrelated library events are available', function () {
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.tools.web_search.enabled', false);
+    config()->set('chat.tools.similarity.enabled', false);
+    config()->set('chat.retrieval_neighbor_window', 0);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $user = User::factory()->create();
+
+    Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Tuesday Topics: Understanding Immigration',
+        'starts_at' => now('America/Chicago')->addDays(2)->setTime(18, 0),
+        'ends_at' => now('America/Chicago')->addDays(2)->setTime(19, 0),
+        'all_day' => false,
+        'location_name' => 'Advanced Learning Library',
+        'description' => 'Library program and community discussion.',
+        'event_url' => 'https://wichitalibrary.libnet.info/event/15409343',
+        'source_hash' => 'library-topic',
+    ]);
+
+    StreamingChatAnswerAgent::fake([
+        'I could not find the answer in the sources I checked.',
+    ]);
+
+    $query = 'What city council, board, and public meetings are coming up in Wichita in the next 14 days? Include dates, times, and where to find the agenda.';
+
+    $result = app(AnswerSynthesizer::class)->synthesizeStreaming(
+        question: $query,
+        city: $city,
+        sources: collect(),
+        user: $user,
+        conversationId: null,
+        onDelta: fn (string $delta): null => null,
+        originalQuestion: $query,
+    );
+
+    expect($result['answer'])->toBe('I could not find upcoming city council or public meetings in the available sources.')
+        ->and($result['citations'])->toBe([]);
+});
+
+it('does not use the procedural fallback for service alerts queries', function () {
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.tools.web_search.enabled', false);
+    config()->set('chat.tools.similarity.enabled', false);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $user = User::factory()->create();
+
+    StreamingChatAnswerAgent::fake([
+        'The available sources indicate that a permit or formal review may be required. The full step-by-step process is not clearly described in the available sources.',
+    ]);
+
+    $query = 'What active service alerts or disruptions should residents in Wichita know about right now? Focus on roads, utilities, water, trash, and public services.';
+
+    $result = app(AnswerSynthesizer::class)->synthesizeStreaming(
+        question: $query,
+        city: $city,
+        sources: collect(),
+        user: $user,
+        conversationId: null,
+        onDelta: fn (string $delta): null => null,
+        originalQuestion: $query,
+    );
+
+    expect($result['answer'])->toBe('I could not find the answer in the sources I checked.')
+        ->and($result['answer'])->not->toContain('permit or formal review may be required')
+        ->and($result['citations'])->toBe([]);
+});
+
+it('does not use the procedural fallback for permits summary queries', function () {
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.tools.web_search.enabled', false);
+    config()->set('chat.tools.similarity.enabled', false);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $user = User::factory()->create();
+
+    StreamingChatAnswerAgent::fake([
+        'The available sources indicate that a permit or formal review may be required. They suggest that additional review may apply in some cases.',
+    ]);
+
+    $query = 'What new permits, rezonings, or major development projects were recently filed or approved in Wichita? Include status and key locations.';
+
+    $result = app(AnswerSynthesizer::class)->synthesizeStreaming(
+        question: $query,
+        city: $city,
+        sources: collect(),
+        user: $user,
+        conversationId: null,
+        onDelta: fn (string $delta): null => null,
+        originalQuestion: $query,
+    );
+
+    expect($result['answer'])->toBe('I could not find the answer in the sources I checked.')
+        ->and($result['answer'])->not->toContain('permit or formal review may be required')
+        ->and($result['citations'])->toBe([]);
 });

@@ -25,6 +25,10 @@
                     hasMessages: @js(count($messages) > 0),
                     pageScrollTop: window.scrollY,
                     scrollTimers: [],
+                    clearScrollTimers() {
+                        this.scrollTimers.forEach((timer) => clearTimeout(timer));
+                        this.scrollTimers = [];
+                    },
                     scrollToBottom() {
                         this.$nextTick(() => {
                             const container = this.$refs.chatScroll;
@@ -54,16 +58,33 @@
                             window.scrollTo({ top: this.pageScrollTop, behavior: 'instant' });
                         });
                     },
+                    handleSubmit() {
+                        this.pageScrollTop = window.scrollY;
+                        this.pendingQuestion = ($refs.chatComposer?.querySelector('textarea')?.value ?? '').trim();
+
+                        if (! this.pendingQuestion) {
+                            return;
+                        }
+
+                        this.hasMessages = true;
+                        this.queueScrollToBottom();
+
+                        setTimeout(() => {
+                            const input = this.$refs.chatComposer?.querySelector('textarea');
+
+                            if (input) {
+                                input.value = '';
+                            }
+                        }, 0);
+                    },
                     queueScrollToBottom() {
-                        this.scrollTimers.forEach((timer) => clearTimeout(timer));
-                        this.scrollTimers = [];
+                        this.clearScrollTimers();
                         [0, 60, 140, 260, 420].forEach((delay) => {
                             this.scrollTimers.push(setTimeout(() => this.scrollToBottom(), delay));
                         });
                     },
                     queueScrollToLatestAssistantStart() {
-                        this.scrollTimers.forEach((timer) => clearTimeout(timer));
-                        this.scrollTimers = [];
+                        this.clearScrollTimers();
                         [0, 60, 140, 260, 420].forEach((delay) => {
                             this.scrollTimers.push(setTimeout(() => this.scrollToLatestAssistantStart(), delay));
                         });
@@ -82,8 +103,9 @@
                     x-on:chat-updated.window="hasMessages = true; pendingQuestion = ''; queueScrollToLatestAssistantStart()"
                     x-on:chat-reset.window="hasMessages = false; pendingQuestion = ''"
                 >
-                    @foreach ($messages as $message)
+                    @foreach ($messages as $index => $message)
                         @php
+                            $messageId = (string) ($message['id'] ?? $message['role'].'-'.$index);
                             $isUser = $message['role'] === 'user';
                             $assistantContent = null;
 
@@ -101,6 +123,8 @@
                             }
                         @endphp
                         <div
+                            wire:key="chat-message-{{ $messageId }}"
+                            data-chat-message-id="{{ $messageId }}"
                             data-chat-role="{{ $message['role'] }}"
                             class="flex w-full {{ $isUser ? 'justify-end' : 'justify-start' }} py-1.5"
                         >
@@ -112,7 +136,7 @@
                                 @if ($isUser)
                                     <div class="whitespace-pre-wrap text-sm leading-relaxed">{{ $message['content'] }}</div>
                                 @else
-                                    <div class="max-w-none text-sm leading-relaxed text-zinc-900 [&_p+p]:mt-3 [&_ul]:mt-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:mt-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li+li]:mt-1 [&_h1]:mt-3 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mt-3 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:text-sm [&_h3]:font-semibold [&_a]:font-semibold [&_a]:text-emerald-600 [&_a]:underline [&_a]:decoration-emerald-600 [&_a]:underline-offset-2 hover:[&_a]:text-emerald-500">
+                                    <div class="max-w-none text-sm leading-relaxed text-zinc-900 [&_p+p]:mt-3 [&_ul]:mt-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul+p]:mt-3 [&_ol]:mt-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol+p]:mt-3 [&_li+li]:mt-1 [&_h1]:mt-3 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mt-3 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mt-2 [&_h3]:text-sm [&_h3]:font-semibold [&_a]:font-semibold [&_a]:text-emerald-600 [&_a]:underline [&_a]:decoration-emerald-600 [&_a]:underline-offset-2 hover:[&_a]:text-emerald-500">
                                         {!! $assistantContent !!}
                                     </div>
                                 @endif
@@ -123,8 +147,9 @@
                                         'border-emerald-500/40' => $isUser,
                                         'border-zinc-200' => ! $isUser,
                                     ])>
-                                        @foreach ($message['citations'] as $citation)
+                                        @foreach ($message['citations'] as $citationIndex => $citation)
                                             <a
+                                                wire:key="chat-citation-{{ $messageId }}-{{ $citationIndex }}"
                                                 href="{{ $citation['source_url'] }}"
                                                 target="_blank"
                                                 @class([
@@ -176,7 +201,7 @@
                 <div class="border-t border-zinc-100 px-6 pb-5 pt-4">
                     <form
                         wire:submit.prevent="ask"
-                        x-on:submit="pageScrollTop = window.scrollY; pendingQuestion = ($refs.chatComposer?.querySelector('textarea')?.value ?? '').trim(); if (pendingQuestion) { hasMessages = true; setTimeout(() => { const input = $refs.chatComposer?.querySelector('textarea'); if (input) { input.value = ''; } }, 0); }"
+                        x-on:submit="handleSubmit()"
                         class="space-y-3"
                     >
                         <flux:composer

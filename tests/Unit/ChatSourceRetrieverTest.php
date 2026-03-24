@@ -5,6 +5,7 @@ use App\Models\ChatSourceChunk;
 use App\Models\ChatSourcePage;
 use App\Models\City;
 use App\Services\Chat\ChatSourceRetriever;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -555,4 +556,113 @@ it('demotes topical but non procedural chunks for permit process questions', fun
     expect($result['evidence'])->not->toBeEmpty()
         ->and($result['evidence'][0]['source_url'])->toBe('https://example.com/demolition-permit')
         ->and(collect($result['evidence'])->take(2)->pluck('source_url')->all())->not->toContain('https://example.com/brooks-landfill');
+});
+
+it('prioritizes recent updates over generic pages for aggregation queries', function () {
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-03-24 15:00:00', 'UTC'));
+
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.fts_enabled', true);
+    config()->set('chat.retrieval_chunk_limit', 8);
+    config()->set('chat.retrieval_neighbor_window', 0);
+    config()->set('chat.retrieval_max_evidence', 8);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $genericSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Current Projects',
+        'source_url' => 'https://example.com/current-projects',
+        'is_active' => true,
+    ]);
+
+    $updatesSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita Updates',
+        'source_url' => 'https://example.com/updates',
+        'is_active' => true,
+    ]);
+
+    $genericPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $genericSource->id,
+        'url' => 'https://example.com/current-projects',
+        'canonical_url' => 'https://example.com/current-projects',
+        'title' => 'Current Projects',
+        'content_text' => 'This week residents can review new permits, new licenses, and current project pages.',
+        'content_length' => 83,
+        'fetched_at' => CarbonImmutable::parse('2026-03-24 14:00:00', 'UTC'),
+        'updated_at' => CarbonImmutable::parse('2026-03-24 14:00:00', 'UTC'),
+        'created_at' => CarbonImmutable::parse('2026-03-24 14:00:00', 'UTC'),
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $genericPage->id,
+        'chunk_index' => 0,
+        'content' => 'This week residents can review new permits, new licenses, and current project pages.',
+        'content_length' => 83,
+    ]);
+
+    $recentPages = [
+        [
+            'url' => 'https://example.com/updates/service-alert-march-24',
+            'title' => 'Service Alert Update - March 24, 2026',
+            'content' => 'Announcement posted March 24, 2026. New service alert this week for water service work.',
+            'timestamp' => '2026-03-24 13:00:00',
+        ],
+        [
+            'url' => 'https://example.com/updates/rezoning-march-23',
+            'title' => 'Rezoning Update - March 23, 2026',
+            'content' => 'Update posted March 23, 2026. New rezoning filing this week at Central and Oliver.',
+            'timestamp' => '2026-03-23 11:00:00',
+        ],
+        [
+            'url' => 'https://example.com/updates/project-march-21',
+            'title' => 'Project Approval Announcement - March 21, 2026',
+            'content' => 'Announcement published March 21, 2026. New project approval this week for a downtown site.',
+            'timestamp' => '2026-03-21 09:00:00',
+        ],
+    ];
+
+    foreach ($recentPages as $pageData) {
+        $page = ChatSourcePage::factory()->create([
+            'chat_source_id' => $updatesSource->id,
+            'url' => $pageData['url'],
+            'canonical_url' => $pageData['url'],
+            'title' => $pageData['title'],
+            'content_text' => $pageData['content'],
+            'content_length' => strlen($pageData['content']),
+            'fetched_at' => CarbonImmutable::parse($pageData['timestamp'], 'UTC'),
+            'updated_at' => CarbonImmutable::parse($pageData['timestamp'], 'UTC'),
+            'created_at' => CarbonImmutable::parse($pageData['timestamp'], 'UTC'),
+        ]);
+
+        ChatSourceChunk::factory()->create([
+            'chat_source_page_id' => $page->id,
+            'chunk_index' => 0,
+            'content' => $pageData['content'],
+            'content_length' => strlen($pageData['content']),
+        ]);
+    }
+
+    $retriever = app(ChatSourceRetriever::class);
+    $result = $retriever->retrieve(
+        collect([$genericSource, $updatesSource]),
+        "What's new this week?"
+    );
+
+    $topUrls = collect($result['evidence'])->take(3)->pluck('source_url')->all();
+
+    expect($result['evidence'])->toHaveCount(4)
+        ->and($topUrls)->toBe([
+            'https://example.com/updates/service-alert-march-24',
+            'https://example.com/updates/rezoning-march-23',
+            'https://example.com/updates/project-march-21',
+        ])
+        ->and($topUrls)->not->toContain('https://example.com/current-projects');
+
+    CarbonImmutable::setTestNow();
 });

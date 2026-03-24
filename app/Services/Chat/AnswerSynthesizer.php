@@ -126,6 +126,10 @@ class AnswerSynthesizer
             $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
         }
 
+        if (($eventContext['intent'] ?? false) && $this->shouldRejectProceduralEventAnswer($question, $answer)) {
+            $answer = self::NO_ANSWER_MESSAGE;
+        }
+
         if ($answer !== ''
             && ! $this->isNoAnswerMessage($answer)
             && ! $this->isRefusalMessage($answer)
@@ -166,13 +170,30 @@ class AnswerSynthesizer
                     $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
                 }
             } else {
-                $answer = $this->noEventsFoundMessage($city, $eventContext['window'] ?? null);
+                $answer = $this->noEventsFoundMessage($city, $eventContext['window'] ?? null, $question);
             }
+        }
+
+        if ($this->shouldRejectProceduralAnswerForNonProceduralQuery(
+            question: $question,
+            answer: $answer,
+            eventIntent: (bool) ($eventContext['intent'] ?? false),
+        )) {
+            $answer = self::NO_ANSWER_MESSAGE;
+            $citations = [];
+            $confidence = 0.0;
+            $sourceMode = 'none';
         }
 
         $preliminaryAlignedEvidence = $this->alignedEvidenceForAnswer($question, $answer, $seedEvidence);
 
-        if ($this->shouldConstrainProceduralAnswer($question, $answer, $seedEvidence, $preliminaryAlignedEvidence)) {
+        if ($this->shouldConstrainProceduralAnswer(
+            question: $question,
+            answer: $answer,
+            seedEvidence: $seedEvidence,
+            alignedEvidence: $preliminaryAlignedEvidence,
+            eventIntent: (bool) ($eventContext['intent'] ?? false),
+        )) {
             $narrowEvidence = $preliminaryAlignedEvidence !== [] ? $preliminaryAlignedEvidence : $seedEvidence;
             $answer = $this->narrowProceduralAnswerFromEvidence($narrowEvidence);
 
@@ -685,10 +706,29 @@ class AnswerSynthesizer
 
     private function isProceduralQuestion(string $question): bool
     {
-        return preg_match(
-            '/\b(how do i|how to|steps?|process|procedure|apply|application|obtain|get|renew|register|file|submit|request|schedule|report|permit|license)\b/i',
-            $question
-        ) === 1;
+        if ($this->eventIntentDetector->isEventIntent($question)) {
+            return false;
+        }
+
+        $normalized = mb_strtolower(trim($question));
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(how do i|how to|what do i need|where do i apply|where can i apply|steps?|step by step|process|procedure)\b/u', $normalized) === 1) {
+            return true;
+        }
+
+        if (preg_match('/\b(apply|application|permit|license|renew|register|file|submit|request|obtain)\b/u', $normalized) !== 1) {
+            return false;
+        }
+
+        if (preg_match('/\b(what new|new permits|rezonings|projects|project|active service alerts?|service alerts?|alerts?|status|summary|summarize|overview|updates?|recently|coming up)\b/u', $normalized) === 1) {
+            return false;
+        }
+
+        return preg_match('/\b(i|my|me|need|required|requirements?|documents?|fees?|cost|where|when|how|can i|do i|should i|get)\b/u', $normalized) === 1;
     }
 
     /**
@@ -1961,13 +2001,22 @@ class AnswerSynthesizer
      * @param  array<int, array<string, mixed>>  $seedEvidence
      * @param  array<int, array<string, mixed>>  $alignedEvidence
      */
-    private function shouldConstrainProceduralAnswer(string $question, string $answer, array $seedEvidence, array $alignedEvidence): bool
-    {
+    private function shouldConstrainProceduralAnswer(
+        string $question,
+        string $answer,
+        array $seedEvidence,
+        array $alignedEvidence,
+        bool $eventIntent = false,
+    ): bool {
+        if ($eventIntent) {
+            return false;
+        }
+
         if ($answer === '' || $this->isNoAnswerMessage($answer) || $this->isRefusalMessage($answer)) {
             return false;
         }
 
-        if (! $this->isProceduralQuestion($question) && ! $this->answerLooksProcedural($answer)) {
+        if (! $this->isProceduralQuestion($question)) {
             return false;
         }
 
@@ -1988,6 +2037,70 @@ class AnswerSynthesizer
     {
         return preg_match('/(?:^|\n)\s*(?:\d+\.)\s+/m', $answer) === 1
             || preg_match('/\b(step|steps|first|second|third|then|next|finally|before|after)\b/i', $answer) === 1;
+    }
+
+    private function shouldRejectProceduralEventAnswer(string $question, string $answer): bool
+    {
+        if ($answer === '' || ! $this->eventIntentDetector->isEventIntent($question)) {
+            return false;
+        }
+
+        $normalizedAnswer = mb_strtolower($answer);
+        $proceduralSignals = $this->proceduralProcessSignalCount($normalizedAnswer);
+
+        if (preg_match('/(?:^|\n)\s*(?:\d+\.)\s+/m', $answer) === 1 && $proceduralSignals >= 2) {
+            return true;
+        }
+
+        return $proceduralSignals >= 3 && ! $this->answerContainsEventSignals($normalizedAnswer);
+    }
+
+    private function answerContainsEventSignals(string $answer): bool
+    {
+        foreach ([
+            'meeting',
+            'meetings',
+            'agenda',
+            'agendas',
+            'event',
+            'events',
+            'calendar',
+            'city council',
+            'board',
+            'commission',
+            'workshop',
+            'hearing',
+            'city hall',
+        ] as $signal) {
+            if ($this->containsSignal($answer, $signal)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function shouldRejectProceduralAnswerForNonProceduralQuery(string $question, string $answer, bool $eventIntent = false): bool
+    {
+        if ($answer === '' || $eventIntent || $this->isProceduralQuestion($question)) {
+            return false;
+        }
+
+        if (preg_match(
+            '/permit or formal review may be required|full step-by-step process is not clearly described|additional review may apply|submit the application|final inspection/i',
+            $answer
+        ) === 1) {
+            return true;
+        }
+
+        $normalizedAnswer = mb_strtolower($answer);
+        $proceduralSignals = $this->proceduralProcessSignalCount($normalizedAnswer);
+
+        if (preg_match('/(?:^|\n)\s*(?:\d+\.)\s+/m', $answer) === 1 && $proceduralSignals >= 2) {
+            return true;
+        }
+
+        return $proceduralSignals >= 3 && ! $this->answerContainsEventSignals($normalizedAnswer);
     }
 
     /**
@@ -2404,8 +2517,12 @@ class AnswerSynthesizer
      *     parse_confidence: float
      * }|null  $window
      */
-    private function noEventsFoundMessage(City $city, ?array $window): string
+    private function noEventsFoundMessage(City $city, ?array $window, string $question = ''): string
     {
+        if ($this->isMeetingFocusedEventQuery($question)) {
+            return 'I could not find upcoming city council or public meetings in the available sources.';
+        }
+
         $label = is_array($window) && is_string($window['label'] ?? null)
             ? $window['label']
             : 'that time period';
@@ -2415,6 +2532,26 @@ class AnswerSynthesizer
         }
 
         return "I could not find any events in {$city->name} for {$label}. Try asking about the next 7 days or next weekend.";
+    }
+
+    private function isMeetingFocusedEventQuery(string $question): bool
+    {
+        $question = mb_strtolower($question);
+
+        foreach ([
+            'city council',
+            'board',
+            'commission',
+            'public meeting',
+            'public meetings',
+            'agenda',
+        ] as $signal) {
+            if (str_contains($question, $signal)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
