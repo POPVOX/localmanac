@@ -427,13 +427,14 @@ class ChatSourceRetriever
     {
         $terms = $this->keywordTerms($question);
         $isProceduralQuestion = $this->isProceduralQuestion($question);
+        $proceduralFocusTerms = $this->proceduralFocusTerms($question);
 
         if ($terms === [] || $rows->isEmpty()) {
             return $rows;
         }
 
         return $rows
-            ->map(function (array $row) use ($terms, $question, $isProceduralQuestion) {
+            ->map(function (array $row) use ($terms, $question, $isProceduralQuestion, $proceduralFocusTerms) {
                 $chunk = (string) ($row['chunk'] ?? '');
                 $title = (string) ($row['page_title'] ?? $row['source_name'] ?? '');
                 $url = (string) ($row['page_url'] ?? '');
@@ -453,6 +454,8 @@ class ChatSourceRetriever
 
                 if ($isProceduralQuestion) {
                     $boostScore += $this->proceduralBoostScore($question, $terms, $row);
+                    $boostScore += $this->proceduralFocusBoostScore($proceduralFocusTerms, $row);
+                    $boostScore -= $this->proceduralFocusMismatchPenalty($proceduralFocusTerms, $row);
                     $boostScore -= $this->genericPagePenalty($row);
                 } else {
                     $boostScore -= $this->genericPagePenalty($row) * 0.4;
@@ -466,6 +469,53 @@ class ChatSourceRetriever
             })
             ->sortByDesc('combined_score')
             ->values();
+    }
+
+    /**
+     * @param  array<int, string>  $focusTerms
+     * @param  array<string, mixed>  $row
+     */
+    private function proceduralFocusBoostScore(array $focusTerms, array $row): float
+    {
+        if ($focusTerms === []) {
+            return 0.0;
+        }
+
+        $chunk = mb_strtolower((string) ($row['chunk'] ?? ''));
+        $title = mb_strtolower((string) ($row['page_title'] ?? ''));
+        $sourceName = mb_strtolower((string) ($row['source_name'] ?? ''));
+        $url = mb_strtolower((string) ($row['page_url'] ?? ''));
+        $context = $title.' '.$sourceName.' '.$url;
+
+        $chunkMatches = $this->countTermMatches($chunk, $focusTerms);
+        $contextMatches = $this->countTermMatches($context, $focusTerms);
+
+        return ($chunkMatches * 8.0) + ($contextMatches * 12.0);
+    }
+
+    /**
+     * @param  array<int, string>  $focusTerms
+     * @param  array<string, mixed>  $row
+     */
+    private function proceduralFocusMismatchPenalty(array $focusTerms, array $row): float
+    {
+        if ($focusTerms === []) {
+            return 0.0;
+        }
+
+        $chunk = mb_strtolower((string) ($row['chunk'] ?? ''));
+        $title = mb_strtolower((string) ($row['page_title'] ?? ''));
+        $sourceName = mb_strtolower((string) ($row['source_name'] ?? ''));
+        $url = mb_strtolower((string) ($row['page_url'] ?? ''));
+        $haystack = $chunk.' '.$title.' '.$sourceName.' '.$url;
+
+        foreach ($focusTerms as $term) {
+            if (str_contains($haystack, $term)) {
+                return 0.0;
+            }
+        }
+
+        return 10.0;
     }
 
     /**
@@ -648,6 +698,49 @@ class ChatSourceRetriever
         }
 
         return false;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function proceduralFocusTerms(string $question): array
+    {
+        $broadProceduralTerms = [
+            'apply',
+            'application',
+            'approval',
+            'city',
+            'contractor',
+            'contractors',
+            'fee',
+            'fees',
+            'get',
+            'historic',
+            'how',
+            'inspection',
+            'inspections',
+            'license',
+            'licenses',
+            'local',
+            'municipal',
+            'need',
+            'permit',
+            'permits',
+            'portal',
+            'review',
+            'schedule',
+            'steps',
+            'submit',
+            'what',
+            'where',
+            'who',
+            'wichita',
+        ];
+
+        return array_values(array_filter(
+            $this->keywordTerms($question),
+            fn (string $term): bool => ! in_array($term, $broadProceduralTerms, true)
+        ));
     }
 
     private function isProceduralQuestion(string $question): bool

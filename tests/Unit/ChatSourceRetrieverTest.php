@@ -377,3 +377,89 @@ it('prioritizes focused procedural permit evidence over generic faq content', fu
         ->and($result['evidence'][0]['source_url'])->toBe('https://example.com/demolition-permit')
         ->and($result['evidence'][0]['snippet'])->toContain('Before you apply for a demolition permit');
 });
+
+it('demotes unrelated permit pages when a specific permit type is requested', function () {
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.fts_enabled', true);
+    config()->set('chat.retrieval_chunk_limit', 8);
+    config()->set('chat.retrieval_neighbor_window', 0);
+    config()->set('chat.retrieval_max_evidence', 8);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $permitSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Licenses & Permits',
+        'source_url' => 'https://example.com/licenses-permits',
+        'is_active' => true,
+    ]);
+
+    $applyForSource = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Apply For',
+        'source_url' => 'https://example.com/apply-for',
+        'is_active' => true,
+    ]);
+
+    $burnPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $permitSource->id,
+        'url' => 'https://example.com/burn-permit',
+        'canonical_url' => 'https://example.com/burn-permit',
+        'title' => 'Burn Permits',
+        'content_text' => 'Burn permit rules, open burn requirements, and fire department guidance.',
+        'content_length' => 74,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $burnPage->id,
+        'chunk_index' => 0,
+        'content' => 'Burn permit rules, open burn requirements, and fire department guidance.',
+        'content_length' => 74,
+    ]);
+
+    $trafficPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $permitSource->id,
+        'url' => 'https://example.com/traffic-permit',
+        'canonical_url' => 'https://example.com/traffic-permit',
+        'title' => 'Traffic, Street & Construction Permitting',
+        'content_text' => 'Street closure permits, traffic control plans, and right-of-way construction requirements.',
+        'content_length' => 96,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $trafficPage->id,
+        'chunk_index' => 0,
+        'content' => 'Street closure permits, traffic control plans, and right-of-way construction requirements.',
+        'content_length' => 96,
+    ]);
+
+    $demolitionPage = ChatSourcePage::factory()->create([
+        'chat_source_id' => $applyForSource->id,
+        'url' => 'https://example.com/demolition-permit',
+        'canonical_url' => 'https://example.com/demolition-permit',
+        'title' => 'Demolition Permit Application',
+        'content_text' => 'Demolition permit applications require contractor documents, approval, and an inspection after approval.',
+        'content_length' => 104,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $demolitionPage->id,
+        'chunk_index' => 0,
+        'content' => 'Demolition permit applications require contractor documents, approval, and an inspection after approval.',
+        'content_length' => 104,
+    ]);
+
+    $retriever = app(ChatSourceRetriever::class);
+    $result = $retriever->retrieve(
+        collect([$permitSource, $applyForSource]),
+        'How do I get a demolition permit?'
+    );
+
+    expect($result['evidence'])->not->toBeEmpty()
+        ->and($result['evidence'][0]['source_url'])->toBe('https://example.com/demolition-permit')
+        ->and($result['evidence'][0]['title'])->toBe('Demolition Permit Application');
+});
