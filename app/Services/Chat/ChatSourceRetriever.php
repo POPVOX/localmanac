@@ -37,12 +37,22 @@ class ChatSourceRetriever
 
         $sourceIds = $sources->pluck('id')->map(fn ($id) => (int) $id)->all();
         $limit = (int) config('chat.retrieval_chunk_limit', 8);
+        $proceduralFocusTerms = $this->isProceduralQuestion($question)
+            ? $this->proceduralFocusTerms($question)
+            : [];
 
+        $focusedRows = $this->proceduralFocusSearch($sourceIds, $proceduralFocusTerms, $limit);
         $vectorRows = $this->vectorSearch($sourceIds, $question, $limit);
         $ftsLimit = max($limit, (int) config('chat.retrieval_fts_limit', $limit));
         $ftsRows = $this->ftsSearch($sourceIds, $question, $ftsLimit);
 
-        $rows = collect($vectorRows);
+        $rows = collect($focusedRows);
+
+        foreach ($vectorRows as $row) {
+            if (! $rows->contains('chunk_id', $row['chunk_id'])) {
+                $rows->push($row);
+            }
+        }
 
         foreach ($ftsRows as $row) {
             if (! $rows->contains('chunk_id', $row['chunk_id'])) {
@@ -75,6 +85,60 @@ class ChatSourceRetriever
                 'cache_hits' => 0,
             ],
         ];
+    }
+
+    /**
+     * @param  array<int, int>  $sourceIds
+     * @param  array<int, string>  $focusTerms
+     * @return array<int, array<string, mixed>>
+     */
+    private function proceduralFocusSearch(array $sourceIds, array $focusTerms, int $limit): array
+    {
+        if ($sourceIds === [] || $focusTerms === []) {
+            return [];
+        }
+
+        $query = $this->baseQuery($sourceIds);
+        $this->applyProceduralFocusConstraints($query, $focusTerms);
+
+        $rows = $query
+            ->limit(max($limit * 2, 8))
+            ->get();
+
+        return $rows->map(function ($row) use ($focusTerms) {
+            $chunk = (string) $row->content;
+            $title = $row->page_title ? (string) $row->page_title : '';
+            $url = (string) $row->page_url;
+            $context = mb_strtolower($chunk.' '.$title.' '.$url);
+            $matches = 0;
+
+            foreach ($focusTerms as $term) {
+                if (str_contains($context, $term)) {
+                    $matches++;
+                }
+            }
+
+            $proceduralSignals = 0;
+
+            foreach ($this->proceduralSignals() as $signal) {
+                if (str_contains($context, $signal)) {
+                    $proceduralSignals++;
+                }
+            }
+
+            return [
+                'chunk_id' => (int) $row->chunk_id,
+                'page_id' => (int) $row->page_id,
+                'chunk_index' => (int) $row->chunk_index,
+                'chunk' => $chunk,
+                'page_url' => (string) $row->page_url,
+                'canonical_url' => $row->canonical_url ? (string) $row->canonical_url : null,
+                'page_title' => $row->page_title ? (string) $row->page_title : null,
+                'content_type' => $row->content_type ? (string) $row->content_type : null,
+                'source_name' => (string) $row->source_name,
+                'score' => max(12, 10 + ($matches * 8) + min($proceduralSignals, 4)),
+            ];
+        })->all();
     }
 
     /**
@@ -256,6 +320,21 @@ class ChatSourceRetriever
                 'pages.content_type',
                 'sources.name as source_name',
             ]);
+    }
+
+    /**
+     * @param  array<int, string>  $focusTerms
+     */
+    private function applyProceduralFocusConstraints(Builder $query, array $focusTerms): void
+    {
+        $query->where(function (Builder $builder) use ($focusTerms): void {
+            foreach ($focusTerms as $term) {
+                $builder->orWhere('chunks.content', 'like', '%'.$term.'%')
+                    ->orWhere('pages.title', 'like', '%'.$term.'%')
+                    ->orWhere('pages.url', 'like', '%'.$term.'%')
+                    ->orWhere('pages.canonical_url', 'like', '%'.$term.'%');
+            }
+        });
     }
 
     /**
