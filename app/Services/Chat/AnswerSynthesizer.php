@@ -1165,7 +1165,34 @@ class AnswerSynthesizer
             })
             ->count();
 
-        return $matchingEvidence === 0;
+        if ($matchingEvidence === 0) {
+            return true;
+        }
+
+        $topEvidence = array_slice($seedEvidence, 0, min(4, count($seedEvidence)));
+        $topMatches = collect($topEvidence)
+            ->filter(function (array $item) use ($focusTerms): bool {
+                $haystack = mb_strtolower(implode(' ', [
+                    (string) ($item['title'] ?? ''),
+                    (string) ($item['snippet'] ?? ''),
+                    (string) ($item['source_url'] ?? ''),
+                ]));
+
+                foreach ($focusTerms as $term) {
+                    if (str_contains($haystack, $term)) {
+                        return true;
+                    }
+                }
+
+                return false;
+            })
+            ->count();
+
+        if ($topMatches === 0) {
+            return true;
+        }
+
+        return ($matchingEvidence / max(count($seedEvidence), 1)) < 0.35;
     }
 
     /**

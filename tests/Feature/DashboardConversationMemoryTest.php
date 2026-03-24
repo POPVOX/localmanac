@@ -22,24 +22,18 @@ it('does not reuse stored dashboard conversation memory and can clear the thread
     session()->put('chat.conversation_id', 'conv_existing');
 
     $service = mock(AskService::class);
-    $service->shouldReceive('answerStreamingForUser')
+    $service->shouldReceive('answer')
         ->once()
         ->andReturnUsing(function (
             string $question,
-            int|string|null $citySelector,
-            User $requestUser,
-            ?string $conversationId,
-            callable $onDelta,
+            ?int $cityId,
+            ?string $citySlug,
             ?string $fallbackIntent
-        ) use ($city, $user): array {
+        ) use ($city): array {
             expect($question)->toBe('Any updates?')
-                ->and($citySelector)->toBe($city->id)
-                ->and($requestUser->is($user))->toBeTrue()
-                ->and($conversationId)->toBeNull()
+                ->and($cityId)->toBe($city->id)
+                ->and($citySlug)->toBeNull()
                 ->and($fallbackIntent)->toBeNull();
-
-            $onDelta('Here ');
-            $onDelta('are updates.');
 
             return [
                 'answer' => 'Here are updates.',
@@ -54,7 +48,6 @@ it('does not reuse stored dashboard conversation memory and can clear the thread
                     'pages_fetched' => 0,
                     'cache_hits' => 0,
                 ],
-                'conversation_id' => 'conv_existing',
             ];
         });
 

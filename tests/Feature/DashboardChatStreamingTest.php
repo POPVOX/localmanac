@@ -20,24 +20,18 @@ it('streams answers for authenticated dashboard users without reusing conversati
     $this->actingAs($user);
 
     $service = mock(AskService::class);
-    $service->shouldReceive('answerStreamingForUser')
+    $service->shouldReceive('answer')
         ->once()
         ->andReturnUsing(function (
             string $question,
-            int|string|null $citySelector,
-            User $requestUser,
-            ?string $conversationId,
-            callable $onDelta,
+            ?int $cityId,
+            ?string $citySlug,
             ?string $fallbackIntent
-        ) use ($city, $user): array {
+        ) use ($city): array {
             expect($question)->toBe('When is trash pickup?')
-                ->and($citySelector)->toBe($city->id)
-                ->and($requestUser->is($user))->toBeTrue()
-                ->and($conversationId)->toBeNull()
+                ->and($cityId)->toBe($city->id)
+                ->and($citySlug)->toBeNull()
                 ->and($fallbackIntent)->toBeNull();
-
-            $onDelta('Trash pickup ');
-            $onDelta('is on Monday.');
 
             return [
                 'answer' => 'Trash pickup is on Monday.',
@@ -66,7 +60,6 @@ it('streams answers for authenticated dashboard users without reusing conversati
                     'pages_fetched' => 1,
                     'cache_hits' => 0,
                 ],
-                'conversation_id' => 'conv_123',
             ];
         });
 
@@ -100,23 +93,18 @@ it('passes explicit fallback intent for unchanged prompt chips', function () {
     $prompt = 'What new permits, rezonings, or major development projects were recently filed or approved in Wichita? Include status and key locations.';
 
     $service = mock(AskService::class);
-    $service->shouldReceive('answerStreamingForUser')
+    $service->shouldReceive('answer')
         ->once()
         ->andReturnUsing(function (
             string $question,
-            int|string|null $citySelector,
-            User $requestUser,
-            ?string $conversationId,
-            callable $onDelta,
+            ?int $cityId,
+            ?string $citySlug,
             ?string $fallbackIntent
-        ) use ($city, $user, $prompt): array {
+        ) use ($city, $prompt): array {
             expect($question)->toBe($prompt)
-                ->and($citySelector)->toBe($city->id)
-                ->and($requestUser->is($user))->toBeTrue()
-                ->and($conversationId)->toBeNull()
+                ->and($cityId)->toBe($city->id)
+                ->and($citySlug)->toBeNull()
                 ->and($fallbackIntent)->toBe('permits_projects');
-
-            $onDelta('Here are project updates.');
 
             return [
                 'answer' => 'Here are project updates.',
@@ -132,7 +120,6 @@ it('passes explicit fallback intent for unchanged prompt chips', function () {
                     'pages_fetched' => 0,
                     'cache_hits' => 0,
                 ],
-                'conversation_id' => null,
             ];
         });
 

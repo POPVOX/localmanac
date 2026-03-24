@@ -167,3 +167,56 @@ it('adds web search when local procedural evidence is off target for the questio
             'wichita.gov',
         ]);
 });
+
+it('adds web search when only low-ranked procedural evidence matches the permit focus', function () {
+    config()->set('chat.retrieval_mode', 'local_then_web');
+    config()->set('chat.tools.similarity.enabled', true);
+    config()->set('chat.tools.web_search.enabled', true);
+    config()->set('chat.tools.web_search.only_when_fresh_intent', true);
+
+    $city = new City;
+    $city->name = 'Wichita';
+
+    $sourceA = new ChatSource;
+    $sourceA->id = 6;
+    $sourceA->source_url = 'https://www.wichita.gov/958/Licenses-Permits';
+
+    $sourceB = new ChatSource;
+    $sourceB->id = 8;
+    $sourceB->source_url = 'https://www.sedgwickcounty.org/how-do-i/';
+
+    $method = new ReflectionMethod(AnswerSynthesizer::class, 'buildTools');
+    $method->setAccessible(true);
+
+    $tools = collect($method->invoke(
+        app(AnswerSynthesizer::class),
+        $city,
+        collect([$sourceA, $sourceB]),
+        'How do I get a demolition permit?',
+        [],
+        [[
+            'title' => 'Burn Permits | Sedgwick County, Kansas',
+            'source_url' => 'https://www.sedgwickcounty.org/fire/forms/burn-permits/',
+            'snippet' => 'Open burns and burn permit requirements.',
+            'score' => 48.0,
+        ], [
+            'title' => 'Traffic, Street & Construction Permitting | Wichita, KS',
+            'source_url' => 'https://www.wichita.gov/1311/Traffic-Street-Construction-Permitting',
+            'snippet' => 'Right-of-way and street construction permits.',
+            'score' => 44.0,
+        ], [
+            'title' => 'Apply For (Wichita)',
+            'source_url' => 'https://www.wichita.gov/DocumentCenter/View/17596',
+            'snippet' => 'Demolition permit applications may require additional review.',
+            'score' => 20.0,
+        ]],
+    ));
+
+    $webSearch = $tools->first(fn ($tool): bool => $tool instanceof WebSearch);
+
+    expect($webSearch)->toBeInstanceOf(WebSearch::class)
+        ->and(collect($webSearch->allowedDomains)->sort()->values()->all())->toBe([
+            'sedgwickcounty.org',
+            'wichita.gov',
+        ]);
+});

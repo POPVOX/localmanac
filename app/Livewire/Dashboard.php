@@ -71,25 +71,12 @@ class Dashboard extends Component
 
         try {
             $city = $this->resolveCity();
-            $response = [];
-
-            if (auth()->user()) {
-                $response = app(AskService::class)->answerStreamingForUser(
-                    question: $question,
-                    citySelector: $city?->id,
-                    user: auth()->user(),
-                    conversationId: null,
-                    onDelta: static fn (string $delta): null => null,
-                    fallbackIntent: $this->fallbackIntent,
-                );
-            } else {
-                $response = app(AskService::class)->answer(
-                    question: $question,
-                    cityId: $city?->id,
-                    citySlug: null,
-                    fallbackIntent: $this->fallbackIntent,
-                );
-            }
+            $response = app(AskService::class)->answer(
+                question: $question,
+                cityId: $city?->id,
+                citySlug: null,
+                fallbackIntent: $this->fallbackIntent,
+            );
 
             $this->messages[] = [
                 'role' => 'assistant',
