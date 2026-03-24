@@ -8,6 +8,10 @@ use Throwable;
 
 class ChatSourceSelector
 {
+    public function __construct(
+        private readonly ProceduralQuestionAnalyzer $proceduralQuestionAnalyzer,
+    ) {}
+
     /**
      * @return Collection<int, ChatSource>
      */
@@ -271,23 +275,7 @@ class ChatSourceSelector
 
     private function isProceduralQuestion(string $question): bool
     {
-        $question = mb_strtolower(trim($question));
-
-        if ($question === '') {
-            return false;
-        }
-
-        if (preg_match('/\b(how do i|how can i|where do i|who do i call|what do i need)\b/i', $question) === 1) {
-            return true;
-        }
-
-        foreach ($this->proceduralSignals() as $signal) {
-            if (str_contains($question, $signal)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->proceduralQuestionAnalyzer->isProceduralQuestion($question);
     }
 
     /**
@@ -295,19 +283,7 @@ class ChatSourceSelector
      */
     private function keywordTerms(string $question): array
     {
-        $terms = preg_split('/\W+/u', mb_strtolower($question)) ?: [];
-        $stopwords = [
-            'the', 'and', 'for', 'with', 'that', 'this', 'from', 'what', 'when', 'where', 'which', 'who', 'whom',
-            'does', 'do', 'did', 'are', 'is', 'was', 'were', 'can', 'could', 'should', 'would', 'will', 'have',
-            'has', 'had', 'into', 'onto', 'about', 'your', 'my', 'our', 'their', 'them', 'they', 'you', 'its',
-            'a', 'an', 'of', 'to', 'in', 'on', 'at', 'by', 'or', 'if', 'as', 'i', 'get',
-            'city', 'local', 'municipal',
-        ];
-
-        return array_values(array_unique(array_filter(
-            $terms,
-            fn (string $term): bool => mb_strlen($term) >= 3 && ! in_array($term, $stopwords, true)
-        )));
+        return $this->proceduralQuestionAnalyzer->keywordTerms($question);
     }
 
     /**
@@ -315,26 +291,6 @@ class ChatSourceSelector
      */
     private function proceduralSignals(): array
     {
-        return [
-            'permit',
-            'permits',
-            'license',
-            'licenses',
-            'apply',
-            'application',
-            'demolition',
-            'inspection',
-            'inspections',
-            'contractor',
-            'contractors',
-            'historic',
-            'approval',
-            'submit',
-            'review',
-            'portal',
-            'fee',
-            'fees',
-            'building',
-        ];
+        return $this->proceduralQuestionAnalyzer->processSignals();
     }
 }

@@ -12,6 +12,7 @@ class ChatSourceRetriever
         private readonly EmbeddingClient $embeddingClient,
         private readonly VectorFormatter $vectorFormatter,
         private readonly ChatSourceGuard $chatSourceGuard,
+        private readonly ProceduralQuestionAnalyzer $proceduralQuestionAnalyzer,
     ) {}
 
     /**
@@ -843,32 +844,7 @@ class ChatSourceRetriever
 
     private function questionRequiresProceduralSteps(string $question): bool
     {
-        $question = mb_strtolower($question);
-
-        if (preg_match('/\b(how do i|how can i|where do i|what do i need)\b/i', $question) === 1) {
-            return true;
-        }
-
-        foreach ([
-            'permit',
-            'permits',
-            'application',
-            'apply',
-            'submit',
-            'inspection',
-            'inspections',
-            'approval',
-            'approved',
-            'required',
-            'requirements',
-            'documents',
-        ] as $signal) {
-            if (str_contains($question, $signal)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->proceduralQuestionAnalyzer->requiresStepwiseSupport($question);
     }
 
     private function countProceduralProcessSignals(string $content): int
@@ -887,24 +863,7 @@ class ChatSourceRetriever
 
     private function questionAndChunkShareProceduralFocus(string $question, string $chunk, string $context): bool
     {
-        foreach ([
-            'demolition',
-            'permit',
-            'inspection',
-            'contractor',
-            'historic',
-            'license',
-            'review',
-            'portal',
-            'application',
-            'fee',
-        ] as $focus) {
-            if (str_contains($question, $focus) && (str_contains($chunk, $focus) || str_contains($context, $focus))) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->proceduralQuestionAnalyzer->sharesFocus($question, $chunk, $context);
     }
 
     /**
@@ -912,63 +871,12 @@ class ChatSourceRetriever
      */
     private function proceduralFocusTerms(string $question): array
     {
-        $broadProceduralTerms = [
-            'apply',
-            'application',
-            'approval',
-            'city',
-            'contractor',
-            'contractors',
-            'fee',
-            'fees',
-            'get',
-            'historic',
-            'how',
-            'inspection',
-            'inspections',
-            'license',
-            'licenses',
-            'local',
-            'municipal',
-            'need',
-            'permit',
-            'permits',
-            'portal',
-            'review',
-            'schedule',
-            'steps',
-            'submit',
-            'what',
-            'where',
-            'who',
-            'wichita',
-        ];
-
-        return array_values(array_filter(
-            $this->keywordTerms($question),
-            fn (string $term): bool => ! in_array($term, $broadProceduralTerms, true)
-        ));
+        return $this->proceduralQuestionAnalyzer->focusTerms($question);
     }
 
     private function isProceduralQuestion(string $question): bool
     {
-        $question = mb_strtolower(trim($question));
-
-        if ($question === '') {
-            return false;
-        }
-
-        if (preg_match('/\b(how do i|how can i|where do i|who do i call|what do i need)\b/i', $question) === 1) {
-            return true;
-        }
-
-        foreach ($this->proceduralSignals() as $signal) {
-            if (str_contains($question, $signal)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->proceduralQuestionAnalyzer->isProceduralQuestion($question);
     }
 
     /**
@@ -976,28 +884,7 @@ class ChatSourceRetriever
      */
     private function proceduralSignals(): array
     {
-        return [
-            'apply',
-            'application',
-            'before you',
-            'required',
-            'must',
-            'contact',
-            'permit',
-            'permits',
-            'review',
-            'inspection',
-            'inspections',
-            'portal',
-            'fee',
-            'fees',
-            'demolition',
-            'contractor',
-            'historic',
-            'approval',
-            'submitted',
-            'submit',
-        ];
+        return $this->proceduralQuestionAnalyzer->processSignals();
     }
 
     /**

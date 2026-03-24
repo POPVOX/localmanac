@@ -35,6 +35,7 @@ class AnswerSynthesizer
         private readonly EventIntentDetector $eventIntentDetector,
         private readonly EventWindowResolver $eventWindowResolver,
         private readonly EventSearchService $eventSearchService,
+        private readonly ProceduralQuestionAnalyzer $proceduralQuestionAnalyzer,
     ) {}
 
     /**
@@ -1080,23 +1081,7 @@ class AnswerSynthesizer
 
     private function isProceduralQuestion(string $question): bool
     {
-        $question = mb_strtolower(trim($question));
-
-        if ($question === '') {
-            return false;
-        }
-
-        if (preg_match('/\b(how do i|how can i|where do i|who do i call|what do i need)\b/i', $question) === 1) {
-            return true;
-        }
-
-        foreach ($this->proceduralSignals() as $signal) {
-            if (str_contains($question, $signal)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->proceduralQuestionAnalyzer->isProceduralQuestion($question);
     }
 
     /**
@@ -1202,40 +1187,7 @@ class AnswerSynthesizer
      */
     private function proceduralFocusTerms(string $question): array
     {
-        $questionTerms = $this->keywordTerms($question);
-        $broadProceduralTerms = [
-            'apply',
-            'application',
-            'approval',
-            'city',
-            'contractor',
-            'contractors',
-            'fee',
-            'fees',
-            'get',
-            'historic',
-            'how',
-            'inspection',
-            'inspections',
-            'license',
-            'licenses',
-            'local',
-            'municipal',
-            'need',
-            'permit',
-            'permits',
-            'portal',
-            'review',
-            'submit',
-            'what',
-            'where',
-            'who',
-        ];
-
-        return array_values(array_filter(
-            $questionTerms,
-            fn (string $term): bool => ! in_array($term, $broadProceduralTerms, true)
-        ));
+        return $this->proceduralQuestionAnalyzer->focusTerms($question);
     }
 
     /**
@@ -1243,30 +1195,7 @@ class AnswerSynthesizer
      */
     private function proceduralSignals(): array
     {
-        return [
-            'permit',
-            'permits',
-            'license',
-            'licenses',
-            'apply',
-            'application',
-            'submit',
-            'review',
-            'inspection',
-            'inspections',
-            'contractor',
-            'contractors',
-            'approval',
-            'historic',
-            'demolition',
-            'fee',
-            'fees',
-            'portal',
-            'contact',
-            'required',
-            'must',
-            'before you',
-        ];
+        return $this->proceduralQuestionAnalyzer->processSignals();
     }
 
     /**
@@ -1659,7 +1588,7 @@ class AnswerSynthesizer
                 $haystack = mb_strtolower(implode(' ', [$question, $answer, $title, $url]));
                 $score = $needsLink ? 80 : 20;
 
-                if (str_contains($haystack, 'historic') && str_contains($haystack, 'gis')) {
+                if (str_contains($haystack, 'gis')) {
                     $score += 40;
                 }
 
@@ -1770,7 +1699,7 @@ class AnswerSynthesizer
                 $title = (string) ($item['title'] ?? '');
                 $haystack = mb_strtolower(implode(' ', [$question, $answer, $title, $snippet]));
 
-                if (str_contains($haystack, 'hazardous waste')) {
+                if (str_contains($haystack, 'drop-off') || str_contains($haystack, 'facility')) {
                     $score += 20;
                 }
 
@@ -1803,7 +1732,7 @@ class AnswerSynthesizer
 
     private function shouldSurfaceAddressResource(string $question, string $answer): bool
     {
-        return preg_match('/\b(where|address|location|located|map|drop[- ]?off|hazardous waste|bring|go|nearest|visit)\b/i', $question.' '.$answer) === 1;
+        return preg_match('/\b(where|address|location|located|map|drop[- ]?off|bring|go|nearest|visit)\b/i', $question.' '.$answer) === 1;
     }
 
     private function linkResourceLabel(string $question, string $answer, string $title, string $url): string
@@ -1836,7 +1765,7 @@ class AnswerSynthesizer
     {
         $haystack = mb_strtolower($question.' '.$answer);
 
-        if (str_contains($haystack, 'hazardous waste') || str_contains($haystack, 'drop-off')) {
+        if (str_contains($haystack, 'drop-off')) {
             return 'Open drop-off map';
         }
 
@@ -2719,32 +2648,7 @@ class AnswerSynthesizer
 
     private function questionRequiresProceduralSteps(string $question): bool
     {
-        $question = mb_strtolower($question);
-
-        if (preg_match('/\b(how do i|how can i|where do i|what do i need)\b/i', $question) === 1) {
-            return true;
-        }
-
-        foreach ([
-            'permit',
-            'permits',
-            'application',
-            'apply',
-            'submit',
-            'inspection',
-            'inspections',
-            'approval',
-            'approved',
-            'required',
-            'requirements',
-            'documents',
-        ] as $signal) {
-            if (str_contains($question, $signal)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->proceduralQuestionAnalyzer->requiresStepwiseSupport($question);
     }
 
     private function proceduralProcessSignalCount(string $content): int

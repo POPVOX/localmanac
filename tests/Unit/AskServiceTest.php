@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\Chat\AnswerSynthesizer;
 use App\Services\Chat\AskService;
 use App\Services\Chat\ChatSourceSelector;
+use App\Services\Chat\ProceduralQuestionAnalyzer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Tests\TestCase;
@@ -55,7 +56,7 @@ it('keeps an uncited answer but suppresses unrelated source links', function () 
             'source_mode' => 'web',
         ]);
 
-    $service = new AskService($selector, $synthesizer);
+    $service = new AskService($selector, $synthesizer, app(ProceduralQuestionAnalyzer::class));
     $response = $service->answer('Who is the largest employer in Wichita?', $city->id);
 
     expect($response['answer'])->toBe('Spirit AeroSystems is likely the largest employer in Wichita.')
@@ -106,7 +107,7 @@ it('normalizes generic city phrasing before retrieval and synthesis', function (
             'source_mode' => 'local',
         ]);
 
-    $service = new AskService($selector, $synthesizer);
+    $service = new AskService($selector, $synthesizer, app(ProceduralQuestionAnalyzer::class));
     $response = $service->answer('What are tenant rights in my city?', $city->id);
 
     expect($response['answer'])->toBe('Tenant rights information is available from the housing resource page.')
@@ -155,7 +156,7 @@ it('broadens procedural source selection before synthesis', function () {
             'source_mode' => 'local',
         ]);
 
-    $service = new AskService($selector, $synthesizer);
+    $service = new AskService($selector, $synthesizer, app(ProceduralQuestionAnalyzer::class));
     $response = $service->answer('How do I get a demolition permit?', $city->id);
 
     expect($response['answer'])->toBe('You can apply for a demolition permit through the city permit center.')
@@ -213,7 +214,7 @@ it('suppresses citations and resources when answer confidence is below the displ
             'source_mode' => 'local',
         ]);
 
-    $service = new AskService($selector, $synthesizer);
+    $service = new AskService($selector, $synthesizer, app(ProceduralQuestionAnalyzer::class));
     $response = $service->answer('How do I get a demolition permit?', $city->id);
 
     expect($response['answer'])->toBe('You can apply for a demolition permit through the city permit center.')
@@ -278,7 +279,7 @@ it('suppresses streaming source links when confidence is below the display thres
             'conversation_id' => 'conv_demo',
         ]);
 
-    $service = new AskService($selector, $synthesizer);
+    $service = new AskService($selector, $synthesizer, app(ProceduralQuestionAnalyzer::class));
     $response = $service->answerStreamingForUser(
         'How do I get a demolition permit?',
         $city->id,

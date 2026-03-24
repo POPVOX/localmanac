@@ -22,6 +22,7 @@ class AskService
     public function __construct(
         private readonly ChatSourceSelector $selector,
         private readonly AnswerSynthesizer $synthesizer,
+        private readonly ProceduralQuestionAnalyzer $proceduralQuestionAnalyzer,
     ) {}
 
     /**
@@ -757,37 +758,7 @@ class AskService
 
     private function isProceduralQuestion(string $question): bool
     {
-        $question = mb_strtolower(trim($question));
-
-        if ($question === '') {
-            return false;
-        }
-
-        if (preg_match('/\b(how do i|how can i|where do i|who do i call|what do i need)\b/i', $question) === 1) {
-            return true;
-        }
-
-        foreach ([
-            'permit',
-            'permits',
-            'license',
-            'licenses',
-            'apply',
-            'application',
-            'demolition',
-            'inspection',
-            'contractor',
-            'historic',
-            'review',
-            'approval',
-            'portal',
-        ] as $signal) {
-            if (str_contains($question, $signal)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->proceduralQuestionAnalyzer->isProceduralQuestion($question);
     }
 
     private function isNoAnswerMessage(string $answer): bool
