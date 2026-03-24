@@ -51,9 +51,8 @@
     <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
         <flux:table :paginate="$sources">
             <flux:table.columns sticky>
-                <flux:table.column sticky>{{ __('Name') }}</flux:table.column>
+                <flux:table.column sticky class="w-[380px]">{{ __('Name') }}</flux:table.column>
                 <flux:table.column>{{ __('City') }}</flux:table.column>
-                <flux:table.column>{{ __('Type') }}</flux:table.column>
                 <flux:table.column class="w-[112px]">{{ __('Active') }}</flux:table.column>
                 <flux:table.column>{{ __('Last run') }}</flux:table.column>
                 <flux:table.column align="end">{{ __('Actions') }}</flux:table.column>
@@ -75,15 +74,22 @@
                         };
                     @endphp
                     <flux:table.row :key="$source->id">
-                        <flux:table.cell variant="strong" sticky>
-                            {{ $source->name ?: __('Source :id', ['id' => $source->id]) }}
+                        <flux:table.cell variant="strong" sticky class="w-[380px]">
+                            <div class="space-y-1">
+                                <div>{{ $source->name ?: __('Source :id', ['id' => $source->id]) }}</div>
+                                <div class="flex items-center gap-2 overflow-hidden">
+                                    <flux:badge color="indigo" variant="subtle" class="shrink-0 uppercase tracking-wide">
+                                        {{ strtoupper(str_replace('_', ' ', $source->source_type)) }}
+                                    </flux:badge>
+                                    @if ($source->source_url)
+                                        <flux:link href="{{ $source->source_url }}" target="_blank" class="block truncate text-sm font-normal text-zinc-500">
+                                            {{ $source->source_url }}
+                                        </flux:link>
+                                    @endif
+                                </div>
+                            </div>
                         </flux:table.cell>
                         <flux:table.cell>{{ $source->city?->name ?? __('Unknown') }}</flux:table.cell>
-                        <flux:table.cell>
-                            <flux:badge color="indigo" variant="subtle" class="uppercase tracking-wide">
-                                {{ strtoupper(str_replace('_', ' ', $source->source_type)) }}
-                            </flux:badge>
-                        </flux:table.cell>
                         <flux:table.cell class="w-[112px]">
                             <flux:switch
                                 :checked="$source->is_active"
@@ -133,7 +139,7 @@
                     </flux:table.row>
                 @empty
                     <flux:table.row>
-                        <flux:table.cell colspan="6">
+                        <flux:table.cell colspan="5">
                             <flux:text variant="subtle">{{ __('No event sources match the current filters.') }}</flux:text>
                         </flux:table.cell>
                     </flux:table.row>

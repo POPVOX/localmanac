@@ -54,35 +54,7 @@
     <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
         <flux:table :paginate="$scrapers">
             <flux:table.columns sticky>
-                <flux:table.column sticky>
-                    <flux:table.sortable
-                        :sorted="$sortField === 'scrapers.id'"
-                        :direction="$sortDirection"
-                        wire:click="sortBy('scrapers.id')"
-                    >
-                        <div>{{ __('ID') }}</div>
-                    </flux:table.sortable>
-                </flux:table.column>
-                <flux:table.column>
-                    <flux:table.sortable
-                        :sorted="$sortField === 'organization_name'"
-                        :direction="$sortDirection"
-                        wire:click="sortBy('organization_name')"
-                    >
-                        <div>{{ __('Organization') }}</div>
-                    </flux:table.sortable>
-                </flux:table.column>
-                <flux:table.column>
-                    <flux:table.sortable
-                        :sorted="$sortField === 'scrapers.type'"
-                        :direction="$sortDirection"
-                        wire:click="sortBy('scrapers.type')"
-                    >
-                        <div>{{ __('Type') }}</div>
-                    </flux:table.sortable>
-                </flux:table.column>
-                <flux:table.column class="w-[112px]">{{ __('Active') }}</flux:table.column>
-                <flux:table.column>
+                <flux:table.column sticky class="w-[420px]">
                     <flux:table.sortable
                         :sorted="$sortField === 'scrapers.name'"
                         :direction="$sortDirection"
@@ -91,6 +63,7 @@
                         <div>{{ __('Scraper') }}</div>
                     </flux:table.sortable>
                 </flux:table.column>
+                <flux:table.column class="w-[112px]">{{ __('Active') }}</flux:table.column>
                 <flux:table.column>{{ __('Last scraped') }}</flux:table.column>
                 <flux:table.column align="end">{{ __('Actions') }}</flux:table.column>
             </flux:table.columns>
@@ -104,12 +77,19 @@
                         $isActiveRun = $lastRun?->isFreshActive() ?? false;
                     @endphp
                     <flux:table.row :key="$scraper->id">
-                        <flux:table.cell variant="strong" sticky>#{{ $scraper->id }}</flux:table.cell>
-                        <flux:table.cell>{{ $scraper->organization?->name ?? '—' }}</flux:table.cell>
-                        <flux:table.cell>
-                            <flux:badge color="indigo" variant="subtle" class="uppercase tracking-wide">
-                                {{ $scraper->type }}
-                            </flux:badge>
+                        <flux:table.cell variant="strong" sticky class="w-[420px]">
+                            <div class="space-y-1">
+                                <div>{{ $scraper->name ?: __('Scraper :id', ['id' => $scraper->id]) }}</div>
+                                <div class="flex items-center gap-2 overflow-hidden">
+                                    <flux:text variant="subtle" class="shrink-0">#{{ $scraper->id }}</flux:text>
+                                    <flux:badge color="indigo" variant="subtle" class="shrink-0 uppercase tracking-wide">
+                                        {{ $scraper->type }}
+                                    </flux:badge>
+                                    <flux:text variant="subtle" class="truncate">
+                                        {{ $scraper->organization?->name ?? __('Unassigned') }}
+                                    </flux:text>
+                                </div>
+                            </div>
                         </flux:table.cell>
                         <flux:table.cell class="w-[112px]">
                             <flux:switch
@@ -117,13 +97,6 @@
                                 wire:click="toggleActive({{ $scraper->id }})"
                                 aria-label="{{ __('Toggle active') }}"
                             />
-                        </flux:table.cell>
-                        <flux:table.cell>
-                            @if ($scraper->name)
-                                <flux:text>{{ $scraper->name }}</flux:text>
-                            @else
-                                <flux:text variant="subtle">{{ __('—') }}</flux:text>
-                            @endif
                         </flux:table.cell>
                         <flux:table.cell>
                             @php
@@ -170,7 +143,7 @@
                     </flux:table.row>
                 @empty
                     <flux:table.row>
-                        <flux:table.cell colspan="7">
+                        <flux:table.cell colspan="4">
                             <flux:text variant="subtle">{{ __('No scrapers match the current filters.') }}</flux:text>
                         </flux:table.cell>
                     </flux:table.row>

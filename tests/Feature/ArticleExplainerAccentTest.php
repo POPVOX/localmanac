@@ -11,7 +11,11 @@ test('article explainer page renders participation section', function () {
 
     $response
         ->assertOk()
-        ->assertSeeText('How to Participate')
+        ->assertSeeText('AI summaries can make mistakes.')
+        ->assertSeeText('You may want to check them before acting on information you read here.')
+        ->assertSeeText('Source Article')
+        ->assertSeeText('Read full source')
+        ->assertDontSeeText('How to Participate')
         ->assertSeeText('No people or organizations listed yet.')
         ->assertDontSeeText('No extracted entities yet.');
 });

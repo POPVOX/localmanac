@@ -49,7 +49,7 @@ test('dashboard shows task-oriented chat prompt chips', function () {
     $response = $this->get(route('dashboard'));
 
     $response->assertOk()
-        ->assertSee('What changed this week?')
+        ->assertSee("What's new this week?")
         ->assertSee('Upcoming meetings')
         ->assertSee('New permits & projects')
         ->assertSee('Service alerts');

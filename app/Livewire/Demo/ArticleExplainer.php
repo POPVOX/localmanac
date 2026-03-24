@@ -208,12 +208,6 @@ class ArticleExplainer extends Component
             }
         }
 
-        $sourceAction = $this->sourceAction();
-
-        if ($sourceAction) {
-            $actions[] = $sourceAction;
-        }
-
         return $actions;
     }
 
@@ -783,36 +777,6 @@ class ArticleExplainer extends Component
         }
 
         return $action;
-    }
-
-    /**
-     * @return array{
-     *     icon: string,
-     *     title: string,
-     *     subtitle: string|null,
-     *     meta: array<int, string>,
-     *     cta_label: string|null,
-     *     cta_url: string|null,
-     *     badge: string|null
-     * }|null
-     */
-    private function sourceAction(): ?array
-    {
-        $url = $this->stringValue($this->article->canonical_url) ?? $this->article->primarySourceUrl();
-
-        if (! $url) {
-            return null;
-        }
-
-        return [
-            'icon' => 'document-text',
-            'title' => __('Read the Proposal'),
-            'subtitle' => __('Full application and supporting documents'),
-            'meta' => [],
-            'cta_label' => __('View documents'),
-            'cta_url' => $url,
-            'badge' => null,
-        ];
     }
 
     private function formatOpportunityDate(?\DateTimeInterface $date, bool $hasTime): ?string

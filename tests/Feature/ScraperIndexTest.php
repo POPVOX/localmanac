@@ -9,8 +9,8 @@ it('renders scraper columns with active before scraper name', function () {
 
     Livewire::actingAs($user)->test(ScraperIndex::class)
         ->assertSeeInOrder([
-            'Type',
-            'Active',
             'Scraper',
+            'Active',
+            'Last scraped',
         ]);
 });

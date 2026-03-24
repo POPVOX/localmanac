@@ -3,6 +3,7 @@
 use App\Http\Controllers\ArticleSourceController;
 use App\Livewire\Admin\ChatSources\Form as ChatSourcesForm;
 use App\Livewire\Admin\ChatSources\Index as ChatSourcesIndex;
+use App\Livewire\Admin\ChatSources\Show as ChatSourcesShow;
 use App\Livewire\Admin\Cities\Form as CitiesForm;
 use App\Livewire\Admin\Cities\Index as CitiesIndex;
 use App\Livewire\Admin\Dashboard as AdminDashboard;
@@ -78,6 +79,7 @@ Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
         Route::get('chat-sources', ChatSourcesIndex::class)->name('chat-sources.index');
         Route::get('chat-sources/create', ChatSourcesForm::class)->name('chat-sources.create');
         Route::get('chat-sources/{source}/edit', ChatSourcesForm::class)->name('chat-sources.edit');
+        Route::get('chat-sources/{source}', ChatSourcesShow::class)->name('chat-sources.show');
 
         Route::get('feedback', FeedbackIndex::class)->name('feedback.index');
     });

@@ -30,6 +30,8 @@ class ChatSourceFactory extends Factory
             ], fake()->numberBetween(1, 3)),
             'priority' => fake()->numberBetween(0, 10),
             'is_active' => true,
+            'frequency' => 'daily',
+            'last_run_at' => null,
             'link_follow_mode' => 'auto',
             'link_limit' => 6,
             'crawl_renderer' => 'auto',

@@ -15,3 +15,7 @@ Schedule::command('scrape:schedule')
 Schedule::command('calendar:schedule')
     ->everyMinute()
     ->withoutOverlapping();
+
+Schedule::command('chat:schedule')
+    ->everyMinute()
+    ->withoutOverlapping();

@@ -4,6 +4,7 @@ use App\Jobs\EmbedChatSourcePage;
 use App\Jobs\IngestChatSource;
 use App\Models\ChatSource;
 use App\Models\ChatSourceChunk;
+use App\Models\ChatSourceIngestionRun;
 use App\Models\ChatSourcePage;
 use App\Models\City;
 use App\Services\Chat\Ingestion\ChatSourceCrawler;
@@ -75,12 +76,26 @@ it('purges blocked infrastructure pages and their chunks during reingest', funct
             ],
         ]);
 
-    $job = new IngestChatSource($source->id);
-    $job->handle($crawler, app(\App\Services\Chat\ChatSourceGuard::class));
+    app()->instance(ChatSourceCrawler::class, $crawler);
+
+    $run = ChatSourceIngestionRun::create([
+        'chat_source_id' => $source->id,
+        'status' => 'queued',
+        'pages_found' => 0,
+        'pages_changed' => 0,
+        'pages_embedded' => 0,
+    ]);
+
+    $job = new IngestChatSource($source->id, false, $run->id);
+    $job->handle(app(\App\Services\Chat\Ingestion\ChatSourceIngestionRunner::class));
 
     expect(ChatSourcePage::query()->whereKey($blockedPage->id)->exists())->toBeFalse()
         ->and(ChatSourceChunk::query()->where('chat_source_page_id', $blockedPage->id)->exists())->toBeFalse()
-        ->and($existingPage->fresh()?->content_text)->toBe('Updated FAQ content');
+        ->and($existingPage->fresh()?->content_text)->toBe('Updated FAQ content')
+        ->and($run->fresh()?->status)->toBe('success')
+        ->and($run->fresh()?->pages_found)->toBe(1)
+        ->and($run->fresh()?->pages_changed)->toBe(1)
+        ->and($run->fresh()?->pages_embedded)->toBe(1);
 
     Queue::assertPushed(EmbedChatSourcePage::class, fn (EmbedChatSourcePage $job): bool => $job->chatSourcePageId === $existingPage->id);
 });

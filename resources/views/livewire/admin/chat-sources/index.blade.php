@@ -1,4 +1,8 @@
-<div class="space-y-6">
+@php
+    $hasActiveRuns = $sources->contains(fn ($source) => $source->latestRun?->isFreshActive() ?? false);
+@endphp
+
+<div class="space-y-6" @if($hasActiveRuns) wire:poll.10s @endif>
     <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
             <flux:heading size="xl" level="1">{{ __('Chat Sources') }}</flux:heading>
@@ -121,7 +125,7 @@
     <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
         <flux:table :paginate="$sources">
             <flux:table.columns sticky>
-                <flux:table.column>
+                <flux:table.column sticky class="w-[360px]">
                     <flux:table.sortable
                         :sorted="$sortField === 'chat_sources.name'"
                         :direction="$sortDirection"
@@ -131,7 +135,6 @@
                     </flux:table.sortable>
                 </flux:table.column>
                 <flux:table.column>{{ __('City') }}</flux:table.column>
-                <flux:table.column>{{ __('Source URL') }}</flux:table.column>
                 <flux:table.column align="center">
                     <flux:table.sortable
                         :sorted="$sortField === 'chat_sources.priority'"
@@ -143,20 +146,29 @@
                     </flux:table.sortable>
                 </flux:table.column>
                 <flux:table.column class="w-[112px]">{{ __('Active') }}</flux:table.column>
-                <flux:table.column>{{ __('Updated') }}</flux:table.column>
+                <flux:table.column>{{ __('Last run') }}</flux:table.column>
                 <flux:table.column align="end">{{ __('Actions') }}</flux:table.column>
             </flux:table.columns>
 
             <flux:table.rows>
                 @forelse ($sources as $source)
+                    @php
+                        $latestRun = $source->latestRun;
+                        $latestStatus = $latestRun?->status;
+                        $lastRunAt = $latestRun?->finished_at ?? $latestRun?->started_at;
+                        $isActiveRun = $latestRun?->isFreshActive() ?? false;
+                        $tz = $source->city?->timezone ?? config('app.timezone', 'UTC');
+                    @endphp
                     <flux:table.row :key="$source->id">
-                        <flux:table.cell variant="strong">{{ $source->name }}</flux:table.cell>
-                        <flux:table.cell>{{ $source->city?->name ?? '—' }}</flux:table.cell>
-                        <flux:table.cell>
-                            <flux:link href="{{ $source->source_url }}" target="_blank">
-                                {{ \Illuminate\Support\Str::limit($source->source_url, 40) }}
-                            </flux:link>
+                        <flux:table.cell variant="strong" sticky class="w-[360px]">
+                            <div class="space-y-1">
+                                <div>{{ $source->name }}</div>
+                                <flux:link href="{{ $source->source_url }}" target="_blank" class="block truncate text-sm font-normal text-zinc-500">
+                                    {{ $source->source_url }}
+                                </flux:link>
+                            </div>
                         </flux:table.cell>
+                        <flux:table.cell>{{ $source->city?->name ?? '—' }}</flux:table.cell>
                         <flux:table.cell align="center">{{ $source->priority }}</flux:table.cell>
                         <flux:table.cell class="w-[112px]">
                             <flux:switch
@@ -166,17 +178,46 @@
                             />
                         </flux:table.cell>
                         <flux:table.cell>
-                            {{ $source->updated_at?->diffForHumans() ?? '—' }}
+                            @if ($isActiveRun)
+                                <flux:text variant="subtle">
+                                    {{ $latestStatus === 'queued' ? __('Queued') : __('Running') }}
+                                </flux:text>
+                            @elseif ($latestStatus === 'failed')
+                                <flux:badge color="red" variant="subtle">{{ __('Failed') }}</flux:badge>
+                            @elseif ($lastRunAt)
+                                {{ $lastRunAt->clone()->tz($tz)->diffForHumans() }}
+                            @else
+                                <flux:text variant="subtle">{{ __('Never') }}</flux:text>
+                            @endif
                         </flux:table.cell>
-                        <flux:table.cell align="end" class="flex flex-wrap gap-2 justify-end">
+                        <flux:table.cell align="end" class="flex items-center justify-end gap-2 whitespace-nowrap">
+                            <flux:button size="sm" variant="ghost" :href="route('admin.chat-sources.show', $source)" wire:navigate>
+                                {{ __('View') }}
+                            </flux:button>
                             <flux:button size="sm" variant="ghost" :href="route('admin.chat-sources.edit', $source)" wire:navigate>
                                 {{ __('Edit') }}
+                            </flux:button>
+                            <flux:button
+                                size="sm"
+                                variant="primary"
+                                wire:click="queueRun({{ $source->id }})"
+                                wire:loading.attr="disabled"
+                                wire:target="queueRun({{ $source->id }})"
+                                :disabled="! $source->is_active || $isActiveRun"
+                            >
+                                <span class="inline-flex items-center justify-center w-16 h-8">
+                                    @if ($isActiveRun)
+                                        <flux:icon.loading class="size-4" />
+                                    @else
+                                        {{ __('Run') }}
+                                    @endif
+                                </span>
                             </flux:button>
                         </flux:table.cell>
                     </flux:table.row>
                 @empty
                     <flux:table.row>
-                        <flux:table.cell colspan="7">
+                        <flux:table.cell colspan="6">
                             <flux:text variant="subtle">{{ __('No sources match the current filters.') }}</flux:text>
                         </flux:table.cell>
                     </flux:table.row>

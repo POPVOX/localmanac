@@ -2,8 +2,11 @@
 
 namespace App\Livewire\Admin\ChatSources;
 
+use App\Jobs\IngestChatSource;
 use App\Models\ChatSource;
+use App\Models\ChatSourceIngestionRun;
 use App\Models\City;
+use App\Services\Chat\Ingestion\ChatSourceIngestionRunner;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\RedirectResponse;
@@ -31,6 +34,8 @@ class Form extends Component
 
     public bool $isActive = true;
 
+    public string $frequency = 'daily';
+
     public string $linkFollowMode = 'auto';
 
     public int $linkLimit = 6;
@@ -41,19 +46,22 @@ class Form extends Component
 
     public function mount(?ChatSource $source = null): void
     {
-        $this->source = $source;
+        $this->source = $source?->exists ? $source : null;
 
-        if ($source) {
-            $this->cityId = $source->city_id;
-            $this->name = $source->name;
-            $this->sourceUrl = $source->source_url;
-            $this->description = $source->description;
-            $this->tags = implode(', ', $source->tags ?? []);
-            $this->priority = (int) $source->priority;
-            $this->isActive = (bool) $source->is_active;
-            $this->linkFollowMode = $source->link_follow_mode ?? 'auto';
-            $this->linkLimit = (int) ($source->link_limit ?? 6);
-            $this->crawlRenderer = $source->crawl_renderer ?? 'auto';
+        if ($this->source) {
+            $this->expireStaleRuns($this->source->id);
+            $this->source = $this->source->load('latestRun');
+            $this->cityId = $this->source->city_id;
+            $this->name = $this->source->name;
+            $this->sourceUrl = $this->source->source_url;
+            $this->description = $this->source->description;
+            $this->tags = implode(', ', $this->source->tags ?? []);
+            $this->priority = (int) $this->source->priority;
+            $this->isActive = (bool) $this->source->is_active;
+            $this->frequency = $this->source->frequency ?? 'daily';
+            $this->linkFollowMode = $this->source->link_follow_mode ?? 'auto';
+            $this->linkLimit = (int) ($this->source->link_limit ?? 6);
+            $this->crawlRenderer = $this->source->crawl_renderer ?? 'auto';
         } else {
             $this->cityId = $this->cityId ?? City::query()->orderBy('name')->value('id');
         }
@@ -64,6 +72,55 @@ class Form extends Component
         $this->showAdvanced = ! $this->showAdvanced;
     }
 
+    public function queueRun(): void
+    {
+        if (! $this->source) {
+            return;
+        }
+
+        $run = null;
+
+        try {
+            $this->expireStaleRuns($this->source->id);
+            $this->source->loadMissing('latestRun');
+
+            if (! $this->source->is_active) {
+                $this->dispatchToast(__('Source disabled'), __('Enable it before queuing a run.'), 'danger');
+
+                return;
+            }
+
+            $hasActiveRun = $this->source->runs()->freshActive()->exists();
+
+            if ($hasActiveRun) {
+                $this->dispatchToast(__('Already running'), __('A run is already queued or in progress.'), 'warning');
+
+                return;
+            }
+
+            $run = app(ChatSourceIngestionRunner::class)->createRun($this->source);
+
+            dispatch(new IngestChatSource($this->source->id, false, $run->id));
+
+            $this->dispatchToast(__('Run queued'), __('We will ingest this source in the background.'));
+
+            $this->refreshSource();
+        } catch (Throwable $exception) {
+            if ($run) {
+                $run->update([
+                    'status' => 'failed',
+                    'finished_at' => now(),
+                    'error_class' => $exception::class,
+                    'error_message' => __('Failed to dispatch run job: :message', ['message' => $exception->getMessage()]),
+                ]);
+            }
+
+            report($exception);
+
+            $this->dispatchToast(__('Queue failed'), __('We could not queue this run.'), 'danger');
+        }
+    }
+
     public function save(): RedirectResponse|Redirector|null
     {
         try {
@@ -71,6 +128,7 @@ class Form extends Component
             $payload['city_id'] = (int) $payload['cityId'];
             $payload['source_url'] = $payload['sourceUrl'];
             $payload['is_active'] = (bool) $payload['isActive'];
+            $payload['frequency'] = $payload['frequency'];
             $payload['link_follow_mode'] = $payload['linkFollowMode'];
             $payload['link_limit'] = (int) $payload['linkLimit'];
             $payload['crawl_renderer'] = $payload['crawlRenderer'];
@@ -127,6 +185,7 @@ class Form extends Component
 
         return view('livewire.admin.chat-sources.form', [
             'cities' => $cities,
+            'frequencies' => ChatSource::FREQUENCIES,
             'title' => $this->source ? __('Edit Chat Source') : __('Create Chat Source'),
         ])->layout('layouts.admin', [
             'title' => $this->source ? __('Edit Chat Source') : __('Create Chat Source'),
@@ -150,6 +209,7 @@ class Form extends Component
             'tags' => ['nullable', 'string'],
             'priority' => ['required', 'integer', 'min:0'],
             'isActive' => ['boolean'],
+            'frequency' => ['required', Rule::in(ChatSource::FREQUENCIES)],
             'linkFollowMode' => ['required', Rule::in(['auto', 'none'])],
             'linkLimit' => ['required', 'integer', 'min:0', 'max:20'],
             'crawlRenderer' => ['required', Rule::in(['auto', 'http', 'playwright'])],
@@ -190,5 +250,29 @@ class Form extends Component
         }
 
         return str_contains($exception->getMessage(), $constraint);
+    }
+
+    private function refreshSource(): void
+    {
+        if (! $this->source) {
+            return;
+        }
+
+        $this->expireStaleRuns($this->source->id);
+        $this->source->refresh()->load('latestRun');
+    }
+
+    private function expireStaleRuns(int $sourceId): void
+    {
+        ChatSourceIngestionRun::query()
+            ->where('chat_source_id', $sourceId)
+            ->staleActive()
+            ->update([
+                'status' => 'failed',
+                'finished_at' => now(),
+                'error_class' => null,
+                'error_message' => __('Run timed out before the worker started.'),
+                'updated_at' => now(),
+            ]);
     }
 }

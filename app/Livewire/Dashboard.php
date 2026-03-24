@@ -439,7 +439,7 @@ class Dashboard extends Component
 
         return [
             [
-                'label' => __('What changed this week?'),
+                'label' => __("What's new this week?"),
                 'prompt' => __('Summarize the most important local updates in :city from the last 7 days. Focus on decisions, projects, and deadlines, and include citations.', ['city' => $cityName]),
             ],
             [

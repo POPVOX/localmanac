@@ -2,9 +2,12 @@
 
 namespace App\Livewire\Admin\ChatSources;
 
+use App\Jobs\IngestChatSource;
 use App\Models\ChatSource;
+use App\Models\ChatSourceIngestionRun;
 use App\Models\ChatSourcePage;
 use App\Models\City;
+use App\Services\Chat\Ingestion\ChatSourceIngestionRunner;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Carbon;
@@ -71,9 +74,9 @@ class Index extends Component
             ]);
 
             if ($source->is_active) {
-                $this->dispatchToast(__('Source enabled'), __('It will be used for chat answers.'));
+                $this->dispatchToast(__('Source enabled'), __('Runs will be included in schedules.'));
             } else {
-                $this->dispatchToast(__('Source disabled'), __('It will be skipped until re-enabled.'));
+                $this->dispatchToast(__('Source disabled'), __('Runs will be skipped until re-enabled.'));
             }
         } catch (ModelNotFoundException $exception) {
             $this->dispatchToast(__('Source not found'), __('Refresh the page and try again.'), 'danger');
@@ -85,12 +88,60 @@ class Index extends Component
         }
     }
 
+    public function queueRun(int $sourceId): void
+    {
+        $run = null;
+
+        try {
+            $source = ChatSource::findOrFail($sourceId);
+            $this->expireStaleRuns($source->id);
+
+            if (! $source->is_active) {
+                $this->dispatchToast(__('Source disabled'), __('Enable it before queuing a run.'), 'danger');
+
+                return;
+            }
+
+            $hasActiveRun = $source->runs()->freshActive()->exists();
+
+            if ($hasActiveRun) {
+                $this->dispatchToast(__('Already running'), __('A run is already queued or in progress.'), 'warning');
+
+                return;
+            }
+
+            $run = app(ChatSourceIngestionRunner::class)->createRun($source);
+
+            dispatch(new IngestChatSource($source->id, false, $run->id));
+
+            $this->dispatchToast(__('Run queued'), __('We will ingest this source in the background.'));
+        } catch (ModelNotFoundException $exception) {
+            $this->dispatchToast(__('Source not found'), __('Refresh the page and try again.'), 'danger');
+            report($exception);
+        } catch (Throwable $exception) {
+            if ($run) {
+                $run->update([
+                    'status' => 'failed',
+                    'finished_at' => now(),
+                    'error_class' => $exception::class,
+                    'error_message' => __('Failed to dispatch run job: :message', ['message' => $exception->getMessage()]),
+                ]);
+            }
+
+            report($exception);
+
+            $this->dispatchToast(__('Queue failed'), __('We could not queue this run.'), 'danger');
+        }
+    }
+
     public function render(): View
     {
+        $this->expireStaleRuns();
+
         $search = trim($this->search);
 
         $sources = ChatSource::query()
-            ->with('city')
+            ->with(['city', 'latestRun'])
             ->when($search !== '', function ($query) use ($search) {
                 $query->leftJoin('cities', 'cities.id', '=', 'chat_sources.city_id')
                     ->select('chat_sources.*')
@@ -181,5 +232,22 @@ class Index extends Component
     private function dispatchToast(string $heading, string $message, string $variant = 'success'): void
     {
         $this->dispatch('toast', heading: $heading, message: $message, variant: $variant);
+    }
+
+    private function expireStaleRuns(?int $sourceId = null): void
+    {
+        $query = ChatSourceIngestionRun::query()->staleActive();
+
+        if ($sourceId !== null) {
+            $query->where('chat_source_id', $sourceId);
+        }
+
+        $query->update([
+            'status' => 'failed',
+            'finished_at' => now(),
+            'error_class' => null,
+            'error_message' => __('Run timed out before the worker started.'),
+            'updated_at' => now(),
+        ]);
     }
 }

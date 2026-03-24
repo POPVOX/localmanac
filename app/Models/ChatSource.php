@@ -6,12 +6,15 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Laravel\Scout\Searchable;
 
 class ChatSource extends Model
 {
     use HasFactory;
     use Searchable;
+
+    public const FREQUENCIES = ['hourly', 'daily', 'weekly'];
 
     /**
      * @var list<string>
@@ -24,6 +27,8 @@ class ChatSource extends Model
         'tags',
         'priority',
         'is_active',
+        'frequency',
+        'last_run_at',
         'link_follow_mode',
         'link_limit',
         'crawl_renderer',
@@ -38,6 +43,8 @@ class ChatSource extends Model
             'tags' => 'array',
             'priority' => 'integer',
             'is_active' => 'boolean',
+            'frequency' => 'string',
+            'last_run_at' => 'datetime',
             'link_limit' => 'integer',
             'crawl_renderer' => 'string',
         ];
@@ -51,6 +58,16 @@ class ChatSource extends Model
     public function pages(): HasMany
     {
         return $this->hasMany(ChatSourcePage::class);
+    }
+
+    public function runs(): HasMany
+    {
+        return $this->hasMany(ChatSourceIngestionRun::class)->orderByDesc('created_at');
+    }
+
+    public function latestRun(): HasOne
+    {
+        return $this->hasOne(ChatSourceIngestionRun::class)->latestOfMany();
     }
 
     public function searchableAs(): string

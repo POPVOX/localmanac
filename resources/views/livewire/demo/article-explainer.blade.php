@@ -189,6 +189,12 @@
                 <flux:link href="{{ $sourceUrl }}" target="_blank" class="text-sm font-medium">
                     {{ __('Read full source →') }}
                 </flux:link>
+
+                <flux:callout variant="warning" icon="exclamation-triangle" :heading="__('AI summary notice')">
+                    <flux:text variant="subtle">
+                        {{ __('AI summaries can make mistakes. That is why we link to the original source documents. You may want to check them before acting on information you read here.') }}
+                    </flux:text>
+                </flux:callout>
             </flux:card>
 
             @can('access-admin')
@@ -213,66 +219,66 @@
         </div>
 
         <div class="flex flex-col gap-6">
-            <flux:card padding="lg" class="relative flex flex-col gap-5 overflow-hidden border border-zinc-200 bg-white/90 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/70">
-                <span class="pointer-events-none absolute inset-y-0 start-0 w-1.5 bg-gradient-to-b from-emerald-300 via-emerald-400 to-emerald-500 dark:from-emerald-700 dark:via-emerald-600 dark:to-emerald-500"></span>
+            @if ($participationActions !== [])
+                <flux:card padding="lg" class="relative flex flex-col gap-5 overflow-hidden border border-zinc-200 bg-white/90 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/70">
+                    <span class="pointer-events-none absolute inset-y-0 start-0 w-1.5 bg-gradient-to-b from-emerald-300 via-emerald-400 to-emerald-500 dark:from-emerald-700 dark:via-emerald-600 dark:to-emerald-500"></span>
 
-                <div class="flex items-center justify-between gap-3 ps-2">
-                    <flux:heading size="lg" level="2">
-                        {{ __('How to Participate') }}
-                    </flux:heading>
-                </div>
+                    <div class="flex items-center justify-between gap-3 ps-2">
+                        <flux:heading size="lg" level="2">
+                            {{ __('How to Participate') }}
+                        </flux:heading>
+                    </div>
 
-                <div class="flex flex-col gap-5 ps-2">
-                    @forelse ($participationActions as $action)
-                        <div class="flex gap-4 border-b border-zinc-200/80 pb-5 last:border-b-0 last:pb-0 dark:border-zinc-700/70">
-                            <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100/80 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-200 dark:ring-emerald-800">
-                                <flux:icon :icon="$action['icon']" variant="micro" class="size-5" />
-                            </div>
-                            <div class="flex flex-1 flex-col gap-2">
-                                <div class="flex flex-col gap-1">
-                                    <flux:heading size="sm" level="3">{{ $action['title'] }}</flux:heading>
-                                    @if ($action['subtitle'])
-                                        <flux:text variant="subtle" class="text-zinc-600 dark:text-zinc-300">
-                                            {{ $action['subtitle'] }}
-                                        </flux:text>
-                                    @endif
+                    <div class="flex flex-col gap-5 ps-2">
+                        @foreach ($participationActions as $action)
+                            <div class="flex gap-4 border-b border-zinc-200/80 pb-5 last:border-b-0 last:pb-0 dark:border-zinc-700/70">
+                                <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100/80 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-200 dark:ring-emerald-800">
+                                    <flux:icon :icon="$action['icon']" variant="micro" class="size-5" />
                                 </div>
-
-                                @if ($action['meta'] !== [])
+                                <div class="flex flex-1 flex-col gap-2">
                                     <div class="flex flex-col gap-1">
-                                        @foreach ($action['meta'] as $line)
+                                        <flux:heading size="sm" level="3">{{ $action['title'] }}</flux:heading>
+                                        @if ($action['subtitle'])
                                             <flux:text variant="subtle" class="text-zinc-600 dark:text-zinc-300">
-                                                {{ $line }}
+                                                {{ $action['subtitle'] }}
                                             </flux:text>
-                                        @endforeach
+                                        @endif
                                     </div>
-                                @endif
 
-                                <div class="flex flex-wrap items-center gap-3">
-                                    @if ($action['cta_url'])
-                                        <flux:button
-                                            size="sm"
-                                            variant="ghost"
-                                            :href="$action['cta_url']"
-                                            target="_blank"
-                                            icon:trailing="arrow-right"
-                                            class="text-emerald-700 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
-                                        >
-                                            {{ $action['cta_label'] ?? __('View details') }}
-                                        </flux:button>
+                                    @if ($action['meta'] !== [])
+                                        <div class="flex flex-col gap-1">
+                                            @foreach ($action['meta'] as $line)
+                                                <flux:text variant="subtle" class="text-zinc-600 dark:text-zinc-300">
+                                                    {{ $line }}
+                                                </flux:text>
+                                            @endforeach
+                                        </div>
                                     @endif
 
-                                    @if ($action['badge'])
-                                        <flux:badge variant="subtle">{{ $action['badge'] }}</flux:badge>
-                                    @endif
+                                    <div class="flex flex-wrap items-center gap-3">
+                                        @if ($action['cta_url'])
+                                            <flux:button
+                                                size="sm"
+                                                variant="ghost"
+                                                :href="$action['cta_url']"
+                                                target="_blank"
+                                                icon:trailing="arrow-right"
+                                                class="text-emerald-700 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200"
+                                            >
+                                                {{ $action['cta_label'] ?? __('View details') }}
+                                            </flux:button>
+                                        @endif
+
+                                        @if ($action['badge'])
+                                            <flux:badge variant="subtle">{{ $action['badge'] }}</flux:badge>
+                                        @endif
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    @empty
-                        <flux:text variant="subtle">{{ __('No participation opportunities yet.') }}</flux:text>
-                    @endforelse
-                </div>
-            </flux:card>
+                        @endforeach
+                    </div>
+                </flux:card>
+            @endif
 
             <flux:card padding="lg" class="flex flex-col gap-4">
                 <div class="flex items-center justify-between gap-3">

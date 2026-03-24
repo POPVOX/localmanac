@@ -4,7 +4,9 @@ namespace App\Console\Commands;
 
 use App\Jobs\IngestChatSource;
 use App\Models\ChatSource;
+use App\Services\Chat\Ingestion\ChatSourceIngestionRunner;
 use Illuminate\Console\Command;
+use Throwable;
 
 class ChatIngestSources extends Command
 {
@@ -30,11 +32,13 @@ class ChatIngestSources extends Command
     /**
      * Execute the console command.
      */
-    public function handle(): int
+    public function handle(ChatSourceIngestionRunner $runner): int
     {
         $query = ChatSource::query();
 
-        if (! $this->option('include-inactive')) {
+        $includeInactive = (bool) $this->option('include-inactive');
+
+        if (! $includeInactive) {
             $query->where('is_active', true);
         }
 
@@ -66,19 +70,40 @@ class ChatIngestSources extends Command
 
         $force = (bool) $this->option('force');
         $sync = (bool) $this->option('sync');
-        $queue = (string) config('chat.crawl_queue', 'ingestion');
+        $handled = 0;
+        $skipped = 0;
 
         foreach ($sources as $source) {
-            $job = new IngestChatSource($source->id, $force);
+            try {
+                $run = $runner->createRun($source, $includeInactive);
 
-            if ($sync) {
-                dispatch_sync($job);
-            } else {
-                dispatch($job)->onQueue($queue);
+                if ($sync) {
+                    $result = $runner->runExisting($run, $force, $includeInactive);
+
+                    if ($result->status === 'success') {
+                        $handled++;
+                    } else {
+                        $skipped++;
+                    }
+                } else {
+                    dispatch(new IngestChatSource($source->id, $force, $run->id, $includeInactive));
+                    $handled++;
+                }
+            } catch (Throwable $exception) {
+                report($exception);
+                $skipped++;
             }
         }
 
-        $this->info(sprintf('Queued ingestion for %d source(s).', $sources->count()));
+        if ($sync) {
+            $this->info(sprintf('Processed ingestion for %d source(s).', $handled));
+        } else {
+            $this->info(sprintf('Queued ingestion for %d source(s).', $handled));
+        }
+
+        if ($skipped > 0) {
+            $this->line(sprintf('Skipped %d source(s).', $skipped));
+        }
 
         return self::SUCCESS;
     }
