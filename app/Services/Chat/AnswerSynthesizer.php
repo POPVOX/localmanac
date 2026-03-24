@@ -56,6 +56,7 @@ class AnswerSynthesizer
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
         $eventCitations = $this->citationsFromLocalEvents($eventContext['local_events'] ?? []);
         $usedSeedAnswer = false;
+        $model = $this->chatModelForQuestion($question, $eventContext, $proceduralContext);
 
         $agent = StructuredChatAnswerAgent::make(
             tools: $this->buildTools($city, $sources, $question, $eventContext, $seedEvidence),
@@ -66,7 +67,7 @@ class AnswerSynthesizer
             provider: $this->providerPreference(
                 chainConfigKey: 'chat.provider_chain',
                 fallbackProviderConfigKey: 'chat.provider',
-                model: (string) config('chat.model', config('enrichment.model', 'gpt-4o-mini')),
+                model: $model,
             ),
             timeout: (int) config('chat.http_timeout', 20),
         );
@@ -206,6 +207,7 @@ class AnswerSynthesizer
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
         $eventCitations = $this->citationsFromLocalEvents($eventContext['local_events'] ?? []);
         $usedSeedAnswer = false;
+        $model = $this->chatModelForQuestion($question, $eventContext, $proceduralContext);
 
         $agent = StreamingChatAnswerAgent::make(
             tools: $this->buildTools($city, $sources, $question, $eventContext, $seedEvidence),
@@ -220,7 +222,7 @@ class AnswerSynthesizer
         $stream = $agent->stream(
             $this->streamingPrompt($question, $city, $seedEvidence, $eventContext),
             provider: $this->streamProvider(),
-            model: (string) config('chat.model', config('enrichment.model', 'gpt-4o-mini')),
+            model: $model,
             timeout: (int) config('chat.http_timeout', 20),
         );
         $resolvedConversationId = $conversationId;
@@ -2787,6 +2789,23 @@ class AnswerSynthesizer
         }
 
         return (string) config('chat.provider', 'openai');
+    }
+
+    /**
+     * @param  array<string, mixed>  $eventContext
+     * @param  array<string, mixed>  $proceduralContext
+     */
+    private function chatModelForQuestion(string $question, array $eventContext = [], array $proceduralContext = []): string
+    {
+        $defaultModel = (string) config('chat.model', config('enrichment.model', 'gpt-4o-mini'));
+
+        if (! $this->isWebSearchEnabledForQuestion($question, $eventContext, $proceduralContext)) {
+            return $defaultModel;
+        }
+
+        $webSearchModel = trim((string) config('chat.web_search_model', ''));
+
+        return $webSearchModel !== '' ? $webSearchModel : $defaultModel;
     }
 
     /**

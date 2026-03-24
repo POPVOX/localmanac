@@ -220,3 +220,57 @@ it('adds web search when only low-ranked procedural evidence matches the permit 
             'wichita.gov',
         ]);
 });
+
+it('uses the configured web search model when web fallback is enabled', function () {
+    config()->set('chat.model', 'gpt-4o-mini');
+    config()->set('chat.web_search_model', 'gpt-5-mini');
+    config()->set('chat.retrieval_mode', 'local_then_web');
+    config()->set('chat.tools.web_search.enabled', true);
+    config()->set('chat.tools.web_search.only_when_fresh_intent', true);
+
+    $synthesizer = app(AnswerSynthesizer::class);
+    $method = new ReflectionMethod(AnswerSynthesizer::class, 'chatModelForQuestion');
+    $method->setAccessible(true);
+
+    $model = $method->invoke(
+        $synthesizer,
+        'How do I get a demolition permit?',
+        [],
+        [
+            'intent' => true,
+            'evidence_sparse' => false,
+            'evidence_generic' => false,
+            'evidence_off_target' => true,
+            'use_web_fallback' => true,
+        ],
+    );
+
+    expect($model)->toBe('gpt-5-mini');
+});
+
+it('keeps the default chat model when web fallback is not enabled', function () {
+    config()->set('chat.model', 'gpt-4o-mini');
+    config()->set('chat.web_search_model', 'gpt-5-mini');
+    config()->set('chat.retrieval_mode', 'local_then_web');
+    config()->set('chat.tools.web_search.enabled', true);
+    config()->set('chat.tools.web_search.only_when_fresh_intent', true);
+
+    $synthesizer = app(AnswerSynthesizer::class);
+    $method = new ReflectionMethod(AnswerSynthesizer::class, 'chatModelForQuestion');
+    $method->setAccessible(true);
+
+    $model = $method->invoke(
+        $synthesizer,
+        'When is trash pickup?',
+        [],
+        [
+            'intent' => false,
+            'evidence_sparse' => false,
+            'evidence_generic' => false,
+            'evidence_off_target' => false,
+            'use_web_fallback' => false,
+        ],
+    );
+
+    expect($model)->toBe('gpt-4o-mini');
+});

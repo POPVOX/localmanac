@@ -7,6 +7,7 @@ return [
         explode(',', (string) env('CHAT_PROVIDER_CHAIN', env('CHAT_PROVIDER', config('enrichment.provider', 'openai'))))
     ))),
     'model' => env('CHAT_MODEL', config('enrichment.model', 'gpt-4o-mini')),
+    'web_search_model' => env('CHAT_WEB_SEARCH_MODEL', 'gpt-5-mini'),
     'retrieval_mode' => env('CHAT_RETRIEVAL_MODE', 'local_then_web'),
     'streaming_enabled' => (bool) env('CHAT_STREAMING_ENABLED', true),
     'streaming_refine_citations' => (bool) env('CHAT_STREAMING_REFINE_CITATIONS', false),
