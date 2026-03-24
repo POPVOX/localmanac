@@ -266,7 +266,7 @@
                                 <button
                                     type="button"
                                     class="rounded-full px-3.5 py-1.5 text-xs font-semibold transition {{ $chipColors[$index % count($chipColors)] }}"
-                                    wire:click="applyPrompt(@js($chip['prompt']))"
+                                    wire:click="applyPrompt(@js($chip['prompt']), @js($chip['fallback_intent']))"
                                 >
                                     {{ $chip['label'] }}
                                 </button>

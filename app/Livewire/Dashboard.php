@@ -31,6 +31,8 @@ class Dashboard extends Component
 
     public string $question = '';
 
+    public ?string $fallbackIntent = null;
+
     /**
      * @var array<int, array{
      *     role: string,
@@ -82,6 +84,7 @@ class Dashboard extends Component
                     user: auth()->user(),
                     conversationId: $this->memoryEnabled() ? $this->conversationId : null,
                     onDelta: static fn (string $delta): null => null,
+                    fallbackIntent: $this->fallbackIntent,
                 );
 
                 if ($this->memoryEnabled()) {
@@ -98,6 +101,7 @@ class Dashboard extends Component
                     question: $question,
                     cityId: $city?->id,
                     citySlug: null,
+                    fallbackIntent: $this->fallbackIntent,
                 );
             }
 
@@ -117,20 +121,34 @@ class Dashboard extends Component
         }
 
         $this->question = '';
+        $this->fallbackIntent = null;
         $this->dispatch('chat-updated');
     }
 
     public function startNewConversation(): void
     {
         $this->conversationId = null;
+        $this->fallbackIntent = null;
         session()->forget($this->conversationSessionKey());
         $this->messages = [];
         $this->dispatch('chat-reset');
     }
 
-    public function applyPrompt(string $prompt): void
+    public function applyPrompt(string $prompt, ?string $fallbackIntent = null): void
     {
         $this->question = $prompt;
+        $this->fallbackIntent = $this->normalizeFallbackIntent($fallbackIntent);
+    }
+
+    public function updatingQuestion(string $value): void
+    {
+        if ($this->fallbackIntent === null) {
+            return;
+        }
+
+        if (trim($value) !== trim($this->question)) {
+            $this->fallbackIntent = null;
+        }
     }
 
     public function selectIssueArea(int $issueAreaId): void
@@ -458,7 +476,7 @@ class Dashboard extends Component
     }
 
     /**
-     * @return array<int, array{label: string, prompt: string}>
+     * @return array<int, array{label: string, prompt: string, fallback_intent: string|null}>
      */
     private function chatPromptChips(?City $city): array
     {
@@ -468,20 +486,37 @@ class Dashboard extends Component
             [
                 'label' => __('What changed this week?'),
                 'prompt' => __('Summarize the most important local updates in :city from the last 7 days. Focus on decisions, projects, and deadlines, and include citations.', ['city' => $cityName]),
+                'fallback_intent' => 'weekly_updates',
             ],
             [
                 'label' => __('Upcoming meetings'),
                 'prompt' => __('What city council, board, and public meetings are coming up in :city in the next 14 days? Include dates, times, and where to find the agenda.', ['city' => $cityName]),
+                'fallback_intent' => null,
             ],
             [
                 'label' => __('New permits & projects'),
                 'prompt' => __('What new permits, rezonings, or major development projects were recently filed or approved in :city? Include status and key locations.', ['city' => $cityName]),
+                'fallback_intent' => 'permits_projects',
             ],
             [
                 'label' => __('Service alerts'),
                 'prompt' => __('What active service alerts or disruptions should residents in :city know about right now? Focus on roads, utilities, water, trash, and public services.', ['city' => $cityName]),
+                'fallback_intent' => 'service_alerts',
             ],
         ];
+    }
+
+    private function normalizeFallbackIntent(?string $fallbackIntent): ?string
+    {
+        if (! is_string($fallbackIntent) || trim($fallbackIntent) === '') {
+            return null;
+        }
+
+        $fallbackIntent = trim($fallbackIntent);
+
+        return in_array($fallbackIntent, AskService::allowedFallbackIntents(), true)
+            ? $fallbackIntent
+            : null;
     }
 
     /**

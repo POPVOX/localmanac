@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\ChatSource;
+use App\Models\ChatSourceChunk;
+use App\Models\ChatSourcePage;
 use App\Models\City;
 use App\Models\User;
 use App\Services\Chat\Agents\ChatCitationAgent;
@@ -24,6 +26,24 @@ it('persists conversation records and returns a conversation id for streaming us
         'source_url' => 'https://example.com/recycling',
         'priority' => 10,
         'is_active' => true,
+    ]);
+
+    $page = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id,
+        'url' => 'https://example.com/recycling',
+        'canonical_url' => 'https://example.com/recycling',
+        'title' => 'Recycling & Trash',
+        'content_text' => 'Trash pickup is on Monday.',
+        'content_length' => 28,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $page->id,
+        'chunk_index' => 0,
+        'content' => 'Trash pickup is on Monday.',
+        'content_length' => 28,
+        'embedding' => null,
+        'embedding_model' => null,
     ]);
 
     $user = User::factory()->create();

@@ -281,6 +281,7 @@ it('returns a cited weekly digest fallback for broad local update asks', functio
         ->postJson('/ask', [
             'question' => 'Summarize the most important local updates in Wichita from the last 7 days. Focus on decisions, projects, and deadlines, and include citations.',
             'city_id' => $city->id,
+            'fallback_intent' => 'weekly_updates',
         ]);
 
     $response->assertOk()
@@ -291,6 +292,115 @@ it('returns a cited weekly digest fallback for broad local update asks', functio
         ->assertJsonPath('citations.1.source_url', 'https://example.com/articles/water-disruption-downtown');
 
     expect((string) $response->json('answer'))->not->toContain('I could not find the answer in the sources I checked.');
+});
+
+it('does not route free form permit questions into digest fallback even when permit articles exist', function () {
+    Cache::flush();
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.retrieval_mode', 'local_only');
+    config()->set('chat.tools.web_search.enabled', false);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita Government',
+        'source_url' => 'https://www.wichita.gov/27/Government',
+        'is_active' => true,
+    ]);
+
+    $permitArticle = Article::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Planning Commission advances riverfront rezoning case',
+        'summary' => 'Commissioners moved a mixed-use rezoning request forward and set a public hearing deadline.',
+        'published_at' => Carbon::parse('2026-03-03 11:30:00', 'America/Chicago'),
+        'canonical_url' => 'https://example.com/articles/rezoning-riverfront',
+    ]);
+
+    ArticleSource::query()->create([
+        'city_id' => $city->id,
+        'article_id' => $permitArticle->id,
+        'source_url' => 'https://example.com/articles/rezoning-riverfront',
+        'source_type' => 'web',
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'I could not find the answer in the sources I checked.',
+            'citations' => [],
+            'source_mode' => 'none',
+            'confidence' => 0.0,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'How do I get a demolition permit?',
+        'city_id' => $city->id,
+    ]);
+
+    $response->assertOk()
+        ->assertSeeText('I could not find the answer in the sources I checked.')
+        ->assertDontSeeText('Here are recent permits and development project updates in Wichita:')
+        ->assertJsonPath('citations', []);
+});
+
+it('returns permit and project digest fallback only when explicitly requested', function () {
+    Cache::flush();
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.retrieval_mode', 'local_only');
+    config()->set('chat.tools.web_search.enabled', false);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita Government',
+        'source_url' => 'https://www.wichita.gov/27/Government',
+        'is_active' => true,
+    ]);
+
+    $permitArticle = Article::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Planning Commission advances riverfront rezoning case',
+        'summary' => 'Commissioners moved a mixed-use rezoning request forward and set a public hearing deadline.',
+        'published_at' => Carbon::parse('2026-03-03 11:30:00', 'America/Chicago'),
+        'canonical_url' => 'https://example.com/articles/rezoning-riverfront',
+    ]);
+
+    ArticleSource::query()->create([
+        'city_id' => $city->id,
+        'article_id' => $permitArticle->id,
+        'source_url' => 'https://example.com/articles/rezoning-riverfront',
+        'source_type' => 'web',
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'I could not find the answer in the sources I checked.',
+            'citations' => [],
+            'source_mode' => 'none',
+            'confidence' => 0.0,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'What new permits or projects were recently filed?',
+        'city_id' => $city->id,
+        'fallback_intent' => 'permits_projects',
+    ]);
+
+    $response->assertOk()
+        ->assertSeeText('Here are recent permits and development project updates in Wichita:')
+        ->assertSeeText('Planning Commission advances riverfront rezoning case')
+        ->assertJsonPath('citations.0.source_url', 'https://example.com/articles/rezoning-riverfront');
 });
 
 it('keeps reranked evidence when minimum score filtering is enabled', function () {

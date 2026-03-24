@@ -27,12 +27,14 @@ it('streams answers for authenticated dashboard users and persists conversation 
             int|string|null $citySelector,
             User $requestUser,
             ?string $conversationId,
-            callable $onDelta
+            callable $onDelta,
+            ?string $fallbackIntent
         ) use ($city, $user): array {
             expect($question)->toBe('When is trash pickup?')
                 ->and($citySelector)->toBe($city->id)
                 ->and($requestUser->is($user))->toBeTrue()
-                ->and($conversationId)->toBeNull();
+                ->and($conversationId)->toBeNull()
+                ->and($fallbackIntent)->toBeNull();
 
             $onDelta('Trash pickup ');
             $onDelta('is on Monday.');
@@ -81,4 +83,64 @@ it('streams answers for authenticated dashboard users and persists conversation 
         ->assertSeeHtml('data-chat-role="assistant"');
 
     expect(session()->get('chat.conversation_id'))->toBe('conv_123');
+});
+
+it('passes explicit fallback intent for unchanged prompt chips', function () {
+    config()->set('chat.streaming_enabled', true);
+    config()->set('chat.memory_enabled', true);
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $prompt = 'What new permits, rezonings, or major development projects were recently filed or approved in Wichita? Include status and key locations.';
+
+    $service = mock(AskService::class);
+    $service->shouldReceive('answerStreamingForUser')
+        ->once()
+        ->andReturnUsing(function (
+            string $question,
+            int|string|null $citySelector,
+            User $requestUser,
+            ?string $conversationId,
+            callable $onDelta,
+            ?string $fallbackIntent
+        ) use ($city, $user, $prompt): array {
+            expect($question)->toBe($prompt)
+                ->and($citySelector)->toBe($city->id)
+                ->and($requestUser->is($user))->toBeTrue()
+                ->and($conversationId)->toBeNull()
+                ->and($fallbackIntent)->toBe('permits_projects');
+
+            $onDelta('Here are project updates.');
+
+            return [
+                'answer' => 'Here are project updates.',
+                'citations' => [],
+                'resources' => [],
+                'city' => [
+                    'id' => $city->id,
+                    'name' => $city->name,
+                    'slug' => $city->slug,
+                ],
+                'meta' => [
+                    'sources_used' => 0,
+                    'pages_fetched' => 0,
+                    'cache_hits' => 0,
+                ],
+                'conversation_id' => null,
+            ];
+        });
+
+    $this->instance(AskService::class, $service);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->call('applyPrompt', $prompt, 'permits_projects')
+        ->call('ask')
+        ->assertSee('Here are project updates.');
 });

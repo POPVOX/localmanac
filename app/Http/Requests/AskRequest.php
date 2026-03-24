@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Services\Chat\AskService;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class AskRequest extends FormRequest
 {
@@ -25,6 +27,7 @@ class AskRequest extends FormRequest
             'question' => ['required', 'string', 'max:800'],
             'city_id' => ['nullable', 'integer', 'exists:cities,id'],
             'city_slug' => ['nullable', 'string', 'exists:cities,slug'],
+            'fallback_intent' => ['nullable', 'string', Rule::in(AskService::allowedFallbackIntents())],
         ];
     }
 

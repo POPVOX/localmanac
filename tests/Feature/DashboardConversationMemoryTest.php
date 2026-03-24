@@ -29,12 +29,14 @@ it('continues existing dashboard conversation and can clear it', function () {
             int|string|null $citySelector,
             User $requestUser,
             ?string $conversationId,
-            callable $onDelta
+            callable $onDelta,
+            ?string $fallbackIntent
         ) use ($city, $user): array {
             expect($question)->toBe('Any updates?')
                 ->and($citySelector)->toBe($city->id)
                 ->and($requestUser->is($user))->toBeTrue()
-                ->and($conversationId)->toBe('conv_existing');
+                ->and($conversationId)->toBe('conv_existing')
+                ->and($fallbackIntent)->toBeNull();
 
             $onDelta('Here ');
             $onDelta('are updates.');
