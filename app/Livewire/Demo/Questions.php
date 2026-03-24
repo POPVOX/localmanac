@@ -16,8 +16,7 @@ class Questions extends Component
      * @var array<int, array{
      *     role: string,
      *     content: string,
-     *     citations?: array<int, array{title: string, source_url: string, type: string}>,
-     *     resources?: array<int, array{type: string, label: string, value: string, url: string}>
+     *     citations?: array<int, array{title: string, source_url: string, type: string}>
      * }>
      */
     public array $messages = [];
@@ -54,7 +53,6 @@ class Questions extends Component
                 'role' => 'assistant',
                 'content' => $response['answer'] ?? '',
                 'citations' => $response['citations'] ?? [],
-                'resources' => $response['resources'] ?? [],
             ];
         } catch (Throwable $exception) {
             report($exception);

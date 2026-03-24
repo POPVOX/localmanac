@@ -53,17 +53,15 @@ test('dashboard shows task-oriented chat prompt chips', function () {
         ->assertSee('Service alerts');
 });
 
-test('editing a chip prompt clears its fallback intent', function () {
+test('applying a chip prompt fills the composer question', function () {
     $user = User::factory()->create();
     $this->actingAs($user);
 
     $prompt = 'What new permits, rezonings, or major development projects were recently filed or approved in Wichita? Include status and key locations.';
 
     Livewire::test(\App\Livewire\Dashboard::class)
-        ->call('applyPrompt', $prompt, 'permits_projects')
-        ->assertSet('fallbackIntent', 'permits_projects')
-        ->set('question', 'How do I get a demolition permit?')
-        ->assertSet('fallbackIntent', null);
+        ->call('applyPrompt', $prompt)
+        ->assertSet('question', $prompt);
 });
 
 test('dashboard renders assistant markdown links as clickable anchors', function () {

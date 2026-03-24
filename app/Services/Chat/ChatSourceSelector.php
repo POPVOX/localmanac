@@ -8,10 +8,6 @@ use Throwable;
 
 class ChatSourceSelector
 {
-    public function __construct(
-        private readonly ProceduralQuestionAnalyzer $proceduralQuestionAnalyzer,
-    ) {}
-
     /**
      * @return Collection<int, ChatSource>
      */
@@ -19,8 +15,6 @@ class ChatSourceSelector
     {
         $limit = $limit ?? (int) config('chat.max_sources', 12);
         $question = trim($question);
-        $isProceduralQuestion = $this->isProceduralQuestion($question);
-
         $sources = collect();
 
         if ($question !== '') {
@@ -35,262 +29,22 @@ class ChatSourceSelector
             }
         }
 
-        $fallback = collect();
-
-        if ($sources->count() < $limit || $isProceduralQuestion) {
-            $fallbackLimit = $isProceduralQuestion
-                ? max($limit * 4, 64)
-                : max($limit * 2, $limit);
-
-            $fallback = ChatSource::query()
-                ->where('city_id', $cityId)
-                ->where('is_active', true)
-                ->orderByDesc('priority')
-                ->orderBy('id')
-                ->take($fallbackLimit)
-                ->get();
-        }
-
-        $sources = $sources
-            ->merge($fallback)
-            ->unique('id')
-            ->values();
-
-        if ($isProceduralQuestion) {
-            return $this->rankProceduralSources($sources, $question, $limit);
-        }
-
-        return $this->rankGeneralSources($sources, $question, $limit);
-    }
-
-    /**
-     * @param  Collection<int, ChatSource>  $sources
-     * @return Collection<int, ChatSource>
-     */
-    private function rankProceduralSources(Collection $sources, string $question, int $limit): Collection
-    {
-        $terms = $this->keywordTerms($question);
-
-        if ($terms === [] || $sources->isEmpty()) {
-            return $sources->take($limit)->values();
-        }
-
-        $ranked = $sources
-            ->values()
-            ->map(function (ChatSource $source, int $index) use ($terms): array {
-                $overlap = $this->sourceOverlap($source, $terms);
-                $proceduralSignals = $this->sourceProceduralSignals($source);
-                $genericPenalty = $this->genericSourcePenalty($source, $overlap);
-
-                $score = 0.0;
-                $score += ($overlap['tags'] * 12.0)
-                    + ($overlap['name'] * 10.0)
-                    + ($overlap['description'] * 6.0)
-                    + ($overlap['url'] * 4.0);
-                $score += $proceduralSignals * 2.5;
-                $score += min((int) $source->priority, 20) * 0.35;
-                $score -= $genericPenalty;
-
-                return [
-                    'source' => $source,
-                    'score' => $score,
-                    'overlap' => array_sum($overlap),
-                    'procedural_signals' => $proceduralSignals,
-                    'fallback_index' => $index,
-                ];
-            })
-            ->sort(function (array $left, array $right): int {
-                return [$right['score'], $right['overlap'], $right['procedural_signals'], $right['source']->priority, -$right['fallback_index']]
-                    <=> [$left['score'], $left['overlap'], $left['procedural_signals'], $left['source']->priority, -$left['fallback_index']];
-            })
-            ->values();
-
-        $matched = $ranked
-            ->filter(fn (array $entry): bool => $entry['overlap'] > 0 || $entry['procedural_signals'] > 0)
-            ->values();
-
-        if ($matched->count() >= $limit) {
-            return $matched
-                ->take($limit)
-                ->pluck('source')
-                ->values();
-        }
-
-        return $matched
-            ->concat(
-                $ranked->reject(fn (array $entry): bool => $matched->contains(fn (array $matchedEntry): bool => $matchedEntry['source']->is($entry['source'])))
-            )
-            ->take($limit)
-            ->pluck('source')
-            ->values();
-    }
-
-    /**
-     * @param  Collection<int, ChatSource>  $sources
-     * @return Collection<int, ChatSource>
-     */
-    private function rankGeneralSources(Collection $sources, string $question, int $limit): Collection
-    {
-        $terms = $this->keywordTerms($question);
-
-        if ($terms === [] || $sources->isEmpty()) {
-            return $sources->take($limit)->values();
+        if ($sources->count() < $limit) {
+            $sources = $sources
+                ->merge(
+                    ChatSource::query()
+                        ->where('city_id', $cityId)
+                        ->where('is_active', true)
+                        ->orderByDesc('priority')
+                        ->orderBy('id')
+                        ->take(max($limit * 2, $limit))
+                        ->get()
+                );
         }
 
         return $sources
-            ->values()
-            ->map(function (ChatSource $source, int $index) use ($terms): array {
-                $overlap = $this->sourceOverlap($source, $terms);
-                $genericPenalty = $this->genericSourcePenalty($source, $overlap);
-                $score = 0.0;
-                $score += ($overlap['tags'] * 8.0)
-                    + ($overlap['name'] * 7.0)
-                    + ($overlap['description'] * 4.0)
-                    + ($overlap['url'] * 2.0);
-                $score += min((int) $source->priority, 20) * 0.2;
-                $score -= $genericPenalty;
-
-                return [
-                    'source' => $source,
-                    'score' => $score,
-                    'overlap' => array_sum($overlap),
-                    'fallback_index' => $index,
-                ];
-            })
-            ->sort(function (array $left, array $right): int {
-                return [$right['score'], $right['overlap'], $right['source']->priority, -$right['fallback_index']]
-                    <=> [$left['score'], $left['overlap'], $left['source']->priority, -$left['fallback_index']];
-            })
+            ->unique('id')
             ->take($limit)
-            ->pluck('source')
             ->values();
-    }
-
-    /**
-     * @param  array<int, string>  $terms
-     * @return array{name: int, tags: int, description: int, url: int}
-     */
-    private function sourceOverlap(ChatSource $source, array $terms): array
-    {
-        $name = mb_strtolower($source->name);
-        $description = mb_strtolower((string) ($source->description ?? ''));
-        $url = mb_strtolower($source->source_url);
-        $tags = collect($source->tags ?? [])
-            ->filter(fn ($tag): bool => is_string($tag))
-            ->map(fn (string $tag): string => mb_strtolower($tag))
-            ->all();
-
-        $overlap = [
-            'name' => 0,
-            'tags' => 0,
-            'description' => 0,
-            'url' => 0,
-        ];
-
-        foreach ($terms as $term) {
-            if (str_contains($name, $term)) {
-                $overlap['name']++;
-            }
-
-            if (str_contains($description, $term)) {
-                $overlap['description']++;
-            }
-
-            if (str_contains($url, $term)) {
-                $overlap['url']++;
-            }
-
-            foreach ($tags as $tag) {
-                if (str_contains($tag, $term) || str_contains($term, $tag)) {
-                    $overlap['tags']++;
-
-                    break;
-                }
-            }
-        }
-
-        return $overlap;
-    }
-
-    private function sourceProceduralSignals(ChatSource $source): int
-    {
-        $haystack = mb_strtolower(implode(' ', [
-            $source->name,
-            (string) ($source->description ?? ''),
-            $source->source_url,
-            implode(' ', array_filter($source->tags ?? [], fn ($tag): bool => is_string($tag))),
-        ]));
-
-        $matches = 0;
-
-        foreach ($this->proceduralSignals() as $signal) {
-            if (str_contains($haystack, $signal)) {
-                $matches++;
-            }
-        }
-
-        return $matches;
-    }
-
-    private function genericSourcePenalty(ChatSource $source, array $overlap): float
-    {
-        $haystack = mb_strtolower(implode(' ', [
-            $source->name,
-            (string) ($source->description ?? ''),
-            $source->source_url,
-            implode(' ', array_filter($source->tags ?? [], fn ($tag): bool => is_string($tag))),
-        ]));
-
-        $hasExplicitMatch = array_sum($overlap) > 0;
-        $penalty = 0.0;
-
-        foreach ([
-            'faq',
-            'government',
-            'city government',
-            'city hall',
-            'departments',
-            'services',
-            'residents',
-            'visitors',
-            'quick links',
-            'news flash',
-            'boards and committees',
-            'animals',
-            'schools',
-            'trash',
-            'recycling',
-        ] as $genericSignal) {
-            if (str_contains($haystack, $genericSignal)) {
-                $penalty += $hasExplicitMatch ? 2.0 : 8.0;
-            }
-        }
-
-        if (str_contains($haystack, '/faq') || str_contains($haystack, '/government')) {
-            $penalty += $hasExplicitMatch ? 3.0 : 10.0;
-        }
-
-        return $penalty;
-    }
-
-    private function isProceduralQuestion(string $question): bool
-    {
-        return $this->proceduralQuestionAnalyzer->isProceduralQuestion($question);
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function keywordTerms(string $question): array
-    {
-        return $this->proceduralQuestionAnalyzer->keywordTerms($question);
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function proceduralSignals(): array
-    {
-        return $this->proceduralQuestionAnalyzer->processSignals();
     }
 }

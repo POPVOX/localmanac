@@ -6,7 +6,6 @@ use App\Models\ChatSourceChunk;
 use App\Models\City;
 use App\Models\EventSource;
 use App\Models\User;
-use App\Services\Chat\Agents\ChatCitationAgent;
 use App\Services\Chat\Agents\StreamingChatAnswerAgent;
 use App\Services\Chat\Agents\StructuredChatAnswerAgent;
 use App\Services\Chat\Event\EventIntentDetector;
@@ -29,13 +28,11 @@ class AnswerSynthesizer
     private const NO_ANSWER_MESSAGE = 'I could not find the answer in the sources I checked.';
 
     public function __construct(
-        private readonly ChatCitationAgent $chatCitationAgent,
         private readonly ChatSourceRetriever $chatSourceRetriever,
         private readonly ChatSourceGuard $chatSourceGuard,
         private readonly EventIntentDetector $eventIntentDetector,
         private readonly EventWindowResolver $eventWindowResolver,
         private readonly EventSearchService $eventSearchService,
-        private readonly ProceduralQuestionAnalyzer $proceduralQuestionAnalyzer,
     ) {}
 
     /**
@@ -43,7 +40,6 @@ class AnswerSynthesizer
      * @return array{
      *     answer: string,
      *     citations: array<int, array{title: string, source_url: string, type: string}>,
-     *     resources: array<int, array{type: string, label: string, value: string, url: string}>,
      *     confidence: float,
      *     source_mode: string
      * }
@@ -53,14 +49,13 @@ class AnswerSynthesizer
         $originalQuestion ??= $question;
         $eventContext = $this->resolveEventContext($question, $city);
         $seedEvidence = $this->seedEvidence($sources, $question);
-        $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
         $eventCitations = $this->citationsFromLocalEvents($eventContext['local_events'] ?? []);
         $usedSeedAnswer = false;
-        $model = $this->chatModelForQuestion($question, $eventContext, $proceduralContext);
+        $model = $this->chatModelForQuestion($question, $eventContext);
 
         $agent = StructuredChatAnswerAgent::make(
-            tools: $this->buildTools($city, $sources, $question, $eventContext, $seedEvidence),
+            tools: $this->buildTools($city, $sources, $question, $eventContext),
         );
 
         $response = $agent->prompt(
@@ -145,10 +140,6 @@ class AnswerSynthesizer
             $alignedEvidence = [];
         }
 
-        $resourceSelection = $this->buildAnswerResources($question, $answer, $citations, $alignedEvidence);
-        $resources = $resourceSelection['resources'];
-        $droppedResources = $resourceSelection['dropped'];
-
         $sourceMode = $this->normalizeSourceMode($structured['source_mode'] ?? null);
 
         if ($sourceMode === 'none' && $citations !== []) {
@@ -162,20 +153,19 @@ class AnswerSynthesizer
             sources: $sources,
             seedEvidence: $seedEvidence,
             alignedEvidence: $alignedEvidence,
-            proceduralContext: $proceduralContext,
+            proceduralContext: [],
             confidence: $confidence,
             sourceMode: $sourceMode,
             citations: $citations,
-            resources: $resources,
+            resources: [],
             droppedCitations: $droppedCitations,
-            droppedResources: $droppedResources,
+            droppedResources: [],
             answer: $answer,
         );
 
         return [
             'answer' => $answer,
             'citations' => $citations,
-            'resources' => $resources,
             'confidence' => $confidence,
             'source_mode' => $sourceMode,
         ];
@@ -186,7 +176,6 @@ class AnswerSynthesizer
      * @return array{
      *     answer: string,
      *     citations: array<int, array{title: string, source_url: string, type: string}>,
-     *     resources: array<int, array{type: string, label: string, value: string, url: string}>,
      *     confidence: float,
      *     source_mode: string,
      *     conversation_id: string|null
@@ -204,14 +193,13 @@ class AnswerSynthesizer
         $originalQuestion ??= $question;
         $eventContext = $this->resolveEventContext($question, $city);
         $seedEvidence = $this->seedEvidence($sources, $question);
-        $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
         $eventCitations = $this->citationsFromLocalEvents($eventContext['local_events'] ?? []);
         $usedSeedAnswer = false;
-        $model = $this->chatModelForQuestion($question, $eventContext, $proceduralContext);
+        $model = $this->chatModelForQuestion($question, $eventContext);
 
         $agent = StreamingChatAnswerAgent::make(
-            tools: $this->buildTools($city, $sources, $question, $eventContext, $seedEvidence),
+            tools: $this->buildTools($city, $sources, $question, $eventContext),
         );
 
         if ($conversationId) {
@@ -253,42 +241,12 @@ class AnswerSynthesizer
         if ($answer !== '') {
             $toolContext = $this->toolContextFromEvents($stream->events ?? new Collection);
             $toolCitations = $this->citationsFromToolContext($toolContext);
-            $shouldRefineStreamingCitations = (bool) config('chat.streaming_refine_citations', false);
-            $modelCitations = [];
-
-            if ($toolCitations === [] || $shouldRefineStreamingCitations) {
-                try {
-                    $citationResponse = $this->chatCitationAgent->prompt(
-                        $this->citationPrompt($question, $city, $answer, $toolContext),
-                        provider: $this->providerPreference(
-                            chainConfigKey: 'chat.provider_chain',
-                            fallbackProviderConfigKey: 'chat.provider',
-                            model: (string) config('chat.model', config('enrichment.model', 'gpt-4o-mini')),
-                        ),
-                        timeout: (int) config('chat.http_timeout', 20),
-                    );
-
-                    $structured = is_array($citationResponse->structured ?? null)
-                        ? $citationResponse->structured
-                        : [];
-
-                    $normalized = $this->normalizeCitations($structured['citations'] ?? []);
-
-                    if ($normalized !== []) {
-                        $modelCitations = $normalized;
-                    }
-
-                    $confidence = $this->normalizedConfidence($structured['confidence'] ?? 0.0);
-                } catch (\Throwable) {
-                    $confidence = 0.0;
-                }
-            }
 
             $citations = $this->groundedCitationCandidates(
                 $seedCitations,
                 [],
                 $toolCitations,
-                $modelCitations,
+                [],
                 $seedEvidence,
                 $answer,
                 $eventCitations,
@@ -357,10 +315,6 @@ class AnswerSynthesizer
             $alignedEvidence = [];
         }
 
-        $resourceSelection = $this->buildAnswerResources($question, $answer, $citations, $alignedEvidence);
-        $resources = $resourceSelection['resources'];
-        $droppedResources = $resourceSelection['dropped'];
-
         $this->logRetrievalDiagnostics(
             question: $question,
             originalQuestion: $originalQuestion,
@@ -368,20 +322,19 @@ class AnswerSynthesizer
             sources: $sources,
             seedEvidence: $seedEvidence,
             alignedEvidence: $alignedEvidence,
-            proceduralContext: $proceduralContext,
+            proceduralContext: [],
             confidence: $confidence,
             sourceMode: $sourceMode,
             citations: $citations,
-            resources: $resources,
+            resources: [],
             droppedCitations: $droppedCitations,
-            droppedResources: $droppedResources,
+            droppedResources: [],
             answer: $answer,
         );
 
         return [
             'answer' => $answer,
             'citations' => $citations,
-            'resources' => $resources,
             'confidence' => $confidence,
             'source_mode' => $sourceMode,
             'conversation_id' => $agent->currentConversation() ?? $resolvedConversationId,
@@ -394,9 +347,7 @@ class AnswerSynthesizer
      */
     private function structuredPrompt(string $question, City $city, array $seedEvidence = [], array $eventContext = []): string
     {
-        $mode = (string) config('chat.retrieval_mode', 'local_then_web');
-        $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
-        $webEnabled = $this->isWebSearchEnabledForQuestion($question, $eventContext, $proceduralContext);
+        $webEnabled = $this->isWebSearchEnabledForQuestion($question, $eventContext);
         $eventIntent = (bool) ($eventContext['intent'] ?? false);
         $eventWindow = $eventContext['window'] ?? null;
 
@@ -419,7 +370,6 @@ class AnswerSynthesizer
             'Each citation must have: title, source_url, type.',
             'Only cite URLs that appear in tool results.',
             '',
-            'Retrieval mode: '.$mode,
             'Web search available: '.($webEnabled ? 'yes' : 'no'),
             'Event intent detected: '.($eventIntent ? 'yes' : 'no'),
             '',
@@ -432,22 +382,6 @@ class AnswerSynthesizer
             'Question:',
             $question,
         ];
-
-        if ($mode === 'local_then_web') {
-            $lines[] = '';
-            $lines[] = 'Use local tool results first. Use web search only when local results are insufficient.';
-        }
-
-        if ((bool) ($proceduralContext['intent'] ?? false)) {
-            $lines[] = '';
-            $lines[] = 'This is a civic how-to or permit-style question.';
-            $lines[] = 'When the evidence supports a process, answer with a short ordered step-by-step list.';
-            $lines[] = 'Prioritize approvals, required documents, submission points, fees, contact points, inspections, and caveats over generic summaries.';
-
-            if ((bool) ($proceduralContext['use_web_fallback'] ?? false)) {
-                $lines[] = 'Local evidence looks weak or generic. Use official-domain web search if needed to find the most specific procedural page.';
-            }
-        }
 
         if ($eventIntent) {
             $lines[] = '';
@@ -480,9 +414,7 @@ class AnswerSynthesizer
      */
     private function streamingPrompt(string $question, City $city, array $seedEvidence = [], array $eventContext = []): string
     {
-        $mode = (string) config('chat.retrieval_mode', 'local_then_web');
-        $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
-        $webEnabled = $this->isWebSearchEnabledForQuestion($question, $eventContext, $proceduralContext);
+        $webEnabled = $this->isWebSearchEnabledForQuestion($question, $eventContext);
         $eventIntent = (bool) ($eventContext['intent'] ?? false);
         $eventWindow = $eventContext['window'] ?? null;
 
@@ -500,7 +432,6 @@ class AnswerSynthesizer
             'Do not name any department, agency, provider, company, office, or organization unless that exact name appears in retrieved evidence.',
             'If the evidence supports the action but not the responsible entity, say you could not verify the exact organization from the sources.',
             '',
-            'Retrieval mode: '.$mode,
             'Web search available: '.($webEnabled ? 'yes' : 'no'),
             'Event intent detected: '.($eventIntent ? 'yes' : 'no'),
             '',
@@ -513,22 +444,6 @@ class AnswerSynthesizer
             'Question:',
             $question,
         ];
-
-        if ($mode === 'local_then_web') {
-            $lines[] = '';
-            $lines[] = 'Use local tool results first. Use web search only when local results are insufficient.';
-        }
-
-        if ((bool) ($proceduralContext['intent'] ?? false)) {
-            $lines[] = '';
-            $lines[] = 'This is a civic how-to or permit-style question.';
-            $lines[] = 'When the evidence supports a process, answer with a short ordered step-by-step list.';
-            $lines[] = 'Prioritize approvals, required documents, submission points, fees, contact points, inspections, and caveats over generic summaries.';
-
-            if ((bool) ($proceduralContext['use_web_fallback'] ?? false)) {
-                $lines[] = 'Local evidence looks weak or generic. Use official-domain web search if needed to find the most specific procedural page.';
-            }
-        }
 
         if ($eventIntent) {
             $lines[] = '';
@@ -592,7 +507,6 @@ class AnswerSynthesizer
     private function buildTools(City $city, Collection $sources, string $question, ?array $eventContext = null, array $seedEvidence = []): array
     {
         $eventContext = $eventContext ?? $this->resolveEventContext($question, $city);
-        $proceduralContext = $this->resolveProceduralContext($question, $seedEvidence);
         $tools = [];
 
         if ((bool) config('chat.tools.similarity.enabled', true)) {
@@ -608,12 +522,12 @@ class AnswerSynthesizer
             );
         }
 
-        if ($this->isWebSearchEnabledForQuestion($question, $eventContext, $proceduralContext)) {
+        if ($this->isWebSearchEnabledForQuestion($question, $eventContext)) {
             $webSearch = new WebSearch(
                 maxSearches: (int) config('chat.tools.web_search.max_searches', 2),
             );
 
-            $allowedDomains = $this->webAllowedDomains($sources, $city, $eventContext, $proceduralContext);
+            $allowedDomains = $this->webAllowedDomains($sources, $city, $eventContext);
 
             if ($allowedDomains !== []) {
                 $webSearch->allow($allowedDomains);
@@ -953,38 +867,9 @@ class AnswerSynthesizer
      */
     private function webAllowedDomains(Collection $sources, City $city, array $eventContext, array $proceduralContext = []): array
     {
-        if ((bool) ($eventContext['intent'] ?? false)) {
-            return $this->eventWebAllowedDomains($city);
-        }
-
-        $mode = (string) config('chat.tools.web_search.allowed_domains_mode', 'source_domains');
-        $globalDomains = collect(config('chat.tools.web_search.allowed_domains', []))
-            ->filter(fn ($domain): bool => is_string($domain) && trim($domain) !== '')
-            ->map(fn (string $domain): string => $this->normalizeDomain($domain))
-            ->filter()
-            ->values();
-
-        $sourceDomains = $sources
-            ->pluck('source_url')
-            ->filter(fn ($url): bool => is_string($url) && trim($url) !== '')
-            ->map(fn (string $url): string => $this->normalizeDomain($url))
-            ->filter()
-            ->values();
-
-        if ((bool) ($proceduralContext['use_web_fallback'] ?? false)) {
-            return $sourceDomains
-                ->merge($globalDomains)
-                ->filter()
-                ->unique()
-                ->values()
-                ->all();
-        }
-
-        return match ($mode) {
-            'global' => $globalDomains->unique()->values()->all(),
-            'merged' => $sourceDomains->merge($globalDomains)->unique()->values()->all(),
-            default => $sourceDomains->unique()->values()->all(),
-        };
+        return (bool) ($eventContext['intent'] ?? false)
+            ? $this->eventWebAllowedDomains($city)
+            : [];
     }
 
     /**
@@ -997,50 +882,19 @@ class AnswerSynthesizer
             return false;
         }
 
-        if ((bool) ($eventContext['intent'] ?? false)) {
-            if (! (bool) config('chat.events.web_fallback.enabled', true)) {
-                return false;
-            }
-
-            if ((bool) config('chat.events.web_fallback.only_when_local_empty', true)) {
-                return ((int) ($eventContext['local_total'] ?? 0)) === 0;
-            }
-
-            return true;
+        if (! (bool) ($eventContext['intent'] ?? false)) {
+            return false;
         }
 
-        return match ((string) config('chat.retrieval_mode', 'local_then_web')) {
-            'web_only' => true,
-            'local_only' => false,
-            default => (bool) ($proceduralContext['use_web_fallback'] ?? false)
-                || ! (bool) config('chat.tools.web_search.only_when_fresh_intent', true)
-                || $this->hasFreshIntent($question),
-        };
-    }
-
-    private function hasFreshIntent(string $question): bool
-    {
-        $question = mb_strtolower($question);
-
-        foreach ([
-            'today',
-            'current',
-            'currently',
-            'latest',
-            'recent',
-            'new',
-            'update',
-            'updated',
-            'this week',
-            'right now',
-            'as of',
-        ] as $keyword) {
-            if (str_contains($question, $keyword)) {
-                return true;
-            }
+        if (! (bool) config('chat.events.web_fallback.enabled', true)) {
+            return false;
         }
 
-        return false;
+        if ((bool) config('chat.events.web_fallback.only_when_local_empty', true)) {
+            return ((int) ($eventContext['local_total'] ?? 0)) === 0;
+        }
+
+        return true;
     }
 
     /**
@@ -1049,39 +903,18 @@ class AnswerSynthesizer
      */
     private function resolveProceduralContext(string $question, array $seedEvidence): array
     {
-        $intent = $this->isProceduralQuestion($question);
-
-        if (! $intent) {
-            return [
-                'intent' => false,
-                'evidence_sparse' => false,
-                'evidence_generic' => false,
-                'evidence_off_target' => false,
-                'use_web_fallback' => false,
-            ];
-        }
-
-        $evidenceSparse = count($seedEvidence) < 2;
-        $evidenceGeneric = $this->evidenceLooksGeneric($seedEvidence);
-        $evidenceOffTarget = $this->evidenceLooksOffTarget($question, $seedEvidence);
-        $useWebFallback = match ((string) config('chat.retrieval_mode', 'local_then_web')) {
-            'web_only' => true,
-            'local_only' => false,
-            default => $evidenceSparse || $evidenceGeneric || $evidenceOffTarget,
-        };
-
         return [
-            'intent' => true,
-            'evidence_sparse' => $evidenceSparse,
-            'evidence_generic' => $evidenceGeneric,
-            'evidence_off_target' => $evidenceOffTarget,
-            'use_web_fallback' => $useWebFallback,
+            'intent' => false,
+            'evidence_sparse' => false,
+            'evidence_generic' => false,
+            'evidence_off_target' => false,
+            'use_web_fallback' => false,
         ];
     }
 
     private function isProceduralQuestion(string $question): bool
     {
-        return $this->proceduralQuestionAnalyzer->isProceduralQuestion($question);
+        return false;
     }
 
     /**
@@ -1187,7 +1020,7 @@ class AnswerSynthesizer
      */
     private function proceduralFocusTerms(string $question): array
     {
-        return $this->proceduralQuestionAnalyzer->focusTerms($question);
+        return [];
     }
 
     /**
@@ -1195,7 +1028,7 @@ class AnswerSynthesizer
      */
     private function proceduralSignals(): array
     {
-        return $this->proceduralQuestionAnalyzer->processSignals();
+        return [];
     }
 
     /**
@@ -1997,21 +1830,6 @@ class AnswerSynthesizer
                 ->values()
                 ->all();
 
-            if ($localTotal === 0 && trim($question) !== '') {
-                $relaxedSearchResult = $this->eventSearchService->search(
-                    city: $city,
-                    window: $window,
-                    question: '',
-                    limit: (int) config('chat.events.max_results', 8),
-                );
-
-                $localTotal = (int) ($relaxedSearchResult['total'] ?? 0);
-                $localEvents = collect($relaxedSearchResult['events'] ?? [])
-                    ->filter(fn ($item): bool => is_array($item))
-                    ->values()
-                    ->all();
-            }
-
             if ($window === null && is_array($searchResult['window'] ?? null)) {
                 $window = $searchResult['window'];
             }
@@ -2648,7 +2466,7 @@ class AnswerSynthesizer
 
     private function questionRequiresProceduralSteps(string $question): bool
     {
-        return $this->proceduralQuestionAnalyzer->requiresStepwiseSupport($question);
+        return false;
     }
 
     private function proceduralProcessSignalCount(string $content): int
@@ -2959,15 +2777,7 @@ class AnswerSynthesizer
      */
     private function chatModelForQuestion(string $question, array $eventContext = [], array $proceduralContext = []): string
     {
-        $defaultModel = (string) config('chat.model', config('enrichment.model', 'gpt-4o-mini'));
-
-        if (! $this->isWebSearchEnabledForQuestion($question, $eventContext, $proceduralContext)) {
-            return $defaultModel;
-        }
-
-        $webSearchModel = trim((string) config('chat.web_search_model', ''));
-
-        return $webSearchModel !== '' ? $webSearchModel : $defaultModel;
+        return (string) config('chat.model', config('enrichment.model', 'gpt-4o-mini'));
     }
 
     /**

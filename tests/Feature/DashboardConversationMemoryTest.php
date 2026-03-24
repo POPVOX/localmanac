@@ -6,7 +6,7 @@ use App\Models\User;
 use App\Services\Chat\AskService;
 use Livewire\Livewire;
 
-it('does not reuse stored dashboard conversation memory and can clear the thread', function () {
+it('reuses stored dashboard conversation memory and clears it on reset', function () {
     config()->set('chat.streaming_enabled', true);
     config()->set('chat.memory_enabled', true);
     config()->set('chat.memory_session_key', 'chat.conversation_id');
@@ -22,18 +22,21 @@ it('does not reuse stored dashboard conversation memory and can clear the thread
     session()->put('chat.conversation_id', 'conv_existing');
 
     $service = mock(AskService::class);
-    $service->shouldReceive('answer')
+    $service->shouldReceive('answerStreamingForUser')
         ->once()
         ->andReturnUsing(function (
             string $question,
-            ?int $cityId,
-            ?string $citySlug,
-            ?string $fallbackIntent
-        ) use ($city): array {
+            int|string|null $citySelector,
+            User $resolvedUser,
+            ?string $conversationId,
+            callable $onDelta
+        ) use ($city, $user): array {
             expect($question)->toBe('Any updates?')
-                ->and($cityId)->toBe($city->id)
-                ->and($citySlug)->toBeNull()
-                ->and($fallbackIntent)->toBeNull();
+                ->and($citySelector)->toBe($city->id)
+                ->and($resolvedUser->is($user))->toBeTrue()
+                ->and($conversationId)->toBe('conv_existing');
+
+            $onDelta('Here are updates.');
 
             return [
                 'answer' => 'Here are updates.',
@@ -48,6 +51,7 @@ it('does not reuse stored dashboard conversation memory and can clear the thread
                     'pages_fetched' => 0,
                     'cache_hits' => 0,
                 ],
+                'conversation_id' => 'conv_existing',
             ];
         });
 
@@ -55,13 +59,14 @@ it('does not reuse stored dashboard conversation memory and can clear the thread
 
     Livewire::test(Dashboard::class)
         ->set('cityId', $city->id)
+        ->assertSet('conversationId', 'conv_existing')
         ->set('question', 'Any updates?')
         ->call('ask')
-        ->assertSet('conversationId', null)
+        ->assertSet('conversationId', 'conv_existing')
         ->assertSee('Here are updates.')
         ->call('startNewConversation')
         ->assertSet('conversationId', null)
         ->assertSet('messages', []);
 
-    expect(session()->get('chat.conversation_id'))->toBe('conv_existing');
+    expect(session()->has('chat.conversation_id'))->toBeFalse();
 });

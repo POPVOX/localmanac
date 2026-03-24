@@ -19,7 +19,6 @@ class AskController extends Controller
             question: (string) $payload['question'],
             cityId: $payload['city_id'] ?? null,
             citySlug: $payload['city_slug'] ?? null,
-            fallbackIntent: $payload['fallback_intent'] ?? null,
         );
 
         return response()->json($result);

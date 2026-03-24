@@ -2,46 +2,23 @@
 
 namespace App\Services\Chat;
 
-use App\Models\Article;
 use App\Models\City;
 use App\Models\User;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use RuntimeException;
 
 class AskService
 {
-    private const WEEKLY_UPDATES_INTENT = 'weekly_updates';
-
-    private const PERMITS_PROJECTS_INTENT = 'permits_projects';
-
-    private const SERVICE_ALERTS_INTENT = 'service_alerts';
-
     public function __construct(
         private readonly ChatSourceSelector $selector,
         private readonly AnswerSynthesizer $synthesizer,
-        private readonly ProceduralQuestionAnalyzer $proceduralQuestionAnalyzer,
     ) {}
-
-    /**
-     * @return array<int, string>
-     */
-    public static function allowedFallbackIntents(): array
-    {
-        return [
-            self::WEEKLY_UPDATES_INTENT,
-            self::PERMITS_PROJECTS_INTENT,
-            self::SERVICE_ALERTS_INTENT,
-        ];
-    }
 
     /**
      * @return array{
      *     answer: string,
      *     citations: array<int, array{title: string, source_url: string, type: string}>,
-     *     resources: array<int, array{type: string, label: string, value: string, url: string}>,
      *     city: array{id: int, name: string, slug: string},
      *     meta: array{sources_used: int, pages_fetched: int, cache_hits: int}
      * }
@@ -50,30 +27,17 @@ class AskService
         string $question,
         ?int $cityId = null,
         ?string $citySlug = null,
-        ?string $fallbackIntent = null,
     ): array {
         $question = trim($question);
         $city = $this->resolveCity($cityId, $citySlug);
         $normalizedQuestion = $this->normalizeQuestionForCity($question, $city);
-        $fallbackIntent = $this->normalizeFallbackIntent($fallbackIntent);
-        $sources = $this->selectSourcesForQuestion($city->id, $normalizedQuestion);
+        $sources = $this->selector->select($city->id, $normalizedQuestion);
 
         if ($sources->isEmpty()) {
-            $fallback = $this->resolveFallbackResponse($city, $sources, $fallbackIntent);
-            $this->logAnswerDiagnostics(
-                $question,
-                $normalizedQuestion,
-                $city,
-                $sources,
-                0.0,
-                'fallback',
-                false,
-                $fallbackIntent,
-                $fallback['digest_fallback_used'],
-                'sources_empty',
-            );
+            $fallback = $this->resolveFallbackResponse($city, $sources);
+            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, 0.0, 'fallback', false, 'sources_empty');
 
-            return $fallback['response'];
+            return $fallback;
         }
 
         try {
@@ -84,26 +48,14 @@ class AskService
                 originalQuestion: $question,
             );
         } catch (\Throwable) {
-            $fallback = $this->resolveFallbackResponse($city, $sources, $fallbackIntent);
-            $this->logAnswerDiagnostics(
-                $question,
-                $normalizedQuestion,
-                $city,
-                $sources,
-                0.0,
-                'fallback',
-                false,
-                $fallbackIntent,
-                $fallback['digest_fallback_used'],
-                'synthesizer_exception',
-            );
+            $fallback = $this->resolveFallbackResponse($city, $sources);
+            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, 0.0, 'fallback', false, 'synthesizer_exception');
 
-            return $fallback['response'];
+            return $fallback;
         }
 
         $answer = trim((string) ($answerPayload['answer'] ?? ''));
         $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
-        $resources = $this->normalizeResources($answerPayload['resources'] ?? []);
         $confidence = $this->normalizeConfidence($answerPayload['confidence'] ?? 0.0);
         $answerIsNoAnswer = $this->isNoAnswerMessage($answer);
         $answerIsRefusal = $this->isRefusalMessage($answer);
@@ -112,7 +64,6 @@ class AskService
             return [
                 'answer' => $answer,
                 'citations' => [],
-                'resources' => [],
                 'city' => [
                     'id' => (int) $city->id,
                     'name' => $city->name,
@@ -129,46 +80,22 @@ class AskService
         $sourcesSuppressed = false;
 
         if (! $this->shouldSurfaceSources($confidence, $citations)) {
-            $sourcesSuppressed = $citations !== [] || $resources !== [];
+            $sourcesSuppressed = $citations !== [];
             $citations = [];
-            $resources = [];
         }
 
         if ($answerIsNoAnswer || $answer === '') {
-            $fallback = $this->resolveFallbackResponse($city, $sources, $fallbackIntent);
-            $this->logAnswerDiagnostics(
-                $question,
-                $normalizedQuestion,
-                $city,
-                $sources,
-                $confidence,
-                'fallback',
-                $sourcesSuppressed,
-                $fallbackIntent,
-                $fallback['digest_fallback_used'],
-                'no_grounded_answer',
-            );
+            $fallback = $this->resolveFallbackResponse($city, $sources);
+            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'fallback', $sourcesSuppressed, 'no_grounded_answer');
 
-            return $fallback['response'];
+            return $fallback;
         }
 
-        $this->logAnswerDiagnostics(
-            $question,
-            $normalizedQuestion,
-            $city,
-            $sources,
-            $confidence,
-            'answer',
-            $sourcesSuppressed,
-            $fallbackIntent,
-            false,
-            null,
-        );
+        $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'answer', $sourcesSuppressed, null);
 
         return [
             'answer' => $answer,
             'citations' => $citations,
-            'resources' => $resources,
             'city' => [
                 'id' => (int) $city->id,
                 'name' => $city->name,
@@ -186,7 +113,6 @@ class AskService
      * @return array{
      *     answer: string,
      *     citations: array<int, array{title: string, source_url: string, type: string}>,
-     *     resources: array<int, array{type: string, label: string, value: string, url: string}>,
      *     city: array{id: int, name: string, slug: string},
      *     meta: array{sources_used: int, pages_fetched: int, cache_hits: int},
      *     conversation_id: string|null
@@ -198,30 +124,17 @@ class AskService
         User $user,
         ?string $conversationId,
         callable $onDelta,
-        ?string $fallbackIntent = null,
     ): array {
         $question = trim($question);
         $city = $this->resolveCityFromSelector($citySelector);
         $normalizedQuestion = $this->normalizeQuestionForCity($question, $city);
-        $fallbackIntent = $this->normalizeFallbackIntent($fallbackIntent);
-        $sources = $this->selectSourcesForQuestion($city->id, $normalizedQuestion);
+        $sources = $this->selector->select($city->id, $normalizedQuestion);
 
         if ($sources->isEmpty()) {
-            $fallback = $this->resolveFallbackResponse($city, $sources, $fallbackIntent);
-            $this->logAnswerDiagnostics(
-                $question,
-                $normalizedQuestion,
-                $city,
-                $sources,
-                0.0,
-                'fallback',
-                false,
-                $fallbackIntent,
-                $fallback['digest_fallback_used'],
-                'sources_empty',
-            );
+            $fallback = $this->resolveFallbackResponse($city, $sources);
+            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, 0.0, 'fallback', false, 'sources_empty');
 
-            return array_merge($fallback['response'], ['conversation_id' => $conversationId]);
+            return array_merge($fallback, ['conversation_id' => $conversationId]);
         }
 
         try {
@@ -235,35 +148,25 @@ class AskService
                 originalQuestion: $question,
             );
         } catch (\Throwable) {
-            $fallback = $this->resolveFallbackResponse($city, $sources, $fallbackIntent);
-            $this->logAnswerDiagnostics(
-                $question,
-                $normalizedQuestion,
-                $city,
-                $sources,
-                0.0,
-                'fallback',
-                false,
-                $fallbackIntent,
-                $fallback['digest_fallback_used'],
-                'streaming_synthesizer_exception',
-            );
+            $fallback = $this->resolveFallbackResponse($city, $sources);
+            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, 0.0, 'fallback', false, 'streaming_synthesizer_exception');
 
-            return array_merge($fallback['response'], ['conversation_id' => $conversationId]);
+            return array_merge($fallback, ['conversation_id' => $conversationId]);
         }
 
         $answer = trim((string) ($answerPayload['answer'] ?? ''));
         $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
-        $resources = $this->normalizeResources($answerPayload['resources'] ?? []);
         $confidence = $this->normalizeConfidence($answerPayload['confidence'] ?? 0.0);
         $answerIsNoAnswer = $this->isNoAnswerMessage($answer);
         $answerIsRefusal = $this->isRefusalMessage($answer);
+        $resolvedConversationId = is_string($answerPayload['conversation_id'] ?? null)
+            ? $answerPayload['conversation_id']
+            : $conversationId;
 
         if ($answerIsRefusal) {
             return [
                 'answer' => $answer,
                 'citations' => [],
-                'resources' => [],
                 'city' => [
                     'id' => (int) $city->id,
                     'name' => $city->name,
@@ -274,59 +177,29 @@ class AskService
                     'pages_fetched' => 0,
                     'cache_hits' => 0,
                 ],
-                'conversation_id' => is_string($answerPayload['conversation_id'] ?? null)
-                    ? $answerPayload['conversation_id']
-                    : $conversationId,
+                'conversation_id' => $resolvedConversationId,
             ];
         }
 
         $sourcesSuppressed = false;
 
         if (! $this->shouldSurfaceSources($confidence, $citations)) {
-            $sourcesSuppressed = $citations !== [] || $resources !== [];
+            $sourcesSuppressed = $citations !== [];
             $citations = [];
-            $resources = [];
         }
 
         if ($answerIsNoAnswer || $answer === '') {
-            $fallback = $this->resolveFallbackResponse($city, $sources, $fallbackIntent);
-            $this->logAnswerDiagnostics(
-                $question,
-                $normalizedQuestion,
-                $city,
-                $sources,
-                $confidence,
-                'fallback',
-                $sourcesSuppressed,
-                $fallbackIntent,
-                $fallback['digest_fallback_used'],
-                'no_grounded_answer',
-            );
+            $fallback = $this->resolveFallbackResponse($city, $sources);
+            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'fallback', $sourcesSuppressed, 'no_grounded_answer');
 
-            return array_merge($fallback['response'], [
-                'conversation_id' => is_string($answerPayload['conversation_id'] ?? null)
-                    ? $answerPayload['conversation_id']
-                    : $conversationId,
-            ]);
+            return array_merge($fallback, ['conversation_id' => $resolvedConversationId]);
         }
 
-        $this->logAnswerDiagnostics(
-            $question,
-            $normalizedQuestion,
-            $city,
-            $sources,
-            $confidence,
-            'answer',
-            $sourcesSuppressed,
-            $fallbackIntent,
-            false,
-            null,
-        );
+        $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'answer', $sourcesSuppressed, null);
 
         return [
             'answer' => $answer,
             'citations' => $citations,
-            'resources' => $resources,
             'city' => [
                 'id' => (int) $city->id,
                 'name' => $city->name,
@@ -337,9 +210,7 @@ class AskService
                 'pages_fetched' => $this->pagesFetchedFromCitations($citations),
                 'cache_hits' => 0,
             ],
-            'conversation_id' => is_string($answerPayload['conversation_id'] ?? null)
-                ? $answerPayload['conversation_id']
-                : $conversationId,
+            'conversation_id' => $resolvedConversationId,
         ];
     }
 
@@ -406,35 +277,6 @@ class AskService
         return preg_replace('/\s+/', ' ', trim($normalized)) ?? trim($normalized);
     }
 
-    private function normalizeFallbackIntent(?string $fallbackIntent): ?string
-    {
-        if (! is_string($fallbackIntent) || trim($fallbackIntent) === '') {
-            return null;
-        }
-
-        $fallbackIntent = trim($fallbackIntent);
-
-        return in_array($fallbackIntent, self::allowedFallbackIntents(), true)
-            ? $fallbackIntent
-            : null;
-    }
-
-    /**
-     * @return Collection<int, \App\Models\ChatSource>
-     */
-    private function selectSourcesForQuestion(int $cityId, string $question): Collection
-    {
-        if ($this->isProceduralQuestion($question)) {
-            return $this->selector->select(
-                $cityId,
-                $question,
-                max((int) config('chat.max_sources', 12), 24),
-            );
-        }
-
-        return $this->selector->select($cityId, $question);
-    }
-
     /**
      * @param  array<int, mixed>  $citations
      * @return array<int, array{title: string, source_url: string, type: string}>
@@ -460,213 +302,30 @@ class AskService
     }
 
     /**
-     * @param  array<int, mixed>  $resources
-     * @return array<int, array{type: string, label: string, value: string, url: string}>
-     */
-    private function normalizeResources(array $resources): array
-    {
-        return collect($resources)
-            ->filter(fn ($item): bool => is_array($item))
-            ->map(function (array $item): array {
-                return [
-                    'type' => trim((string) ($item['type'] ?? 'link')) ?: 'link',
-                    'label' => trim((string) ($item['label'] ?? 'Resource')) ?: 'Resource',
-                    'value' => trim((string) ($item['value'] ?? '')),
-                    'url' => trim((string) ($item['url'] ?? '')),
-                ];
-            })
-            ->filter(fn (array $item): bool => $item['value'] !== '' && $item['url'] !== '')
-            ->unique(fn (array $item): string => $item['type'].'|'.$item['url'])
-            ->values()
-            ->all();
-    }
-
-    /**
      * @param  Collection<int, \App\Models\ChatSource>  $sources
      * @return array{
      *     answer: string,
      *     citations: array<int, array{title: string, source_url: string, type: string}>,
-     *     resources: array<int, array{type: string, label: string, value: string, url: string}>,
      *     city: array{id: int, name: string, slug: string},
      *     meta: array{sources_used: int, pages_fetched: int, cache_hits: int}
      * }
      */
-    private function resolveFallbackResponse(City $city, Collection $sources, ?string $fallbackIntent = null): array
+    private function resolveFallbackResponse(City $city, Collection $sources): array
     {
-        $digest = $this->articleDigestFallback($city, $fallbackIntent);
-        $citations = $digest['citations'] ?? [];
-        $answer = $digest['answer'] ?? __('I could not find the answer in the sources I checked. Try a different wording or a more specific question.');
-
         return [
-            'response' => [
-                'answer' => $answer,
-                'citations' => $citations,
-                'resources' => [],
-                'city' => [
-                    'id' => (int) $city->id,
-                    'name' => $city->name,
-                    'slug' => $city->slug,
-                ],
-                'meta' => [
-                    'sources_used' => $sources->count(),
-                    'pages_fetched' => $this->pagesFetchedFromCitations($citations),
-                    'cache_hits' => 0,
-                ],
+            'answer' => __('I could not find the answer in the sources I checked. Try a different wording or a more specific question.'),
+            'citations' => [],
+            'city' => [
+                'id' => (int) $city->id,
+                'name' => $city->name,
+                'slug' => $city->slug,
             ],
-            'digest_fallback_used' => $digest !== null,
+            'meta' => [
+                'sources_used' => $sources->count(),
+                'pages_fetched' => 0,
+                'cache_hits' => 0,
+            ],
         ];
-    }
-
-    /**
-     * @return array{
-     *     answer: string,
-     *     citations: array<int, array{title: string, source_url: string, type: string}>
-     * }|null
-     */
-    private function articleDigestFallback(City $city, ?string $intent): ?array
-    {
-        if ($intent === null) {
-            return null;
-        }
-
-        $windowDays = 7;
-        $header = "Here are the latest local updates in {$city->name} from the last 7 days:";
-        $keywords = [];
-        $allowAllFallback = true;
-
-        if ($intent === self::PERMITS_PROJECTS_INTENT) {
-            $windowDays = 30;
-            $header = "Here are recent permits and development project updates in {$city->name}:";
-            $keywords = ['permit', 'permits', 'rezoning', 'zoning', 'development', 'project', 'projects', 'planning', 'site plan'];
-            $allowAllFallback = false;
-        }
-
-        if ($intent === self::SERVICE_ALERTS_INTENT) {
-            $windowDays = 14;
-            $header = "Here are recent service alerts and disruptions in {$city->name}:";
-            $keywords = ['alert', 'alerts', 'disruption', 'road closure', 'closure', 'utility', 'utilities', 'water', 'trash', 'recycling', 'outage'];
-            $allowAllFallback = false;
-        }
-
-        $entries = $this->recentDigestArticles($city, $windowDays, $keywords, $allowAllFallback)
-            ->map(function (Article $article) use ($city): ?array {
-                $url = trim((string) ($article->primarySourceUrl() ?: $article->canonical_url ?: ''));
-
-                if ($url === '') {
-                    return null;
-                }
-
-                return [
-                    'line' => $this->articleDigestLine($article, $city),
-                    'citation' => [
-                        'title' => trim((string) ($article->title ?? 'Source')) ?: 'Source',
-                        'source_url' => $url,
-                        'type' => $this->inferCitationType($url),
-                    ],
-                ];
-            })
-            ->filter(fn (?array $entry): bool => is_array($entry))
-            ->unique(fn (array $entry): string => $entry['citation']['source_url'])
-            ->take((int) config('chat.link_limit', 6))
-            ->values();
-
-        if ($entries->isEmpty()) {
-            return null;
-        }
-
-        $lines = $entries
-            ->pluck('line')
-            ->filter(fn ($line): bool => is_string($line) && trim($line) !== '')
-            ->values();
-
-        if ($lines->isEmpty()) {
-            return null;
-        }
-
-        return [
-            'answer' => $header."\n- ".$lines->implode("\n- "),
-            'citations' => $entries
-                ->pluck('citation')
-                ->filter(fn ($citation): bool => is_array($citation))
-                ->values()
-                ->all(),
-        ];
-    }
-
-    /**
-     * @param  array<int, string>  $keywords
-     * @return Collection<int, Article>
-     */
-    private function recentDigestArticles(City $city, int $windowDays, array $keywords, bool $allowAllFallback): Collection
-    {
-        $timezone = $city->timezone ?: config('app.timezone', 'UTC');
-        $since = Carbon::now($timezone)->subDays($windowDays)->startOfDay()->setTimezone('UTC');
-
-        $articles = Article::query()
-            ->where('city_id', $city->id)
-            ->where(function ($builder) use ($since): void {
-                $builder->where('published_at', '>=', $since)
-                    ->orWhere(function ($nested) use ($since): void {
-                        $nested->whereNull('published_at')
-                            ->where('created_at', '>=', $since);
-                    });
-            })
-            ->with(['sources:id,article_id,source_url'])
-            ->limit(80)
-            ->get()
-            ->sortByDesc(fn (Article $article): int => (int) (($article->published_at ?? $article->created_at)?->getTimestamp() ?? 0))
-            ->values();
-
-        if ($keywords === []) {
-            return $articles;
-        }
-
-        $keywordMatches = $articles
-            ->filter(fn (Article $article): bool => $this->articleMatchesKeywords($article, $keywords))
-            ->values();
-
-        if ($keywordMatches->isNotEmpty()) {
-            return $keywordMatches;
-        }
-
-        return $allowAllFallback ? $articles : collect();
-    }
-
-    /**
-     * @param  array<int, string>  $keywords
-     */
-    private function articleMatchesKeywords(Article $article, array $keywords): bool
-    {
-        $haystack = mb_strtolower(trim(
-            ((string) $article->title).' '.((string) $article->summary)
-        ));
-
-        if ($haystack === '') {
-            return false;
-        }
-
-        foreach ($keywords as $keyword) {
-            if (str_contains($haystack, mb_strtolower($keyword))) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function articleDigestLine(Article $article, City $city): string
-    {
-        $timezone = $city->timezone ?: config('app.timezone', 'UTC');
-        $date = ($article->published_at ?? $article->created_at)?->copy()->setTimezone($timezone);
-        $dateLabel = $date?->format('M j, Y') ?: 'Recent';
-        $title = trim((string) ($article->title ?? 'Local update')) ?: 'Local update';
-        $summary = trim((string) ($article->summary ?? ''));
-
-        if ($summary === '') {
-            return "{$dateLabel}: {$title}";
-        }
-
-        return "{$dateLabel}: {$title} - ".Str::limit($summary, 180);
     }
 
     /**
@@ -718,15 +377,9 @@ class AskService
         float $confidence,
         string $outcome,
         bool $sourcesSuppressed,
-        ?string $fallbackIntent,
-        bool $digestFallbackUsed,
         ?string $fallbackReason,
     ): void {
-        if (! $this->isProceduralQuestion($normalizedQuestion)
-            && ! $sourcesSuppressed
-            && $outcome !== 'fallback'
-            && $fallbackIntent === null
-        ) {
+        if (! $sourcesSuppressed && $outcome !== 'fallback') {
             return;
         }
 
@@ -736,13 +389,9 @@ class AskService
             'question' => $normalizedQuestion,
             'original_question' => $originalQuestion,
             'normalized_question' => $normalizedQuestion,
-            'procedural_question' => $this->isProceduralQuestion($normalizedQuestion),
             'outcome' => $outcome,
             'confidence' => $confidence,
             'sources_suppressed' => $sourcesSuppressed,
-            'fallback_intent' => $fallbackIntent,
-            'request_origin' => $fallbackIntent !== null ? 'chip' : 'free_form',
-            'digest_fallback_used' => $digestFallbackUsed,
             'fallback_reason' => $fallbackReason,
             'selected_sources' => $sources
                 ->take(8)
@@ -754,11 +403,6 @@ class AskService
                 ->values()
                 ->all(),
         ]);
-    }
-
-    private function isProceduralQuestion(string $question): bool
-    {
-        return $this->proceduralQuestionAnalyzer->isProceduralQuestion($question);
     }
 
     private function isNoAnswerMessage(string $answer): bool

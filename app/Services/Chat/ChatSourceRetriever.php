@@ -12,7 +12,6 @@ class ChatSourceRetriever
         private readonly EmbeddingClient $embeddingClient,
         private readonly VectorFormatter $vectorFormatter,
         private readonly ChatSourceGuard $chatSourceGuard,
-        private readonly ProceduralQuestionAnalyzer $proceduralQuestionAnalyzer,
     ) {}
 
     /**
@@ -844,7 +843,7 @@ class ChatSourceRetriever
 
     private function questionRequiresProceduralSteps(string $question): bool
     {
-        return $this->proceduralQuestionAnalyzer->requiresStepwiseSupport($question);
+        return false;
     }
 
     private function countProceduralProcessSignals(string $content): int
@@ -863,7 +862,7 @@ class ChatSourceRetriever
 
     private function questionAndChunkShareProceduralFocus(string $question, string $chunk, string $context): bool
     {
-        return $this->proceduralQuestionAnalyzer->sharesFocus($question, $chunk, $context);
+        return false;
     }
 
     /**
@@ -871,12 +870,12 @@ class ChatSourceRetriever
      */
     private function proceduralFocusTerms(string $question): array
     {
-        return $this->proceduralQuestionAnalyzer->focusTerms($question);
+        return [];
     }
 
     private function isProceduralQuestion(string $question): bool
     {
-        return $this->proceduralQuestionAnalyzer->isProceduralQuestion($question);
+        return false;
     }
 
     /**
@@ -884,7 +883,7 @@ class ChatSourceRetriever
      */
     private function proceduralSignals(): array
     {
-        return $this->proceduralQuestionAnalyzer->processSignals();
+        return [];
     }
 
     /**

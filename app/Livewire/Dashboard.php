@@ -31,14 +31,11 @@ class Dashboard extends Component
 
     public string $question = '';
 
-    public ?string $fallbackIntent = null;
-
     /**
      * @var array<int, array{
      *     role: string,
      *     content: string,
-     *     citations?: array<int, array{title: string, source_url: string, type: string}>,
-     *     resources?: array<int, array{type: string, label: string, value: string, url: string}>
+     *     citations?: array<int, array{title: string, source_url: string, type: string}>
      * }>
      */
     public array $messages = [];
@@ -54,6 +51,7 @@ class Dashboard extends Component
     public function mount(): void
     {
         $this->cityId = request()->integer('city_id') ?: null;
+        $this->conversationId = $this->storedConversationId();
     }
 
     public function ask(): void
@@ -71,18 +69,34 @@ class Dashboard extends Component
 
         try {
             $city = $this->resolveCity();
-            $response = app(AskService::class)->answer(
-                question: $question,
-                cityId: $city?->id,
-                citySlug: null,
-                fallbackIntent: $this->fallbackIntent,
-            );
+            $user = auth()->user();
+
+            if ($user && (bool) config('chat.streaming_enabled', true)) {
+                $response = app(AskService::class)->answerStreamingForUser(
+                    question: $question,
+                    citySelector: $city?->id,
+                    user: $user,
+                    conversationId: $this->storedConversationId(),
+                    onDelta: static fn (string $delta): null => null,
+                );
+
+                $this->conversationId = is_string($response['conversation_id'] ?? null)
+                    ? $response['conversation_id']
+                    : null;
+
+                $this->storeConversationId($this->conversationId);
+            } else {
+                $response = app(AskService::class)->answer(
+                    question: $question,
+                    cityId: $city?->id,
+                    citySlug: null,
+                );
+            }
 
             $this->messages[] = [
                 'role' => 'assistant',
                 'content' => (string) ($response['answer'] ?? ''),
                 'citations' => $response['citations'] ?? [],
-                'resources' => $response['resources'] ?? [],
             ];
         } catch (Throwable $exception) {
             report($exception);
@@ -94,32 +108,20 @@ class Dashboard extends Component
         }
 
         $this->question = '';
-        $this->fallbackIntent = null;
         $this->dispatch('chat-updated');
     }
 
     public function startNewConversation(): void
     {
-        $this->fallbackIntent = null;
+        $this->conversationId = null;
+        $this->storeConversationId(null);
         $this->messages = [];
         $this->dispatch('chat-reset');
     }
 
-    public function applyPrompt(string $prompt, ?string $fallbackIntent = null): void
+    public function applyPrompt(string $prompt): void
     {
         $this->question = $prompt;
-        $this->fallbackIntent = $this->normalizeFallbackIntent($fallbackIntent);
-    }
-
-    public function updatingQuestion(string $value): void
-    {
-        if ($this->fallbackIntent === null) {
-            return;
-        }
-
-        if (trim($value) !== trim($this->question)) {
-            $this->fallbackIntent = null;
-        }
     }
 
     public function selectIssueArea(int $issueAreaId): void
@@ -437,7 +439,7 @@ class Dashboard extends Component
     }
 
     /**
-     * @return array<int, array{label: string, prompt: string, fallback_intent: string|null}>
+     * @return array<int, array{label: string, prompt: string}>
      */
     private function chatPromptChips(?City $city): array
     {
@@ -447,37 +449,50 @@ class Dashboard extends Component
             [
                 'label' => __('What changed this week?'),
                 'prompt' => __('Summarize the most important local updates in :city from the last 7 days. Focus on decisions, projects, and deadlines, and include citations.', ['city' => $cityName]),
-                'fallback_intent' => 'weekly_updates',
             ],
             [
                 'label' => __('Upcoming meetings'),
                 'prompt' => __('What city council, board, and public meetings are coming up in :city in the next 14 days? Include dates, times, and where to find the agenda.', ['city' => $cityName]),
-                'fallback_intent' => null,
             ],
             [
                 'label' => __('New permits & projects'),
                 'prompt' => __('What new permits, rezonings, or major development projects were recently filed or approved in :city? Include status and key locations.', ['city' => $cityName]),
-                'fallback_intent' => 'permits_projects',
             ],
             [
                 'label' => __('Service alerts'),
                 'prompt' => __('What active service alerts or disruptions should residents in :city know about right now? Focus on roads, utilities, water, trash, and public services.', ['city' => $cityName]),
-                'fallback_intent' => 'service_alerts',
             ],
         ];
     }
 
-    private function normalizeFallbackIntent(?string $fallbackIntent): ?string
+    private function storedConversationId(): ?string
     {
-        if (! is_string($fallbackIntent) || trim($fallbackIntent) === '') {
+        if (! auth()->check() || ! (bool) config('chat.memory_enabled', true)) {
             return null;
         }
 
-        $fallbackIntent = trim($fallbackIntent);
+        $conversationId = session((string) config('chat.memory_session_key', 'chat.conversation_id'));
 
-        return in_array($fallbackIntent, AskService::allowedFallbackIntents(), true)
-            ? $fallbackIntent
+        return is_string($conversationId) && trim($conversationId) !== ''
+            ? $conversationId
             : null;
+    }
+
+    private function storeConversationId(?string $conversationId): void
+    {
+        if (! auth()->check() || ! (bool) config('chat.memory_enabled', true)) {
+            return;
+        }
+
+        $sessionKey = (string) config('chat.memory_session_key', 'chat.conversation_id');
+
+        if ($conversationId === null || trim($conversationId) === '') {
+            session()->forget($sessionKey);
+
+            return;
+        }
+
+        session()->put($sessionKey, $conversationId);
     }
 
     /**

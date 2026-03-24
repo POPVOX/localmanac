@@ -6,63 +6,59 @@ use App\Models\User;
 use App\Services\Chat\AnswerSynthesizer;
 use App\Services\Chat\AskService;
 use App\Services\Chat\ChatSourceSelector;
-use App\Services\Chat\ProceduralQuestionAnalyzer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
 
-it('keeps an uncited answer but suppresses unrelated source links', function () {
-    config()->set('chat.source_display_min_confidence', 0.85);
-
+it('uses a single selector to synthesizer orchestration path for standard qa', function () {
     $city = City::factory()->create([
         'name' => 'Wichita',
         'slug' => 'wichita',
     ]);
 
-    $sources = ChatSource::factory()->count(2)->create([
+    $source = ChatSource::factory()->create([
         'city_id' => $city->id,
+        'name' => 'Trash Service',
+        'source_url' => 'https://example.com/trash',
         'is_active' => true,
     ]);
 
     $selector = Mockery::mock(ChatSourceSelector::class);
     $selector->shouldReceive('select')
         ->once()
-        ->with($city->id, 'Who is the largest employer in Wichita?')
-        ->andReturn(new Collection($sources->all()));
+        ->with($city->id, 'When is trash pickup?')
+        ->andReturn(collect([$source]));
 
     $synthesizer = Mockery::mock(AnswerSynthesizer::class);
     $synthesizer->shouldReceive('synthesize')
         ->once()
         ->with(
-            'Who is the largest employer in Wichita?',
+            'When is trash pickup?',
             Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)),
             Mockery::type(Collection::class),
-            'Who is the largest employer in Wichita?'
+            'When is trash pickup?'
         )
         ->andReturn([
-            'answer' => 'Spirit AeroSystems is likely the largest employer in Wichita.',
-            'citations' => [],
-            'resources' => [
+            'answer' => 'Trash pickup is on Monday.',
+            'citations' => [
                 [
-                    'type' => 'link',
-                    'label' => 'Open source page',
-                    'value' => 'About Wichita Public Schools',
-                    'url' => 'https://www.usd259.org/about-wps',
+                    'title' => 'Trash Service',
+                    'source_url' => 'https://example.com/trash',
+                    'type' => 'html',
                 ],
             ],
-            'confidence' => 0.74,
-            'source_mode' => 'web',
+            'confidence' => 0.95,
+            'source_mode' => 'local',
         ]);
 
-    $service = new AskService($selector, $synthesizer, app(ProceduralQuestionAnalyzer::class));
-    $response = $service->answer('Who is the largest employer in Wichita?', $city->id);
+    $service = new AskService($selector, $synthesizer);
+    $response = $service->answer('When is trash pickup?', $city->id);
 
-    expect($response['answer'])->toBe('Spirit AeroSystems is likely the largest employer in Wichita.')
-        ->and($response['citations'])->toBe([])
-        ->and($response['resources'])->toBe([])
-        ->and($response['meta']['pages_fetched'])->toBe(0);
+    expect($response['answer'])->toBe('Trash pickup is on Monday.')
+        ->and($response['citations'][0]['source_url'])->toBe('https://example.com/trash')
+        ->and(array_keys($response))->toBe(['answer', 'citations', 'city', 'meta']);
 });
 
 it('normalizes generic city phrasing before retrieval and synthesis', function () {
@@ -102,19 +98,18 @@ it('normalizes generic city phrasing before retrieval and synthesis', function (
                     'type' => 'html',
                 ],
             ],
-            'resources' => [],
             'confidence' => 0.95,
             'source_mode' => 'local',
         ]);
 
-    $service = new AskService($selector, $synthesizer, app(ProceduralQuestionAnalyzer::class));
+    $service = new AskService($selector, $synthesizer);
     $response = $service->answer('What are tenant rights in my city?', $city->id);
 
     expect($response['answer'])->toBe('Tenant rights information is available from the housing resource page.')
         ->and($response['citations'][0]['source_url'])->toBe('https://example.com/tenant-rights');
 });
 
-it('broadens procedural source selection before synthesis', function () {
+it('does not widen source selection for procedural questions', function () {
     $city = City::factory()->create([
         'name' => 'Wichita',
         'slug' => 'wichita',
@@ -130,18 +125,12 @@ it('broadens procedural source selection before synthesis', function () {
     $selector = Mockery::mock(ChatSourceSelector::class);
     $selector->shouldReceive('select')
         ->once()
-        ->with($city->id, 'How do I get a demolition permit?', 24)
+        ->with($city->id, 'How do I get a demolition permit?')
         ->andReturn(collect([$source]));
 
     $synthesizer = Mockery::mock(AnswerSynthesizer::class);
     $synthesizer->shouldReceive('synthesize')
         ->once()
-        ->with(
-            'How do I get a demolition permit?',
-            Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)),
-            Mockery::type(Collection::class),
-            'How do I get a demolition permit?'
-        )
         ->andReturn([
             'answer' => 'You can apply for a demolition permit through the city permit center.',
             'citations' => [
@@ -151,19 +140,18 @@ it('broadens procedural source selection before synthesis', function () {
                     'type' => 'html',
                 ],
             ],
-            'resources' => [],
             'confidence' => 0.95,
             'source_mode' => 'local',
         ]);
 
-    $service = new AskService($selector, $synthesizer, app(ProceduralQuestionAnalyzer::class));
+    $service = new AskService($selector, $synthesizer);
     $response = $service->answer('How do I get a demolition permit?', $city->id);
 
     expect($response['answer'])->toBe('You can apply for a demolition permit through the city permit center.')
         ->and($response['citations'][0]['source_url'])->toBe('https://example.com/demolition-permit');
 });
 
-it('suppresses citations and resources when answer confidence is below the display threshold', function () {
+it('suppresses citations when answer confidence is below the display threshold', function () {
     config()->set('chat.source_display_min_confidence', 0.85);
 
     $city = City::factory()->create([
@@ -181,18 +169,12 @@ it('suppresses citations and resources when answer confidence is below the displ
     $selector = Mockery::mock(ChatSourceSelector::class);
     $selector->shouldReceive('select')
         ->once()
-        ->with($city->id, 'How do I get a demolition permit?', 24)
+        ->with($city->id, 'How do I get a demolition permit?')
         ->andReturn(collect([$source]));
 
     $synthesizer = Mockery::mock(AnswerSynthesizer::class);
     $synthesizer->shouldReceive('synthesize')
         ->once()
-        ->with(
-            'How do I get a demolition permit?',
-            Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)),
-            Mockery::type(Collection::class),
-            'How do I get a demolition permit?'
-        )
         ->andReturn([
             'answer' => 'You can apply for a demolition permit through the city permit center.',
             'citations' => [
@@ -202,28 +184,19 @@ it('suppresses citations and resources when answer confidence is below the displ
                     'type' => 'html',
                 ],
             ],
-            'resources' => [
-                [
-                    'type' => 'link',
-                    'label' => 'Open permit page',
-                    'value' => 'Permit Center',
-                    'url' => 'https://example.com/demolition-permit',
-                ],
-            ],
             'confidence' => 0.62,
             'source_mode' => 'local',
         ]);
 
-    $service = new AskService($selector, $synthesizer, app(ProceduralQuestionAnalyzer::class));
+    $service = new AskService($selector, $synthesizer);
     $response = $service->answer('How do I get a demolition permit?', $city->id);
 
     expect($response['answer'])->toBe('You can apply for a demolition permit through the city permit center.')
         ->and($response['citations'])->toBe([])
-        ->and($response['resources'])->toBe([])
         ->and($response['meta']['pages_fetched'])->toBe(0);
 });
 
-it('suppresses streaming source links when confidence is below the display threshold', function () {
+it('suppresses streaming citations when answer confidence is below the display threshold', function () {
     config()->set('chat.source_display_min_confidence', 0.85);
 
     $city = City::factory()->create([
@@ -242,7 +215,7 @@ it('suppresses streaming source links when confidence is below the display thres
     $selector = Mockery::mock(ChatSourceSelector::class);
     $selector->shouldReceive('select')
         ->once()
-        ->with($city->id, 'How do I get a demolition permit?', 24)
+        ->with($city->id, 'How do I get a demolition permit?')
         ->andReturn(collect([$source]));
 
     $synthesizer = Mockery::mock(AnswerSynthesizer::class);
@@ -266,20 +239,12 @@ it('suppresses streaming source links when confidence is below the display thres
                     'type' => 'html',
                 ],
             ],
-            'resources' => [
-                [
-                    'type' => 'link',
-                    'label' => 'Open permit page',
-                    'value' => 'Permit Center',
-                    'url' => 'https://example.com/demolition-permit',
-                ],
-            ],
             'confidence' => 0.62,
             'source_mode' => 'local',
             'conversation_id' => 'conv_demo',
         ]);
 
-    $service = new AskService($selector, $synthesizer, app(ProceduralQuestionAnalyzer::class));
+    $service = new AskService($selector, $synthesizer);
     $response = $service->answerStreamingForUser(
         'How do I get a demolition permit?',
         $city->id,
@@ -290,7 +255,6 @@ it('suppresses streaming source links when confidence is below the display thres
 
     expect($response['answer'])->toBe('You can apply for a demolition permit through the city permit center.')
         ->and($response['citations'])->toBe([])
-        ->and($response['resources'])->toBe([])
         ->and($response['conversation_id'])->toBe('conv_demo')
         ->and($response['meta']['pages_fetched'])->toBe(0);
 });

@@ -1,6 +1,5 @@
 <?php
 
-use App\Services\Chat\Agents\ChatCitationAgent;
 use App\Services\Chat\Agents\StructuredChatAnswerAgent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\JsonSchema\JsonSchemaTypeFactory;
@@ -16,10 +15,9 @@ it('disallows additional properties for structured chat citation items', functio
     expect($citations['items']['additionalProperties'] ?? null)->toBeFalse();
 });
 
-it('disallows additional properties for citation agent items', function () {
+it('requires the documented top-level structured chat fields', function () {
     $schema = new JsonSchemaTypeFactory;
-    $definition = (new ChatCitationAgent)->schema($schema);
-    $citations = $definition['citations']->toArray();
+    $definition = (new StructuredChatAnswerAgent)->schema($schema);
 
-    expect($citations['items']['additionalProperties'] ?? null)->toBeFalse();
+    expect(array_keys($definition))->toBe(['answer', 'citations', 'source_mode', 'confidence']);
 });

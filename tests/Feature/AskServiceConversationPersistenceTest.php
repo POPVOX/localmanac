@@ -5,7 +5,6 @@ use App\Models\ChatSourceChunk;
 use App\Models\ChatSourcePage;
 use App\Models\City;
 use App\Models\User;
-use App\Services\Chat\Agents\ChatCitationAgent;
 use App\Services\Chat\Agents\StreamingChatAnswerAgent;
 use App\Services\Chat\AskService;
 use Illuminate\Support\Facades\DB;
@@ -50,19 +49,6 @@ it('persists conversation records and returns a conversation id for streaming us
 
     StreamingChatAnswerAgent::fake([
         'Trash pickup is on Monday.',
-    ]);
-
-    ChatCitationAgent::fake([
-        [
-            'citations' => [
-                [
-                    'title' => $source->name,
-                    'source_url' => $source->source_url,
-                    'type' => 'html',
-                ],
-            ],
-            'confidence' => 0.9,
-        ],
     ]);
 
     $result = app(AskService::class)->answerStreamingForUser(

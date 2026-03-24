@@ -1,15 +1,11 @@
 <?php
 
-use App\Models\Article;
-use App\Models\ArticleSource;
 use App\Models\ChatSource;
 use App\Models\ChatSourceChunk;
 use App\Models\ChatSourcePage;
 use App\Models\City;
 use App\Models\Event;
-use App\Services\Chat\Agents\StreamingChatAnswerAgent;
 use App\Services\Chat\Agents\StructuredChatAnswerAgent;
-use App\Services\Chat\Tools\EventSearchTool;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 
@@ -45,7 +41,7 @@ it('answers with citations from ingested sources', function () {
         'content_length' => 28,
     ]);
 
-    $chunk = ChatSourceChunk::factory()->create([
+    ChatSourceChunk::factory()->create([
         'chat_source_page_id' => $page->id,
         'chunk_index' => 0,
         'content' => 'Trash pickup is on Monday.',
@@ -67,18 +63,80 @@ it('answers with citations from ingested sources', function () {
         ],
     ]);
 
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'When is trash pickup?',
-            'city_id' => $city->id,
-        ]);
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'When is trash pickup?',
+        'city_id' => $city->id,
+    ]);
 
     $response->assertOk()
         ->assertJsonPath('answer', 'Trash pickup is on Monday.')
         ->assertJsonPath('citations.0.source_url', 'https://example.com/recycling');
 });
 
-it('returns fallback answer when evidence is insufficient', function () {
+it('returns the documented ask contract exactly', function () {
+    Cache::flush();
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.retrieval_mode', 'local_only');
+    config()->set('chat.tools.web_search.enabled', false);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Trash Service',
+        'source_url' => 'https://example.com/trash',
+        'is_active' => true,
+    ]);
+
+    $page = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id,
+        'url' => 'https://example.com/trash',
+        'canonical_url' => 'https://example.com/trash',
+        'title' => 'Trash Service',
+        'content_text' => 'Trash pickup is on Monday.',
+        'content_length' => 28,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $page->id,
+        'chunk_index' => 0,
+        'content' => 'Trash pickup is on Monday.',
+        'content_length' => 28,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    StructuredChatAnswerAgent::fake([
+        [
+            'answer' => 'Trash pickup is on Monday.',
+            'citations' => [
+                [
+                    'title' => 'Trash Service',
+                    'source_url' => 'https://example.com/trash',
+                    'type' => 'html',
+                ],
+            ],
+            'source_mode' => 'local',
+            'confidence' => 0.95,
+        ],
+    ]);
+
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'When is trash pickup?',
+        'city_id' => $city->id,
+        'fallback_intent' => 'weekly_updates',
+    ]);
+
+    $response->assertOk();
+
+    expect(array_keys($response->json()))->toBe(['answer', 'citations', 'city', 'meta'])
+        ->and($response->json())->not->toHaveKey('resources');
+});
+
+it('returns deterministic fallback when evidence is insufficient', function () {
     Cache::flush();
     config()->set('scout.driver', 'collection');
     config()->set('chat.retrieval_mode', 'local_only');
@@ -97,371 +155,14 @@ it('returns fallback answer when evidence is insufficient', function () {
         'priority' => 10,
     ]);
 
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'How do I get a permit?',
-            'city_id' => $city->id,
-        ]);
-
-    $response->assertOk()
-        ->assertSeeText('I could not find the answer in the sources I checked.');
-});
-
-it('falls back when the answer includes unsupported claims', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_only');
-    config()->set('chat.tools.web_search.enabled', false);
-    config()->set('chat.source_display_min_confidence', 0.85);
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-    ]);
-
-    ChatSource::factory()->create([
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'How do I get a permit?',
         'city_id' => $city->id,
-        'name' => 'About Wichita Public Schools',
-        'source_url' => 'https://www.usd259.org/about-wps',
-        'is_active' => true,
     ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'Spirit AeroSystems is likely the largest employer in Wichita.',
-            'citations' => [],
-            'source_mode' => 'web',
-            'confidence' => 0.74,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'Who is the largest employer in Wichita?',
-            'city_id' => $city->id,
-        ]);
 
     $response->assertOk()
         ->assertJsonPath('answer', 'I could not find the answer in the sources I checked. Try a different wording or a more specific question.')
-        ->assertJsonPath('citations', [])
-        ->assertJsonPath('resources', []);
-});
-
-it('rejects unsupported named organizations in actionable answers', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_only');
-    config()->set('chat.tools.web_search.enabled', false);
-    config()->set('chat.vector_enabled', false);
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-    ]);
-
-    $source = ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Report a Gas Leak',
-        'source_url' => 'https://example.com/report-gas-leak',
-        'tags' => ['gas', 'leak', 'emergency'],
-        'priority' => 10,
-    ]);
-
-    $page = ChatSourcePage::factory()->create([
-        'chat_source_id' => $source->id,
-        'url' => 'https://example.com/report-gas-leak',
-        'canonical_url' => 'https://example.com/report-gas-leak',
-        'title' => 'Report a Gas Leak',
-        'content_text' => 'If you suspect a gas leak, leave the area immediately and call 911. Contact your gas utility using the emergency number on your bill or provider website.',
-        'content_length' => 144,
-    ]);
-
-    ChatSourceChunk::factory()->create([
-        'chat_source_page_id' => $page->id,
-        'chunk_index' => 0,
-        'content' => 'If you suspect a gas leak, leave the area immediately and call 911. Contact your gas utility using the emergency number on your bill or provider website.',
-        'content_length' => 144,
-        'embedding' => null,
-        'embedding_model' => null,
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'Call Evergy to report the gas leak.',
-            'citations' => [
-                [
-                    'title' => 'Report a Gas Leak',
-                    'source_url' => 'https://example.com/report-gas-leak',
-                    'type' => 'html',
-                ],
-            ],
-            'source_mode' => 'local',
-            'confidence' => 0.95,
-        ],
-    ]);
-
-    StreamingChatAnswerAgent::fake([
-        'If you suspect a gas leak, leave the area immediately and call 911. I could not verify the exact utility from the sources I checked.',
-    ]);
-
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'Who do I call to report a gas leak?',
-            'city_id' => $city->id,
-        ]);
-
-    $response->assertOk()
-        ->assertJsonPath('answer', 'If you suspect a gas leak, leave the area immediately and call 911. I could not verify the exact utility from the sources I checked.')
-        ->assertJsonPath('citations.0.source_url', 'https://example.com/report-gas-leak');
-
-    expect((string) $response->json('answer'))->not->toContain('Evergy');
-});
-
-it('returns a cited weekly digest fallback for broad local update asks', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_only');
-    config()->set('chat.tools.web_search.enabled', false);
-
-    Carbon::setTestNow(Carbon::parse('2026-03-04 09:00:00', 'America/Chicago'));
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-        'timezone' => 'America/Chicago',
-    ]);
-
-    ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Wichita Government',
-        'source_url' => 'https://www.wichita.gov/27/Government',
-        'is_active' => true,
-    ]);
-
-    $permitArticle = Article::factory()->create([
-        'city_id' => $city->id,
-        'title' => 'Planning Commission advances riverfront rezoning case',
-        'summary' => 'Commissioners moved a mixed-use rezoning request forward and set a public hearing deadline.',
-        'published_at' => Carbon::parse('2026-03-03 11:30:00', 'America/Chicago'),
-        'canonical_url' => 'https://example.com/articles/rezoning-riverfront',
-    ]);
-
-    ArticleSource::query()->create([
-        'city_id' => $city->id,
-        'article_id' => $permitArticle->id,
-        'source_url' => 'https://example.com/articles/rezoning-riverfront',
-        'source_type' => 'web',
-    ]);
-
-    $serviceArticle = Article::factory()->create([
-        'city_id' => $city->id,
-        'title' => 'City announces temporary water service disruption downtown',
-        'summary' => 'Utility crews scheduled overnight valve repairs and provided restoration times.',
-        'published_at' => Carbon::parse('2026-03-02 08:15:00', 'America/Chicago'),
-        'canonical_url' => 'https://example.com/articles/water-disruption-downtown',
-    ]);
-
-    ArticleSource::query()->create([
-        'city_id' => $city->id,
-        'article_id' => $serviceArticle->id,
-        'source_url' => 'https://example.com/articles/water-disruption-downtown',
-        'source_type' => 'web',
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'I could not find the answer in the sources I checked.',
-            'citations' => [],
-            'source_mode' => 'none',
-            'confidence' => 0.0,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'Summarize the most important local updates in Wichita from the last 7 days. Focus on decisions, projects, and deadlines, and include citations.',
-            'city_id' => $city->id,
-            'fallback_intent' => 'weekly_updates',
-        ]);
-
-    $response->assertOk()
-        ->assertSeeText('Here are the latest local updates in Wichita from the last 7 days:')
-        ->assertSeeText('Planning Commission advances riverfront rezoning case')
-        ->assertSeeText('City announces temporary water service disruption downtown')
-        ->assertJsonPath('citations.0.source_url', 'https://example.com/articles/rezoning-riverfront')
-        ->assertJsonPath('citations.1.source_url', 'https://example.com/articles/water-disruption-downtown');
-
-    expect((string) $response->json('answer'))->not->toContain('I could not find the answer in the sources I checked.');
-});
-
-it('does not route free form permit questions into digest fallback even when permit articles exist', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_only');
-    config()->set('chat.tools.web_search.enabled', false);
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-        'timezone' => 'America/Chicago',
-    ]);
-
-    ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Wichita Government',
-        'source_url' => 'https://www.wichita.gov/27/Government',
-        'is_active' => true,
-    ]);
-
-    $permitArticle = Article::factory()->create([
-        'city_id' => $city->id,
-        'title' => 'Planning Commission advances riverfront rezoning case',
-        'summary' => 'Commissioners moved a mixed-use rezoning request forward and set a public hearing deadline.',
-        'published_at' => Carbon::parse('2026-03-03 11:30:00', 'America/Chicago'),
-        'canonical_url' => 'https://example.com/articles/rezoning-riverfront',
-    ]);
-
-    ArticleSource::query()->create([
-        'city_id' => $city->id,
-        'article_id' => $permitArticle->id,
-        'source_url' => 'https://example.com/articles/rezoning-riverfront',
-        'source_type' => 'web',
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'I could not find the answer in the sources I checked.',
-            'citations' => [],
-            'source_mode' => 'none',
-            'confidence' => 0.0,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()->postJson('/ask', [
-        'question' => 'How do I get a demolition permit?',
-        'city_id' => $city->id,
-    ]);
-
-    $response->assertOk()
-        ->assertSeeText('I could not find the answer in the sources I checked.')
-        ->assertDontSeeText('Here are recent permits and development project updates in Wichita:')
         ->assertJsonPath('citations', []);
-});
-
-it('returns permit and project digest fallback only when explicitly requested', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_only');
-    config()->set('chat.tools.web_search.enabled', false);
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-        'timezone' => 'America/Chicago',
-    ]);
-
-    ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Wichita Government',
-        'source_url' => 'https://www.wichita.gov/27/Government',
-        'is_active' => true,
-    ]);
-
-    $permitArticle = Article::factory()->create([
-        'city_id' => $city->id,
-        'title' => 'Planning Commission advances riverfront rezoning case',
-        'summary' => 'Commissioners moved a mixed-use rezoning request forward and set a public hearing deadline.',
-        'published_at' => Carbon::parse('2026-03-03 11:30:00', 'America/Chicago'),
-        'canonical_url' => 'https://example.com/articles/rezoning-riverfront',
-    ]);
-
-    ArticleSource::query()->create([
-        'city_id' => $city->id,
-        'article_id' => $permitArticle->id,
-        'source_url' => 'https://example.com/articles/rezoning-riverfront',
-        'source_type' => 'web',
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'I could not find the answer in the sources I checked.',
-            'citations' => [],
-            'source_mode' => 'none',
-            'confidence' => 0.0,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()->postJson('/ask', [
-        'question' => 'What new permits or projects were recently filed?',
-        'city_id' => $city->id,
-        'fallback_intent' => 'permits_projects',
-    ]);
-
-    $response->assertOk()
-        ->assertSeeText('Here are recent permits and development project updates in Wichita:')
-        ->assertSeeText('Planning Commission advances riverfront rezoning case')
-        ->assertJsonPath('citations.0.source_url', 'https://example.com/articles/rezoning-riverfront');
-});
-
-it('keeps reranked evidence when minimum score filtering is enabled', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_only');
-    config()->set('chat.tools.web_search.enabled', false);
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-    ]);
-
-    $source = ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Park Wichita',
-        'source_url' => 'https://example.com/park-wichita',
-        'tags' => ['parking'],
-        'priority' => 10,
-    ]);
-
-    $page = ChatSourcePage::factory()->create([
-        'chat_source_id' => $source->id,
-        'url' => 'https://example.com/park-wichita',
-        'canonical_url' => 'https://example.com/park-wichita',
-        'title' => 'Park Wichita | Wichita, KS',
-        'content_text' => 'Fee schedule and paid parking hours.',
-        'content_length' => 35,
-    ]);
-
-    $chunk = ChatSourceChunk::factory()->create([
-        'chat_source_page_id' => $page->id,
-        'chunk_index' => 0,
-        'content' => 'Fee schedule: paid parking is $1 per hour from 8 a.m. to 6 p.m. Monday through Thursday.',
-        'content_length' => 95,
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'Paid parking is $1 per hour from 8 a.m. to 6 p.m. Monday through Thursday.',
-            'citations' => [
-                [
-                    'title' => 'Park Wichita | Wichita, KS',
-                    'source_url' => 'https://example.com/park-wichita',
-                    'type' => 'html',
-                ],
-            ],
-            'source_mode' => 'local',
-            'confidence' => 0.9,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'fee',
-            'city_id' => $city->id,
-        ]);
-
-    $response->assertOk()
-        ->assertJsonPath('answer', 'Paid parking is $1 per hour from 8 a.m. to 6 p.m. Monday through Thursday.')
-        ->assertJsonPath('citations.0.source_url', 'https://example.com/park-wichita');
 });
 
 it('uses seed evidence fallback when structured synthesis returns an empty answer', function () {
@@ -511,657 +212,67 @@ it('uses seed evidence fallback when structured synthesis returns an empty answe
         ],
     ]);
 
-    StreamingChatAnswerAgent::fake([
-        'To report a water leak, call 316-262-6000.',
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => 'How do I report a water leak?',
+        'city_id' => $city->id,
     ]);
 
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'How do I report a water leak?',
-            'city_id' => $city->id,
-        ]);
-
     $response->assertOk()
-        ->assertJsonPath('answer', 'To report a water leak, call 316-262-6000.')
         ->assertJsonPath('citations.0.source_url', 'https://example.com/report-water-leak');
-});
-
-it('uses seed evidence fallback when structured synthesis returns a no-answer message', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_only');
-    config()->set('chat.tools.web_search.enabled', false);
-    config()->set('chat.vector_enabled', false);
-    config()->set('chat.chunk_max_chars', 1200);
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-    ]);
-
-    $source = ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Garage Sales Online',
-        'source_url' => 'https://example.com/garage-sale-permit',
-        'tags' => ['garage', 'permit'],
-        'priority' => 10,
-    ]);
-
-    $page = ChatSourcePage::factory()->create([
-        'chat_source_id' => $source->id,
-        'url' => 'https://example.com/garage-sale-permit',
-        'canonical_url' => 'https://example.com/garage-sale-permit',
-        'title' => 'Garage Sales Online',
-        'content_text' => 'Garage sale permit pricing.',
-        'content_length' => 27,
-    ]);
-
-    $leadingContext = str_repeat('Garage sale permit details and process. ', 24);
-    $feeText = 'The permit is available for only $2.50 per day with a $1 credit card transaction fee.';
-
-    ChatSourceChunk::factory()->create([
-        'chat_source_page_id' => $page->id,
-        'chunk_index' => 0,
-        'content' => $leadingContext.$feeText,
-        'content_length' => mb_strlen($leadingContext.$feeText),
-        'embedding' => null,
-        'embedding_model' => null,
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'I could not find the answer in the sources I checked.',
-            'citations' => [],
-            'source_mode' => 'none',
-            'confidence' => 0.0,
-        ],
-    ]);
-
-    StreamingChatAnswerAgent::fake([
-        'The garage sale permit is $2.50 per day, plus a $1 credit card transaction fee.',
-    ]);
-
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'How much does a garage sale permit cost?',
-            'city_id' => $city->id,
-        ]);
-
-    $response->assertOk()
-        ->assertJsonPath('answer', 'The garage sale permit is $2.50 per day, plus a $1 credit card transaction fee.')
-        ->assertJsonPath('citations.0.source_url', 'https://example.com/garage-sale-permit');
-});
-
-it('prefers grounded service citations over broad faq citations', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_only');
-    config()->set('chat.tools.web_search.enabled', false);
-    config()->set('chat.vector_enabled', false);
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-    ]);
-
-    $serviceSource = ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Leaf Pickup Service',
-        'source_url' => 'https://example.com/leaf-pickup',
-        'tags' => ['leaf', 'pickup'],
-        'priority' => 10,
-    ]);
-
-    $faqSource = ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Wichita FAQ',
-        'source_url' => 'https://example.com/faq',
-        'tags' => ['faq', 'city'],
-        'priority' => 12,
-    ]);
-
-    $servicePage = ChatSourcePage::factory()->create([
-        'chat_source_id' => $serviceSource->id,
-        'url' => 'https://example.com/leaf-pickup',
-        'canonical_url' => 'https://example.com/leaf-pickup',
-        'title' => 'Leaf Pickup Service',
-        'content_text' => 'Leaf pickup requests are handled through the leaf pickup service page at https://example.com/leaf-pickup.',
-        'content_length' => 103,
-    ]);
-
-    ChatSourceChunk::factory()->create([
-        'chat_source_page_id' => $servicePage->id,
-        'chunk_index' => 0,
-        'content' => 'Leaf pickup requests are handled through the leaf pickup service page at https://example.com/leaf-pickup.',
-        'content_length' => 103,
-        'embedding' => null,
-        'embedding_model' => null,
-    ]);
-
-    $faqPage = ChatSourcePage::factory()->create([
-        'chat_source_id' => $faqSource->id,
-        'url' => 'https://example.com/faq',
-        'canonical_url' => 'https://example.com/faq',
-        'title' => 'Frequently Asked Questions',
-        'content_text' => 'FAQ. City services and quick links.',
-        'content_length' => 35,
-    ]);
-
-    ChatSourceChunk::factory()->create([
-        'chat_source_page_id' => $faqPage->id,
-        'chunk_index' => 0,
-        'content' => 'FAQ. City services and quick links.',
-        'content_length' => 35,
-        'embedding' => null,
-        'embedding_model' => null,
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'Use the leaf pickup service page to submit your request.',
-            'citations' => [
-                [
-                    'title' => 'Frequently Asked Questions',
-                    'source_url' => 'https://example.com/faq',
-                    'type' => 'html',
-                ],
-            ],
-            'source_mode' => 'local',
-            'confidence' => 0.93,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()->postJson('/ask', [
-        'question' => 'How do I request leaf pickup?',
-        'city_id' => $city->id,
-    ]);
-
-    $response->assertSuccessful()
-        ->assertJsonPath('citations.0.source_url', 'https://example.com/leaf-pickup');
-
-    expect(collect($response->json('citations'))->pluck('source_url'))->not->toContain('https://example.com/faq');
-});
-
-it('returns step by step demolition permit guidance from focused seed evidence fallback', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_only');
-    config()->set('chat.tools.web_search.enabled', false);
-    config()->set('chat.vector_enabled', false);
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-    ]);
-
-    $source = ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Building Permit Center',
-        'source_url' => 'https://example.com/demolition-permit',
-        'tags' => ['demolition', 'permit', 'inspection'],
-        'priority' => 10,
-    ]);
-
-    $page = ChatSourcePage::factory()->create([
-        'chat_source_id' => $source->id,
-        'url' => 'https://example.com/demolition-permit',
-        'canonical_url' => 'https://example.com/demolition-permit',
-        'title' => 'Demolition Permit Application',
-        'content_text' => 'Before you apply for a demolition permit, submit the required contractor documents, use the permit portal, and schedule the inspection after approval.',
-        'content_length' => 146,
-    ]);
-
-    ChatSourceChunk::factory()->create([
-        'chat_source_page_id' => $page->id,
-        'chunk_index' => 0,
-        'content' => 'Before you apply for a demolition permit, submit the required contractor documents, use the permit portal, and schedule the inspection after approval.',
-        'content_length' => 146,
-        'embedding' => null,
-        'embedding_model' => null,
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'I could not find the answer in the sources I checked.',
-            'citations' => [],
-            'source_mode' => 'none',
-            'confidence' => 0.0,
-        ],
-    ]);
-
-    StreamingChatAnswerAgent::fake([
-        "1. Submit the required contractor documents.\n2. Apply through the permit portal.\n3. Schedule the inspection after approval.",
-    ]);
-
-    $response = $this->withoutMiddleware()->postJson('/ask', [
-        'question' => 'How do I get a demolition permit?',
-        'city_id' => $city->id,
-    ]);
-
-    $response->assertSuccessful()
-        ->assertJsonPath('citations.0.source_url', 'https://example.com/demolition-permit');
 
     expect((string) $response->json('answer'))
-        ->toContain('1. Submit the required contractor documents.')
-        ->toContain('2. Apply through the permit portal.')
-        ->toContain('3. Schedule the inspection after approval.');
+        ->toContain('To report a water leak, call 316-262-6000.')
+        ->toContain('https://example.com/report-water-leak');
 });
 
-it('answers event asks and keeps ask response contract unchanged', function () {
+it('keeps event queries on the documented event-aware path', function () {
     Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_then_web');
-    config()->set('chat.tools.web_search.enabled', false);
-
     Carbon::setTestNow(Carbon::parse('2026-02-12 10:00:00', 'America/Chicago'));
 
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-        'timezone' => 'America/Chicago',
-    ]);
-
-    $parkingSource = ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Parking Rates',
-        'source_url' => 'https://www.wichita.gov/parking',
-        'tags' => ['parking', 'downtown'],
-        'is_active' => true,
-    ]);
-
-    $parkingPage = ChatSourcePage::factory()->create([
-        'chat_source_id' => $parkingSource->id,
-        'url' => 'https://www.wichita.gov/parking',
-        'canonical_url' => 'https://www.wichita.gov/parking',
-        'title' => 'Parking Rates',
-        'content_text' => 'Downtown parking meters cost $1 per hour.',
-        'content_length' => 41,
-    ]);
-
-    ChatSourceChunk::factory()->create([
-        'chat_source_page_id' => $parkingPage->id,
-        'chunk_index' => 0,
-        'content' => 'Downtown parking meters cost $1 per hour.',
-        'content_length' => 41,
-        'embedding' => null,
-        'embedding_model' => null,
-    ]);
-
-    Event::factory()->create([
-        'city_id' => $city->id,
-        'title' => 'Riverside Arts Fest',
-        'starts_at' => Carbon::parse('2026-02-14 11:00:00', 'America/Chicago'),
-        'ends_at' => Carbon::parse('2026-02-14 17:00:00', 'America/Chicago'),
-        'event_url' => 'https://events.wichita.gov/riverside-arts-fest',
-        'source_hash' => sha1('riverside-arts-fest'),
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'This weekend in Wichita, Riverside Arts Fest runs on Saturday from 11:00 AM to 5:00 PM.',
-            'citations' => [
-                [
-                    'title' => 'Riverside Arts Fest',
-                    'source_url' => 'https://events.wichita.gov/riverside-arts-fest',
-                    'type' => 'html',
-                ],
-            ],
-            'source_mode' => 'local',
-            'confidence' => 0.88,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => "What's going on this weekend in the city?",
-            'city_id' => $city->id,
-        ]);
-
-    $response->assertOk()
-        ->assertJsonPath('answer', 'This weekend in Wichita, Riverside Arts Fest runs on Saturday from 11:00 AM to 5:00 PM.')
-        ->assertJsonPath('citations.0.source_url', 'https://events.wichita.gov/riverside-arts-fest')
-        ->assertJsonStructure([
-            'answer',
-            'citations',
-            'city' => ['id', 'name', 'slug'],
-            'meta' => ['sources_used', 'pages_fetched', 'cache_hits'],
-        ]);
-
-    StructuredChatAnswerAgent::assertPrompted(function ($prompt): bool {
-        $tools = collect($prompt->agent->tools);
-
-        return $prompt->contains('Event intent detected: yes')
-            && $tools->contains(fn ($tool): bool => $tool instanceof EventSearchTool);
-    });
-});
-
-it('treats public meeting asks as event intent', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_then_web');
-    config()->set('chat.tools.web_search.enabled', false);
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-        'timezone' => 'America/Chicago',
-    ]);
-
-    ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Wichita Government',
-        'source_url' => 'https://www.wichita.gov/27/Government',
-        'is_active' => true,
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'A city council meeting is scheduled next week.',
-            'citations' => [
-                [
-                    'title' => 'City Council Agenda',
-                    'source_url' => 'https://events.wichita.gov/city-council',
-                    'type' => 'html',
-                ],
-            ],
-            'source_mode' => 'local',
-            'confidence' => 0.8,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'What city council and board meetings are coming up next week?',
-            'city_id' => $city->id,
-        ]);
-
-    $response->assertOk()
-        ->assertSeeText('city council meeting');
-
-    StructuredChatAnswerAgent::assertPrompted(function ($prompt): bool {
-        $tools = collect($prompt->agent->tools);
-
-        return $prompt->contains('Event intent detected: yes')
-            && $tools->contains(fn ($tool): bool => $tool instanceof EventSearchTool);
-    });
-});
-
-it('uses current year for month-day event asks', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_then_web');
-    config()->set('chat.tools.web_search.enabled', false);
-    config()->set('chat.events.web_fallback.enabled', false);
-
-    Carbon::setTestNow(Carbon::parse('2026-02-12 10:00:00', 'America/Chicago'));
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-        'timezone' => 'America/Chicago',
-    ]);
-
-    ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'City Services',
-        'source_url' => 'https://www.wichita.gov',
-        'is_active' => true,
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'I could not find the answer in the sources I checked.',
-            'citations' => [],
-            'source_mode' => 'none',
-            'confidence' => 0.0,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'March 12th events',
-            'city_id' => $city->id,
-        ]);
-
-    $response->assertOk()
-        ->assertSeeText('I could not find any events in Wichita for March 12, 2026.');
-});
-
-it('returns combined answers for mixed civic and event asks', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_then_web');
-    config()->set('chat.tools.web_search.enabled', false);
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-        'timezone' => 'America/Chicago',
-    ]);
-
-    $parkingSource = ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'Parking Rates',
-        'source_url' => 'https://www.wichita.gov/parking',
-        'tags' => ['parking', 'downtown'],
-        'is_active' => true,
-    ]);
-
-    $parkingPage = ChatSourcePage::factory()->create([
-        'chat_source_id' => $parkingSource->id,
-        'url' => 'https://www.wichita.gov/parking',
-        'canonical_url' => 'https://www.wichita.gov/parking',
-        'title' => 'Parking Rates',
-        'content_text' => 'Downtown parking meters cost $1 per hour.',
-        'content_length' => 41,
-    ]);
-
-    ChatSourceChunk::factory()->create([
-        'chat_source_page_id' => $parkingPage->id,
-        'chunk_index' => 0,
-        'content' => 'Downtown parking meters cost $1 per hour.',
-        'content_length' => 41,
-        'embedding' => null,
-        'embedding_model' => null,
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'This weekend there is a downtown jazz show, and parking meters cost $1 per hour downtown.',
-            'citations' => [
-                [
-                    'title' => 'Downtown jazz show',
-                    'source_url' => 'https://events.wichita.gov/jazz',
-                    'type' => 'html',
-                ],
-                [
-                    'title' => 'Parking Rates',
-                    'source_url' => 'https://www.wichita.gov/parking',
-                    'type' => 'html',
-                ],
-            ],
-            'source_mode' => 'local',
-            'confidence' => 0.86,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => "What's going on this weekend, and what is downtown parking?",
-            'city_id' => $city->id,
-        ]);
-
-    $response->assertOk()
-        ->assertSeeText('downtown jazz show')
-        ->assertSeeText('$1 per hour');
-});
-
-it('returns explicit no-events guidance when no local events are found', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_then_web');
-    config()->set('chat.tools.web_search.enabled', false);
-    config()->set('chat.events.no_results_suggest_alternatives', true);
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-        'timezone' => 'America/Chicago',
-    ]);
-
-    ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'City Services',
-        'source_url' => 'https://www.wichita.gov',
-        'is_active' => true,
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'I could not find the answer in the sources I checked.',
-            'citations' => [],
-            'source_mode' => 'none',
-            'confidence' => 0.0,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => "What's going on this weekend?",
-            'city_id' => $city->id,
-        ]);
-
-    $response->assertOk()
-        ->assertSeeText('I could not find any events in Wichita for this weekend.')
-        ->assertSeeText('Try asking about the next 7 days or next weekend.');
-});
-
-it('falls back to deterministic local event summary when llm returns no-answer but events exist', function () {
-    Cache::flush();
-    config()->set('scout.driver', 'collection');
-    config()->set('chat.retrieval_mode', 'local_then_web');
-    config()->set('chat.tools.web_search.enabled', false);
-    config()->set('chat.events.web_fallback.enabled', false);
-
-    Carbon::setTestNow(Carbon::parse('2026-02-12 10:00:00', 'America/Chicago'));
-
-    $city = City::factory()->create([
-        'name' => 'Wichita',
-        'slug' => 'wichita',
-        'timezone' => 'America/Chicago',
-    ]);
-
-    ChatSource::factory()->create([
-        'city_id' => $city->id,
-        'name' => 'City Services',
-        'source_url' => 'https://www.wichita.gov',
-        'is_active' => true,
-    ]);
-
-    Event::factory()->create([
-        'city_id' => $city->id,
-        'title' => 'Neighborhood Night Market',
-        'starts_at' => Carbon::parse('2026-02-12 18:00:00', 'America/Chicago'),
-        'ends_at' => Carbon::parse('2026-02-12 21:00:00', 'America/Chicago'),
-        'location_name' => 'Downtown',
-        'event_url' => 'https://events.wichita.gov/night-market',
-        'source_hash' => sha1('night-market'),
-    ]);
-
-    Event::factory()->create([
-        'city_id' => $city->id,
-        'title' => 'Weekend Family Concert',
-        'starts_at' => Carbon::parse('2026-02-14 14:00:00', 'America/Chicago'),
-        'ends_at' => Carbon::parse('2026-02-14 16:00:00', 'America/Chicago'),
-        'location_name' => 'Riverfront Stadium',
-        'event_url' => 'https://events.wichita.gov/family-concert',
-        'source_hash' => sha1('family-concert'),
-    ]);
-
-    StructuredChatAnswerAgent::fake([
-        [
-            'answer' => 'I could not find the answer in the sources I checked.',
-            'citations' => [],
-            'source_mode' => 'none',
-            'confidence' => 0.0,
-        ],
-    ]);
-
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'What events or activities are going on this week?',
-            'city_id' => $city->id,
-        ]);
-
-    $response->assertOk()
-        ->assertSeeText('Top events in Wichita for this week')
-        ->assertJsonPath('citations.0.source_url', 'https://events.wichita.gov/night-market');
-
-    expect((string) $response->json('answer'))->not->toContain('I could not find any events in Wichita');
-});
-
-it('caps response citations to link limit', function () {
-    Cache::flush();
     config()->set('scout.driver', 'collection');
     config()->set('chat.retrieval_mode', 'local_only');
     config()->set('chat.tools.web_search.enabled', false);
-    config()->set('chat.vector_enabled', false);
-    config()->set('chat.link_limit', 3);
+    config()->set('chat.events.enabled', true);
+    config()->set('chat.events.intent_mode', 'intent');
 
     $city = City::factory()->create([
         'name' => 'Wichita',
         'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
     ]);
 
-    foreach (range(1, 5) as $index) {
-        $source = ChatSource::factory()->create([
-            'city_id' => $city->id,
-            'name' => 'Service Update '.$index,
-            'source_url' => 'https://example.com/service-update-'.$index,
-            'is_active' => true,
-        ]);
+    ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'City Events',
+        'source_url' => 'https://example.com/events',
+        'is_active' => true,
+    ]);
 
-        $page = ChatSourcePage::factory()->create([
-            'chat_source_id' => $source->id,
-            'url' => 'https://example.com/service-update-'.$index,
-            'canonical_url' => 'https://example.com/service-update-'.$index,
-            'title' => 'Service Update '.$index,
-            'content_text' => 'Service update '.$index.' for Wichita city services.',
-            'content_length' => 43,
-        ]);
-
-        ChatSourceChunk::factory()->create([
-            'chat_source_page_id' => $page->id,
-            'chunk_index' => 0,
-            'content' => 'Service update '.$index.' for Wichita city services.',
-            'content_length' => 43,
-            'embedding' => null,
-            'embedding_model' => null,
-        ]);
-    }
+    Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Weekend Festival',
+        'starts_at' => Carbon::parse('2026-02-14 10:00:00', 'America/Chicago'),
+        'ends_at' => Carbon::parse('2026-02-14 18:00:00', 'America/Chicago'),
+        'location_name' => 'Downtown',
+        'event_url' => 'https://example.com/events/weekend-festival',
+        'source_hash' => sha1('weekend-festival'),
+    ]);
 
     StructuredChatAnswerAgent::fake([
         [
-            'answer' => 'Here are the latest service updates.',
-            'citations' => [
-                ['title' => 'One', 'source_url' => 'https://example.com/1', 'type' => 'html'],
-                ['title' => 'Two', 'source_url' => 'https://example.com/2', 'type' => 'html'],
-                ['title' => 'Three', 'source_url' => 'https://example.com/3', 'type' => 'html'],
-                ['title' => 'Four', 'source_url' => 'https://example.com/4', 'type' => 'html'],
-                ['title' => 'Five', 'source_url' => 'https://example.com/5', 'type' => 'html'],
-            ],
-            'source_mode' => 'local',
-            'confidence' => 0.85,
+            'answer' => 'I could not find the answer in the sources I checked.',
+            'citations' => [],
+            'source_mode' => 'none',
+            'confidence' => 0.0,
         ],
     ]);
 
-    $response = $this->withoutMiddleware()
-        ->postJson('/ask', [
-            'question' => 'What are this week\'s city updates?',
-            'city_id' => $city->id,
-        ]);
+    $response = $this->withoutMiddleware()->postJson('/ask', [
+        'question' => "What's going on this weekend?",
+        'city_id' => $city->id,
+    ]);
 
-    $response->assertOk();
-
-    expect($response->json('citations'))->toHaveCount(3);
+    $response->assertOk()
+        ->assertSeeText('Weekend Festival')
+        ->assertJsonPath('citations.0.source_url', 'https://example.com/events/weekend-festival');
 });
