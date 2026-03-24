@@ -8,6 +8,7 @@ use App\Models\ArticleIssueArea;
 use App\Models\City;
 use App\Models\Event;
 use App\Models\IssueArea;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -291,6 +292,75 @@ it('hides clearly national stories from the default dashboard feed while keeping
         ->assertDontSee('KWCH National Policy Update')
         ->assertSee('Wichita Water Main Project')
         ->assertSee('Unanalyzed Neighborhood Notice');
+});
+
+it('counts added today from visible feed items by ingestion time instead of source publish time', function () {
+    Carbon::setTestNow(Carbon::parse('2026-03-24 10:00:00', 'America/Chicago'));
+    config()->set('scout.driver', 'collection');
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $visibleFresh = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Freshly Added Permit Filing',
+        'summary' => 'Recently ingested permit update.',
+        'status' => 'published',
+        'content_type' => 'html',
+        'published_at' => Carbon::parse('2026-03-20 12:00:00', 'UTC'),
+    ]);
+
+    $visibleFresh->forceFill([
+        'created_at' => Carbon::parse('2026-03-24 14:00:00', 'UTC'),
+        'updated_at' => Carbon::parse('2026-03-24 14:00:00', 'UTC'),
+    ])->saveQuietly();
+
+    $hiddenNational = Article::create([
+        'city_id' => $city->id,
+        'title' => 'National Story Added Today',
+        'summary' => 'Should not affect visible feed stats.',
+        'status' => 'published',
+        'content_type' => 'html',
+        'published_at' => Carbon::parse('2026-03-24 12:00:00', 'UTC'),
+    ]);
+
+    $hiddenNational->forceFill([
+        'created_at' => Carbon::parse('2026-03-24 15:00:00', 'UTC'),
+        'updated_at' => Carbon::parse('2026-03-24 15:00:00', 'UTC'),
+    ])->saveQuietly();
+
+    ArticleAnalysis::create([
+        'article_id' => $hiddenNational->id,
+        'score_version' => 'crf_v1',
+        'status' => 'llm_done',
+        'coverage_scope' => 'national',
+        'local_relevance_score' => 0.1,
+        'locality_reason' => 'Not locally relevant.',
+    ]);
+
+    $olderVisible = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Older Visible Story',
+        'summary' => 'Visible but not added today.',
+        'status' => 'published',
+        'content_type' => 'html',
+        'published_at' => Carbon::parse('2026-03-10 12:00:00', 'UTC'),
+    ]);
+
+    $olderVisible->forceFill([
+        'created_at' => Carbon::parse('2026-03-23 14:00:00', 'UTC'),
+        'updated_at' => Carbon::parse('2026-03-23 14:00:00', 'UTC'),
+    ])->saveQuietly();
+
+    Livewire::actingAs(User::factory()->create())
+        ->test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->assertSee('Freshly Added Permit Filing')
+        ->assertDontSee('National Story Added Today')
+        ->assertSeeHtml('text-base font-semibold text-emerald-600">1</div>');
 });
 
 it('still returns clearly national stories in dashboard search results', function () {

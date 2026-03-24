@@ -8,106 +8,24 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
+/**
+ * IMPORTANT ARCHITECTURE RULES
+ *
+ * - This is the ONLY orchestration path for chat.
+ * - Do NOT add routing, analyzers, or branching logic here.
+ * - Do NOT introduce multiple answer pipelines.
+ * - ChatSourceSelector = retrieval only.
+ * - AnswerSynthesizer = single authenticated synthesis path.
+ *
+ * If behavior needs to change, update the prompt or synthesizer,
+ * NOT the orchestration flow.
+ */
 class AskService
 {
     public function __construct(
         private readonly ChatSourceSelector $selector,
         private readonly AnswerSynthesizer $synthesizer,
     ) {}
-
-    /**
-     * @return array{
-     *     answer: string,
-     *     citations: array<int, array{title: string, source_url: string, type: string}>,
-     *     city: array{id: int, name: string, slug: string},
-     *     meta: array{sources_used: int, pages_fetched: int, cache_hits: int}
-     * }
-     */
-    public function answer(
-        string $question,
-        ?int $cityId = null,
-        ?string $citySlug = null,
-    ): array {
-        $question = trim($question);
-        $city = $this->resolveCity($cityId, $citySlug);
-        $normalizedQuestion = $this->normalizeQuestionForCity($question, $city);
-        $sources = $this->selector->select($city->id, $normalizedQuestion);
-
-        if ($sources->isEmpty()) {
-            $fallback = $this->resolveFallbackResponse($city, $sources);
-            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, 0.0, 'fallback', false, 'sources_empty');
-
-            return $fallback;
-        }
-
-        try {
-            $answerPayload = $this->synthesizer->synthesize(
-                question: $normalizedQuestion,
-                city: $city,
-                sources: $sources,
-                originalQuestion: $question,
-            );
-        } catch (\Throwable) {
-            $fallback = $this->resolveFallbackResponse($city, $sources);
-            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, 0.0, 'fallback', false, 'synthesizer_exception');
-
-            return $fallback;
-        }
-
-        $answer = trim((string) ($answerPayload['answer'] ?? ''));
-        $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
-        $confidence = $this->normalizeConfidence($answerPayload['confidence'] ?? 0.0);
-        $answerIsNoAnswer = $this->isNoAnswerMessage($answer);
-        $answerIsRefusal = $this->isRefusalMessage($answer);
-
-        if ($answerIsRefusal) {
-            return [
-                'answer' => $answer,
-                'citations' => [],
-                'city' => [
-                    'id' => (int) $city->id,
-                    'name' => $city->name,
-                    'slug' => $city->slug,
-                ],
-                'meta' => [
-                    'sources_used' => $sources->count(),
-                    'pages_fetched' => 0,
-                    'cache_hits' => 0,
-                ],
-            ];
-        }
-
-        $sourcesSuppressed = false;
-
-        if (! $this->shouldSurfaceSources($confidence, $citations)) {
-            $sourcesSuppressed = $citations !== [];
-            $citations = [];
-        }
-
-        if ($answerIsNoAnswer || $answer === '') {
-            $fallback = $this->resolveFallbackResponse($city, $sources);
-            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'fallback', $sourcesSuppressed, 'no_grounded_answer');
-
-            return $fallback;
-        }
-
-        $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'answer', $sourcesSuppressed, null);
-
-        return [
-            'answer' => $answer,
-            'citations' => $citations,
-            'city' => [
-                'id' => (int) $city->id,
-                'name' => $city->name,
-                'slug' => $city->slug,
-            ],
-            'meta' => [
-                'sources_used' => $sources->count(),
-                'pages_fetched' => $this->pagesFetchedFromCitations($citations),
-                'cache_hits' => 0,
-            ],
-        ];
-    }
 
     /**
      * @return array{
@@ -154,64 +72,19 @@ class AskService
             return array_merge($fallback, ['conversation_id' => $conversationId]);
         }
 
-        $answer = trim((string) ($answerPayload['answer'] ?? ''));
-        $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
-        $confidence = $this->normalizeConfidence($answerPayload['confidence'] ?? 0.0);
-        $answerIsNoAnswer = $this->isNoAnswerMessage($answer);
-        $answerIsRefusal = $this->isRefusalMessage($answer);
         $resolvedConversationId = is_string($answerPayload['conversation_id'] ?? null)
             ? $answerPayload['conversation_id']
             : $conversationId;
 
-        if ($answerIsRefusal) {
-            return [
-                'answer' => $answer,
-                'citations' => [],
-                'city' => [
-                    'id' => (int) $city->id,
-                    'name' => $city->name,
-                    'slug' => $city->slug,
-                ],
-                'meta' => [
-                    'sources_used' => $sources->count(),
-                    'pages_fetched' => 0,
-                    'cache_hits' => 0,
-                ],
-                'conversation_id' => $resolvedConversationId,
-            ];
-        }
+        $final = $this->finalizeAnswer(
+            originalQuestion: $question,
+            normalizedQuestion: $normalizedQuestion,
+            city: $city,
+            sources: $sources,
+            answerPayload: $answerPayload,
+        );
 
-        $sourcesSuppressed = false;
-
-        if (! $this->shouldSurfaceSources($confidence, $citations)) {
-            $sourcesSuppressed = $citations !== [];
-            $citations = [];
-        }
-
-        if ($answerIsNoAnswer || $answer === '') {
-            $fallback = $this->resolveFallbackResponse($city, $sources);
-            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'fallback', $sourcesSuppressed, 'no_grounded_answer');
-
-            return array_merge($fallback, ['conversation_id' => $resolvedConversationId]);
-        }
-
-        $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, $confidence, 'answer', $sourcesSuppressed, null);
-
-        return [
-            'answer' => $answer,
-            'citations' => $citations,
-            'city' => [
-                'id' => (int) $city->id,
-                'name' => $city->name,
-                'slug' => $city->slug,
-            ],
-            'meta' => [
-                'sources_used' => $sources->count(),
-                'pages_fetched' => $this->pagesFetchedFromCitations($citations),
-                'cache_hits' => 0,
-            ],
-            'conversation_id' => $resolvedConversationId,
-        ];
+        return array_merge($final, ['conversation_id' => $resolvedConversationId]);
     }
 
     private function resolveCity(?int $cityId, ?string $citySlug): City
@@ -275,6 +148,68 @@ class AskService
         $normalized = preg_replace('/\bthis city\b/i', $cityName, $normalized) ?? $normalized;
 
         return preg_replace('/\s+/', ' ', trim($normalized)) ?? trim($normalized);
+    }
+
+    private function finalizeAnswer(
+        string $originalQuestion,
+        string $normalizedQuestion,
+        City $city,
+        Collection $sources,
+        array $answerPayload,
+    ): array {
+        $answer = trim((string) ($answerPayload['answer'] ?? ''));
+        $citations = $this->normalizeCitations($answerPayload['citations'] ?? []);
+        $confidence = $this->normalizeConfidence($answerPayload['confidence'] ?? 0.0);
+        $answerIsNoAnswer = $this->isNoAnswerMessage($answer);
+        $answerIsRefusal = $this->isRefusalMessage($answer);
+
+        if ($answerIsRefusal) {
+            return [
+                'answer' => $answer,
+                'citations' => [],
+                'city' => [
+                    'id' => (int) $city->id,
+                    'name' => $city->name,
+                    'slug' => $city->slug,
+                ],
+                'meta' => [
+                    'sources_used' => $sources->count(),
+                    'pages_fetched' => 0,
+                    'cache_hits' => 0,
+                ],
+            ];
+        }
+
+        $sourcesSuppressed = false;
+
+        if (! $this->shouldSurfaceSources($confidence, $citations)) {
+            $sourcesSuppressed = $citations !== [];
+            $citations = [];
+        }
+
+        if ($answer === '' || $answerIsNoAnswer) {
+            $fallback = $this->resolveFallbackResponse($city, $sources);
+            $this->logAnswerDiagnostics($originalQuestion, $normalizedQuestion, $city, $sources, $confidence, 'fallback', $sourcesSuppressed, 'no_grounded_answer');
+
+            return $fallback;
+        }
+
+        $this->logAnswerDiagnostics($originalQuestion, $normalizedQuestion, $city, $sources, $confidence, 'answer', $sourcesSuppressed, null);
+
+        return [
+            'answer' => $answer,
+            'citations' => $citations,
+            'city' => [
+                'id' => (int) $city->id,
+                'name' => $city->name,
+                'slug' => $city->slug,
+            ],
+            'meta' => [
+                'sources_used' => $sources->count(),
+                'pages_fetched' => $this->pagesFetchedFromCitations($citations),
+                'cache_hits' => 0,
+            ],
+        ];
     }
 
     /**
@@ -354,7 +289,7 @@ class AskService
             return false;
         }
 
-        return $confidence >= (float) config('chat.source_display_min_confidence', 0.85);
+        return $confidence >= (float) config('chat.source_display_min_confidence', 0.6);
     }
 
     private function normalizeConfidence(mixed $confidence): float
@@ -386,7 +321,6 @@ class AskService
         Log::info('chat.answer.diagnostics', [
             'city_id' => $city->id,
             'city_slug' => $city->slug,
-            'question' => $normalizedQuestion,
             'original_question' => $originalQuestion,
             'normalized_question' => $normalizedQuestion,
             'outcome' => $outcome,
@@ -408,13 +342,9 @@ class AskService
     private function isNoAnswerMessage(string $answer): bool
     {
         $normalized = mb_strtolower(trim($answer));
-        $target = mb_strtolower('I could not find the answer in the sources I checked.');
 
-        if ($normalized === '' || $target === '') {
-            return false;
-        }
-
-        return $normalized === $target || str_starts_with($normalized, $target);
+        return str_contains($normalized, 'could not find')
+            || str_contains($normalized, 'no information');
     }
 
     private function isRefusalMessage(string $answer): bool

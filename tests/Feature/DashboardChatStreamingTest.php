@@ -73,6 +73,47 @@ it('uses the streaming chat path for authenticated dashboard users and stores co
     expect(session('chat.conversation_id'))->toBe('conv_123');
 });
 
+it('uses the authenticated chat path even when the legacy streaming flag is disabled', function () {
+    config()->set('chat.streaming_enabled', false);
+    config()->set('chat.memory_enabled', true);
+
+    $city = City::create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    $service = mock(AskService::class);
+    $service->shouldReceive('answerStreamingForUser')
+        ->once()
+        ->andReturn([
+            'answer' => 'Trash pickup is on Monday.',
+            'citations' => [],
+            'city' => [
+                'id' => $city->id,
+                'name' => $city->name,
+                'slug' => $city->slug,
+            ],
+            'meta' => [
+                'sources_used' => 1,
+                'pages_fetched' => 0,
+                'cache_hits' => 0,
+            ],
+            'conversation_id' => 'conv_456',
+        ]);
+
+    $this->instance(AskService::class, $service);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->set('question', 'When is trash pickup?')
+        ->call('ask')
+        ->assertSet('conversationId', 'conv_456')
+        ->assertSee('Trash pickup is on Monday.');
+});
+
 it('keeps dashboard prompt chips on the streaming path without a fallback intent', function () {
     config()->set('chat.streaming_enabled', true);
     config()->set('chat.memory_enabled', true);

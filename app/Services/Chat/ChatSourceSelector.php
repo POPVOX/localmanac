@@ -6,6 +6,13 @@ use App\Models\ChatSource;
 use Illuminate\Support\Collection;
 use Throwable;
 
+/**
+ * IMPORTANT ARCHITECTURE RULES
+ *
+ * - This class is retrieval only.
+ * - Do NOT add answer routing, prompt branching, or synthesis strategy here.
+ * - It may rank and fall back across sources, but it must not decide how chat answers are produced.
+ */
 class ChatSourceSelector
 {
     /**

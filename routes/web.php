@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Controllers\ArticleSourceController;
-use App\Http\Controllers\AskController;
 use App\Livewire\Admin\ChatSources\Form as ChatSourcesForm;
 use App\Livewire\Admin\ChatSources\Index as ChatSourcesIndex;
 use App\Livewire\Admin\Cities\Form as CitiesForm;
@@ -22,7 +21,6 @@ use App\Livewire\Admin\Scrapers\Show as ScrapersShow;
 use App\Livewire\Dashboard as UserDashboard;
 use App\Livewire\Demo\ArticleExplainer;
 use App\Livewire\Demo\Calendar as DemoCalendar;
-use App\Livewire\Demo\Questions as DemoQuestions;
 use Illuminate\Support\Facades\Route;
 use Laravel\Fortify\Features;
 
@@ -31,9 +29,6 @@ Route::view('/', 'welcome')->name('home');
 Route::get('demo/calendar', DemoCalendar::class)->name('demo.calendar');
 Route::livewire('articles/{article}', ArticleExplainer::class)->name('articles.show');
 Route::get('articles/{article}/source', ArticleSourceController::class)->name('articles.source');
-Route::get('questions', DemoQuestions::class)->name('questions');
-Route::post('ask', AskController::class)->name('ask')->middleware('throttle:ask');
-
 Route::middleware(['auth'])->group(function () {
     Route::redirect('settings', 'settings/profile');
 

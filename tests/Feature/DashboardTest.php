@@ -26,7 +26,9 @@ test('verified users can visit the dashboard', function () {
     $response = $this->get(route('dashboard'));
     $response->assertOk()
         ->assertSee('data-testid="assistant-typing-indicator"', false)
-        ->assertDontSee('data-testid="new-conversation-button"', false);
+        ->assertDontSee('data-testid="new-conversation-button"', false)
+        ->assertSee('Live with real Wichita data! Try our AI assistant to get your Wichita questions answered.')
+        ->assertDontSee('Live with real Wichita data! Try the AI assistant above.');
 });
 
 test('dashboard scrolls to the start of the latest assistant answer', function () {
@@ -79,6 +81,37 @@ test('dashboard renders assistant markdown links as clickable anchors', function
         ->assertSeeHtml('href="https://www.wichita.gov/208/Economic-Development"')
         ->assertSeeHtml('target="_blank"')
         ->assertSeeHtml('rel="noopener noreferrer"');
+});
+
+test('dashboard no longer renders legacy answer resources', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    Livewire::test(\App\Livewire\Dashboard::class)
+        ->set('messages', [
+            [
+                'role' => 'assistant',
+                'content' => 'Use the citation below.',
+                'resources' => [
+                    [
+                        'type' => 'link',
+                        'label' => 'Legacy Resource Label',
+                        'value' => 'Legacy Resource Value',
+                        'url' => 'https://example.com/legacy-resource',
+                    ],
+                ],
+                'citations' => [
+                    [
+                        'title' => 'Current Citation',
+                        'source_url' => 'https://example.com/current-citation',
+                        'type' => 'html',
+                    ],
+                ],
+            ],
+        ])
+        ->assertSee('Current Citation')
+        ->assertDontSee('Legacy Resource Label')
+        ->assertDontSee('Legacy Resource Value');
 });
 
 test('regular users do not see admin dashboard link in dropdown', function () {

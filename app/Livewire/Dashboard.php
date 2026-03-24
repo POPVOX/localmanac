@@ -6,6 +6,7 @@ use App\Models\Article;
 use App\Models\City;
 use App\Models\Event;
 use App\Models\IssueArea;
+use App\Models\User;
 use App\Services\Chat\AskService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -71,27 +72,23 @@ class Dashboard extends Component
             $city = $this->resolveCity();
             $user = auth()->user();
 
-            if ($user && (bool) config('chat.streaming_enabled', true)) {
-                $response = app(AskService::class)->answerStreamingForUser(
-                    question: $question,
-                    citySelector: $city?->id,
-                    user: $user,
-                    conversationId: $this->storedConversationId(),
-                    onDelta: static fn (string $delta): null => null,
-                );
-
-                $this->conversationId = is_string($response['conversation_id'] ?? null)
-                    ? $response['conversation_id']
-                    : null;
-
-                $this->storeConversationId($this->conversationId);
-            } else {
-                $response = app(AskService::class)->answer(
-                    question: $question,
-                    cityId: $city?->id,
-                    citySlug: null,
-                );
+            if (! $user instanceof User) {
+                throw new \RuntimeException('Dashboard chat requires an authenticated user.');
             }
+
+            $response = app(AskService::class)->answerStreamingForUser(
+                question: $question,
+                citySelector: $city?->id,
+                user: $user,
+                conversationId: $this->storedConversationId(),
+                onDelta: static fn (string $delta): null => null,
+            );
+
+            $this->conversationId = is_string($response['conversation_id'] ?? null)
+                ? $response['conversation_id']
+                : null;
+
+            $this->storeConversationId($this->conversationId);
 
             $this->messages[] = [
                 'role' => 'assistant',
@@ -177,9 +174,10 @@ class Dashboard extends Component
         $articleFallbackChips = $this->articleFallbackChips();
 
         $articleBase = $this->articleQuery($city);
+        $visibleFeedBase = $this->applyRecentFeedFilters($this->articleQuery($city));
 
         $totalArticles = (clone $articleBase)->count();
-        $articlesAddedToday = $this->countArticlesForDate($articleBase, $timezone);
+        $articlesAddedToday = $this->countArticlesAddedToday($visibleFeedBase, $timezone);
 
         $articles = $this->dashboardArticles($city);
 
@@ -391,19 +389,13 @@ class Dashboard extends Component
         });
     }
 
-    private function countArticlesForDate(Builder $baseQuery, string $timezone): int
+    private function countArticlesAddedToday(Builder $baseQuery, string $timezone): int
     {
         $windowStartUtc = Carbon::now($timezone)->startOfDay()->setTimezone('UTC');
         $windowEndUtc = Carbon::now($timezone)->endOfDay()->setTimezone('UTC');
 
         return (clone $baseQuery)
-            ->where(function (Builder $query) use ($windowStartUtc, $windowEndUtc): void {
-                $query->whereBetween('published_at', [$windowStartUtc, $windowEndUtc])
-                    ->orWhere(function (Builder $nested) use ($windowStartUtc, $windowEndUtc): void {
-                        $nested->whereNull('published_at')
-                            ->whereBetween('created_at', [$windowStartUtc, $windowEndUtc]);
-                    });
-            })
+            ->whereBetween('created_at', [$windowStartUtc, $windowEndUtc])
             ->count();
     }
 
