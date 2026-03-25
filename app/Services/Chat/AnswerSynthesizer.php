@@ -124,6 +124,10 @@ class AnswerSynthesizer
                 (bool) ($eventContext['intent'] ?? false),
             );
             $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
+
+            if ($citations !== []) {
+                $confidence = max($confidence, $this->deterministicSourceConfidence());
+            }
         }
 
         if ($answer !== ''
