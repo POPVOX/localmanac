@@ -220,12 +220,173 @@ it('formats updates-mode items as clean readable sentences without truncated fra
     );
 
     expect($result['answer'])
-        ->toContain('Here are the most important local updates I found from the last 7 days:')
+        ->toContain('Here are the most important local updates I found for this week:')
         ->toContain('- Mar 24: Water Main Repair Update, crews closed Main Street near City Hall for water-line repairs, which means drivers should use Douglas or Market until the work is complete.')
         ->not->toContain('...')
         ->not->toContain('(,')
         ->not->toContain('Update (')
         ->not->toContain('City Hall (');
+
+    Carbon::setTestNow();
+});
+
+it('only selects updates inside the requested relative window before summarization', function (string $query, array $includedTitles, array $excludedTitles, int $expectedSourcesUsed) {
+    Carbon::setTestNow(Carbon::parse('2026-03-24 15:00:00', 'UTC'));
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $articles = [
+        [
+            'title' => 'Today Update',
+            'summary' => 'A city update was posted today.',
+            'published_at' => '2026-03-24 10:00:00',
+            'url' => 'https://example.com/updates/today',
+        ],
+        [
+            'title' => 'Two Days Ago Update',
+            'summary' => 'An update was posted two days ago.',
+            'published_at' => '2026-03-22 11:00:00',
+            'url' => 'https://example.com/updates/two-days-ago',
+        ],
+        [
+            'title' => 'Six Days Ago Update',
+            'summary' => 'An update was posted six days ago.',
+            'published_at' => '2026-03-18 12:00:00',
+            'url' => 'https://example.com/updates/six-days-ago',
+        ],
+        [
+            'title' => 'Twelve Days Ago Update',
+            'summary' => 'An update was posted twelve days ago.',
+            'published_at' => '2026-03-12 09:00:00',
+            'url' => 'https://example.com/updates/twelve-days-ago',
+        ],
+        [
+            'title' => 'Sixteen Days Ago Update',
+            'summary' => 'An update was posted sixteen days ago.',
+            'published_at' => '2026-03-08 09:00:00',
+            'url' => 'https://example.com/updates/sixteen-days-ago',
+        ],
+    ];
+
+    foreach ($articles as $articleData) {
+        $article = Article::factory()->create([
+            'city_id' => $city->id,
+            'title' => $articleData['title'],
+            'summary' => $articleData['summary'],
+            'published_at' => Carbon::parse($articleData['published_at'], 'UTC'),
+            'canonical_url' => $articleData['url'],
+        ]);
+
+        ArticleBody::factory()->create([
+            'article_id' => $article->id,
+            'cleaned_text' => $articleData['summary'],
+        ]);
+
+        ArticleAnalysis::factory()->create([
+            'article_id' => $article->id,
+            'coverage_scope' => 'local',
+            'local_relevance_score' => 0.9,
+            'civic_relevance_score' => 0.9,
+            'final_scores' => [
+                'agency' => 0.8,
+                'timeliness' => 0.9,
+            ],
+        ]);
+
+        ArticleSource::create([
+            'city_id' => $city->id,
+            'article_id' => $article->id,
+            'organization_id' => null,
+            'source_url' => $articleData['url'],
+            'source_type' => 'html',
+            'source_uid' => null,
+            'accessed_at' => Carbon::parse($articleData['published_at'], 'UTC'),
+        ]);
+    }
+
+    $result = app(ChatUpdatesAnswerService::class)->answer($query, $city);
+
+    foreach ($includedTitles as $title) {
+        expect($result['answer'])->toContain($title);
+    }
+
+    foreach ($excludedTitles as $title) {
+        expect($result['answer'])->not->toContain($title);
+    }
+
+    $citationTitles = collect($result['citations'])->pluck('title')->all();
+
+    expect($result['meta']['sources_used'])->toBe($expectedSourcesUsed);
+
+    foreach ($excludedTitles as $title) {
+        expect($citationTitles)->not->toContain($title);
+    }
+
+    Carbon::setTestNow();
+})->with([
+    'last 5 days' => [
+        'query' => 'Summarize local updates from the last 5 days.',
+        'includedTitles' => ['Today Update', 'Two Days Ago Update'],
+        'excludedTitles' => ['Six Days Ago Update', 'Twelve Days Ago Update', 'Sixteen Days Ago Update'],
+        'expectedSourcesUsed' => 2,
+    ],
+    'last 7 days' => [
+        'query' => 'Summarize local updates from the last 7 days.',
+        'includedTitles' => ['Today Update', 'Two Days Ago Update', 'Six Days Ago Update'],
+        'excludedTitles' => ['Twelve Days Ago Update', 'Sixteen Days Ago Update'],
+        'expectedSourcesUsed' => 3,
+    ],
+    'last 14 days' => [
+        'query' => 'Summarize local updates from the last 14 days.',
+        'includedTitles' => ['Today Update', 'Two Days Ago Update', 'Six Days Ago Update'],
+        'excludedTitles' => ['Sixteen Days Ago Update'],
+        'expectedSourcesUsed' => 3,
+    ],
+]);
+
+it('returns the normal fallback when no updates fall inside the resolved relative window', function () {
+    Carbon::setTestNow(Carbon::parse('2026-03-24 15:00:00', 'UTC'));
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $article = Article::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Six Days Ago Update',
+        'summary' => 'An update was posted six days ago.',
+        'published_at' => Carbon::parse('2026-03-18 12:00:00', 'UTC'),
+        'canonical_url' => 'https://example.com/updates/six-days-ago',
+    ]);
+
+    ArticleBody::factory()->create([
+        'article_id' => $article->id,
+        'cleaned_text' => 'An update was posted six days ago.',
+    ]);
+
+    ArticleAnalysis::factory()->create([
+        'article_id' => $article->id,
+        'coverage_scope' => 'local',
+        'local_relevance_score' => 0.9,
+        'civic_relevance_score' => 0.9,
+        'final_scores' => [
+            'agency' => 0.8,
+            'timeliness' => 0.9,
+        ],
+    ]);
+
+    $result = app(ChatUpdatesAnswerService::class)->answer(
+        'Summarize local updates from the last 5 days.',
+        $city,
+    );
+
+    expect($result['answer'])->toBe('I could not find enough recent local updates in the available article sources from the last 5 days.')
+        ->and($result['citations'])->toBe([])
+        ->and($result['meta']['sources_used'])->toBe(0);
 
     Carbon::setTestNow();
 });

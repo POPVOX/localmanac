@@ -26,24 +26,24 @@ class ChatUpdatesAnswerService
      */
     public function answer(string $question, City $city): array
     {
-        $windowDays = $this->updatesWindowDays($question);
-        $articles = $this->candidateArticles($city, $windowDays, $question)
-            ->sortByDesc(fn (Article $article): float => $this->articleScore($article, $question, $windowDays))
+        $window = $this->resolveUpdatesWindow($question);
+        $articles = $this->candidateArticles($city, $window, $question)
+            ->sortByDesc(fn (Article $article): float => $this->articleScore($article, $question, $window['window_days']))
             ->values();
 
         $selected = $articles
-            ->filter(fn (Article $article): bool => $this->articleScore($article, $question, $windowDays) > 0)
+            ->filter(fn (Article $article): bool => $this->articleScore($article, $question, $window['window_days']) > 0)
             ->take(self::SUMMARY_LIMIT)
             ->values();
 
         if ($selected->isEmpty()) {
-            return $this->fallbackResponse($city, $question, $windowDays);
+            return $this->fallbackResponse($city, $question, $window['label']);
         }
 
         $citations = $this->citations($selected);
 
         return [
-            'answer' => $this->buildAnswer($selected, $question, $windowDays),
+            'answer' => $this->buildAnswer($selected, $question, $window['label']),
             'citations' => $citations,
             'city' => [
                 'id' => (int) $city->id,
@@ -59,21 +59,24 @@ class ChatUpdatesAnswerService
     }
 
     /**
+     * @param  array{
+     *     start_at: Carbon,
+     *     end_at: Carbon,
+     *     label: string,
+     *     window_days: int
+     * }  $window
      * @return Collection<int, Article>
      */
-    private function candidateArticles(City $city, int $windowDays, string $question): Collection
+    private function candidateArticles(City $city, array $window, string $question): Collection
     {
-        $lookbackDays = max($windowDays * 3, 21);
-        $cutoff = now()->subDays($lookbackDays);
-
         return Article::query()
             ->where('city_id', $city->id)
             ->where('status', 'published')
-            ->where(function (Builder $builder) use ($cutoff): void {
-                $builder->where('published_at', '>=', $cutoff)
-                    ->orWhere(function (Builder $nested) use ($cutoff): void {
+            ->where(function (Builder $builder) use ($window): void {
+                $builder->whereBetween('published_at', [$window['start_at'], $window['end_at']])
+                    ->orWhere(function (Builder $nested) use ($window): void {
                         $nested->whereNull('published_at')
-                            ->where('created_at', '>=', $cutoff);
+                            ->whereBetween('created_at', [$window['start_at'], $window['end_at']]);
                     });
             })
             ->where(function (Builder $builder): void {
@@ -167,11 +170,11 @@ class ChatUpdatesAnswerService
     /**
      * @param  Collection<int, Article>  $articles
      */
-    private function buildAnswer(Collection $articles, string $question, int $windowDays): string
+    private function buildAnswer(Collection $articles, string $question, string $windowLabel): string
     {
         $intro = $this->isServiceAlertQuery($question)
             ? 'Here are the most relevant local service updates I found right now:'
-            : 'Here are the most important local updates I found from the last '.$windowDays.' days:';
+            : 'Here are the most important local updates I found '.$this->updatesWindowLabelForAnswer($windowLabel).':';
 
         $lines = $articles
             ->map(fn (Article $article): string => $this->formatUpdateLine($article))
@@ -397,27 +400,119 @@ class ChatUpdatesAnswerService
         )));
     }
 
-    private function updatesWindowDays(string $question): int
+    /**
+     * @return array{
+     *     start_at: Carbon,
+     *     end_at: Carbon,
+     *     label: string,
+     *     window_days: int
+     * }
+     */
+    private function resolveUpdatesWindow(string $question): array
     {
         $normalized = mb_strtolower($question);
+        $now = now();
 
         if (preg_match('/\b(?:last|past)\s+(\d{1,2})\s+days?\b/u', $normalized, $matches) === 1) {
-            return max(1, (int) ($matches[1] ?? 7));
+            $days = max(1, (int) ($matches[1] ?? 7));
+
+            return $this->rollingUpdatesWindow($now, $days, 'last '.$days.' days');
         }
 
         if (preg_match('/\b(?:last|past)\s+(\d{1,2})\s+weeks?\b/u', $normalized, $matches) === 1) {
-            return max(1, (int) ($matches[1] ?? 1)) * 7;
+            $weeks = max(1, (int) ($matches[1] ?? 1));
+
+            return $this->rollingUpdatesWindow($now, $weeks * 7, 'last '.$weeks.' weeks');
         }
 
-        if (preg_match('/\b(?:this|last|past)\s+week\b/u', $normalized) === 1) {
-            return 7;
+        if (preg_match('/\bpast\s+week\b/u', $normalized) === 1) {
+            return $this->rollingUpdatesWindow($now, 7, 'past week');
         }
 
-        if (preg_match('/\b(?:this|last|past)\s+month\b/u', $normalized) === 1) {
-            return 30;
+        if (preg_match('/\bthis\s+week\b/u', $normalized) === 1) {
+            return $this->boundedUpdatesWindow(
+                $now->copy()->startOfWeek(Carbon::MONDAY),
+                $now->copy(),
+                'this week',
+            );
         }
 
-        return $this->isServiceAlertQuery($question) ? 14 : 7;
+        if (preg_match('/\brecently\b/u', $normalized) === 1) {
+            return $this->rollingUpdatesWindow($now, 7, 'recently');
+        }
+
+        if (preg_match('/\bright\s+now\b/u', $normalized) === 1) {
+            return $this->rollingUpdatesWindow($now, 3, 'right now');
+        }
+
+        if (preg_match('/\bthis\s+month\b/u', $normalized) === 1) {
+            return $this->boundedUpdatesWindow(
+                $now->copy()->startOfMonth(),
+                $now->copy(),
+                'this month',
+            );
+        }
+
+        if (preg_match('/\b(?:last|past)\s+month\b/u', $normalized) === 1) {
+            return $this->rollingUpdatesWindow($now, 30, 'last 30 days');
+        }
+
+        return $this->rollingUpdatesWindow(
+            $now,
+            $this->isServiceAlertQuery($question) ? 14 : 7,
+            $this->isServiceAlertQuery($question) ? 'last 14 days' : 'last 7 days',
+        );
+    }
+
+    /**
+     * @return array{
+     *     start_at: Carbon,
+     *     end_at: Carbon,
+     *     label: string,
+     *     window_days: int
+     * }
+     */
+    private function rollingUpdatesWindow(Carbon $now, int $days, string $label): array
+    {
+        $days = max(1, $days);
+        $start = $now->copy()->subDays($days - 1)->startOfDay();
+
+        return $this->boundedUpdatesWindow($start, $now->copy(), $label);
+    }
+
+    /**
+     * @return array{
+     *     start_at: Carbon,
+     *     end_at: Carbon,
+     *     label: string,
+     *     window_days: int
+     * }
+     */
+    private function boundedUpdatesWindow(Carbon $start, Carbon $end, string $label): array
+    {
+        if ($end->lessThan($start)) {
+            [$start, $end] = [$end, $start];
+        }
+
+        return [
+            'start_at' => $start,
+            'end_at' => $end,
+            'label' => $label,
+            'window_days' => max(1, $start->diffInDays($end) + 1),
+        ];
+    }
+
+    private function updatesWindowLabelForAnswer(string $label): string
+    {
+        if ($label === 'recently' || $label === 'right now') {
+            return $label;
+        }
+
+        if (str_starts_with($label, 'last ') || str_starts_with($label, 'past ')) {
+            return 'from the '.$label;
+        }
+
+        return 'for '.$label;
     }
 
     private function isServiceAlertQuery(string $question): bool
@@ -472,11 +567,11 @@ class ChatUpdatesAnswerService
      *     meta: array{sources_used: int, pages_fetched: int, cache_hits: int}
      * }
      */
-    private function fallbackResponse(City $city, string $question, int $windowDays): array
+    private function fallbackResponse(City $city, string $question, string $windowLabel): array
     {
         $answer = $this->isServiceAlertQuery($question)
             ? 'I could not find active local service alerts or disruptions in the available article sources right now.'
-            : 'I could not find enough recent local updates in the available article sources for the last '.$windowDays.' days.';
+            : 'I could not find enough recent local updates in the available article sources '.$this->updatesWindowLabelForAnswer($windowLabel).'.';
 
         return [
             'answer' => $answer,
