@@ -37,6 +37,7 @@ Implemented HTML profile routing:
 5. Deduplicator resolves create/update target.
 6. ArticleWriter persists article/body/source records.
 7. Document-like content may dispatch extraction jobs.
+8. Enrichment job generates article chunk embeddings via `ArticleChunkEmbedder` (chunks body text, generates pgvector embeddings for vector search).
 
 ## Event Ingestion
 
@@ -135,6 +136,12 @@ Event commands:
 
 - `calendar:run`
 - `calendar:schedule`
+
+Chat commands:
+
+- `chat:ingest-sources` — crawl and embed chat source pages
+- `chat:backfill-article-chunks` — backfill article chunk embeddings (`--force`, `--batch-size`)
+- `chat:purge-navigation-pages` — remove navigation/hub pages from chunk index (`--dry-run`)
 
 Support commands:
 

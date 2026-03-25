@@ -28,6 +28,7 @@ Localmanac provides city-scoped civic awareness by combining:
 - `claims`, `article_entities`, `article_issue_areas`, `keywords`, `article_keywords`
 - `article_analyses`, `civic_actions`, `process_timeline_items`, `article_explainers`
 - `chat_sources`, `chat_source_pages`, `chat_source_chunks`
+- `article_chunks`
 - `site_feedback`
 
 ## Authorization Model
@@ -51,6 +52,11 @@ Both gates resolve through `User::isSuperAdmin()`.
 - Scout is used for article search and chat-source retrieval.
 - Dashboard article search uses Scout candidate retrieval and deterministic ordering, with SQL fallback when Scout fails.
 - Chat source selection uses Scout first, then priority fallback from DB.
+- Chat retrieval uses Laravel AI SDK for vector similarity search (`whereVectorSimilarTo`) across both chat source chunks and article chunks.
+- Semantic reranking uses the SDK's `Reranking::of()->rerank()` with Cohere/Jina providers.
+- Article bodies are chunked and embedded with pgvector (1536-dimension text-embedding-3-small) for vector search.
+- Query expansion generates sub-queries for broad questions via LLM before retrieval.
+- Navigation page filtering removes hub/index pages from the chunk index during crawl and via purge command.
 
 ## Dashboard Article Discovery
 

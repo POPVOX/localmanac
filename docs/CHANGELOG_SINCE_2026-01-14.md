@@ -62,3 +62,28 @@ User impact:
 
 - Safer scraper onboarding and fewer broken scraper configs
 - Better reliability for JS-heavy or challenge-protected sources
+
+## 2026-03: SDK-Native Retrieval Pipeline
+
+- Replaced raw SQL vector search with Laravel AI SDK `whereVectorSimilarTo` for both chat source chunks and article chunks
+- Replaced 200+ lines of manual reranking heuristics with SDK `Reranking::of()->rerank()` using Cohere/Jina providers
+- Added `article_chunks` table with pgvector embeddings so articles are discoverable via vector similarity search
+- Added `ArticleChunkEmbedder` service with automatic chunk generation during article enrichment
+- Added `QueryExpander` agent for LLM-driven query expansion on broad questions
+- Added `AnswerQualityJudge` agent for automated answer classification (useful, no_answer, refusal, vague)
+- Added `NavigationPageClassifier` service to filter hub/index pages from the chunk index
+- Added `chat:backfill-article-chunks` command for one-time article chunk backfill
+- Added `chat:purge-navigation-pages` command to remove navigation pages from the index
+- Removed `ChatUpdatesAnswerService` routing — all questions now flow through a single retrieval-and-synthesis path
+- Removed procedural answer constraining that was producing worse answers than the LLM
+- Added Google Maps address linking in LLM answer instructions
+- Added reranking, query expansion, and article chunks configuration entries
+
+User impact:
+
+- Articles are now findable via semantic search even when vocabulary doesn't match
+- Broad questions like "service alerts" or "what's new" produce better results through query expansion
+- Search results are semantically reranked instead of using keyword-based scoring heuristics
+- Navigation/hub pages no longer pollute retrieval results
+- Street addresses in answers link to Google Maps
+- Answer quality is monitored via automated classification logging
