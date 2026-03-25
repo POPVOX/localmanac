@@ -62,7 +62,7 @@ test('dashboard shows task-oriented chat prompt chips', function () {
     $response->assertOk()
         ->assertSee("What's new this week?")
         ->assertSee('Upcoming meetings')
-        ->assertSee('New permits & projects')
+        ->assertSee('How do I...?')
         ->assertSee('Service alerts');
 });
 
@@ -70,7 +70,7 @@ test('applying a chip prompt fills the composer question', function () {
     $user = User::factory()->create();
     $this->actingAs($user);
 
-    $prompt = 'What new permits, rezonings, or major development projects were recently filed or approved in Wichita? Include status and key locations.';
+    $prompt = 'How do I apply for a building permit in Wichita? What documents do I need and where do I submit the application?';
 
     Livewire::test(\App\Livewire\Dashboard::class)
         ->call('applyPrompt', $prompt)

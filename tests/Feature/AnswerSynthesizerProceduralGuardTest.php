@@ -13,25 +13,38 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(RefreshDatabase::class);
 
 it('does not classify event-style meeting questions as procedural questions', function () {
-    $retriever = app(\App\Services\Chat\ChatSourceRetriever::class);
-    $method = new ReflectionMethod(\App\Services\Chat\ChatSourceRetriever::class, 'isProceduralQuestion');
+    $synthesizer = app(AnswerSynthesizer::class);
+    $method = new ReflectionMethod(AnswerSynthesizer::class, 'isProceduralQuestion');
     $method->setAccessible(true);
 
     expect($method->invoke(
-        $retriever,
+        $synthesizer,
         'What city council, board, and public meetings are coming up in Wichita in the next 14 days? Include dates, times, and where to find the agenda.'
     ))->toBeFalse()
-        ->and($method->invoke($retriever, 'How do I get a demolition permit?'))->toBeTrue();
+        ->and($method->invoke($synthesizer, 'How do I get a demolition permit?'))->toBeTrue();
 });
 
-it('does not trigger procedural constraining since it has been removed from AnswerSynthesizer', function () {
-    expect(method_exists(AnswerSynthesizer::class, 'shouldConstrainProceduralAnswer'))->toBeFalse()
-        ->and(method_exists(AnswerSynthesizer::class, 'narrowProceduralAnswerFromEvidence'))->toBeFalse()
-        ->and(method_exists(AnswerSynthesizer::class, 'shouldRejectProceduralEventAnswer'))->toBeFalse()
-        ->and(method_exists(AnswerSynthesizer::class, 'shouldRejectProceduralAnswerForNonProceduralQuery'))->toBeFalse();
+it('does not trigger the procedural guard for event-intent meeting queries', function () {
+    $synthesizer = app(AnswerSynthesizer::class);
+    $method = new ReflectionMethod(AnswerSynthesizer::class, 'shouldConstrainProceduralAnswer');
+    $method->setAccessible(true);
+
+    $question = 'What city council, board, and public meetings are coming up in Wichita in the next 14 days? Include dates, times, and where to find the agenda.';
+    $answer = "1. Submit the application.\n2. Wait for permit review.\n3. Schedule the final inspection.";
+    $evidence = [
+        [
+            'title' => 'Agenda Center • Wichita, KS • CivicEngage',
+            'snippet' => 'City council meeting agendas are posted in the Agenda Center before each meeting.',
+            'source_url' => 'https://www.wichita.gov/AgendaCenter/Wichita-City-Council-Meetings-34',
+            'score' => 9.5,
+        ],
+    ];
+
+    expect($method->invoke($synthesizer, $question, $answer, $evidence, $evidence, true))->toBeFalse()
+        ->and($method->invoke($synthesizer, 'How do I get a demolition permit?', $answer, $evidence, $evidence, false))->toBeTrue();
 });
 
-it('passes LLM answer through single synthesis path without procedural constraining', function () {
+it('narrows procedural answers when ordinance-style evidence does not support a complete process', function () {
     config()->set('chat.vector_enabled', false);
     config()->set('chat.tools.web_search.enabled', false);
     config()->set('chat.tools.similarity.enabled', false);
@@ -122,10 +135,13 @@ it('passes LLM answer through single synthesis path without procedural constrain
     );
 
     $answer = $result['answer'];
+    $sentences = array_values(array_filter(
+        preg_split('/(?<=[.?!])\s+/u', trim($answer)) ?: [],
+        fn (string $sentence): bool => $sentence !== ''
+    ));
 
     expect($answer)
-        ->not->toContain('permit or formal review may be required')
-        ->not->toContain('The full step-by-step process is not clearly described')
+        ->toContain('Submit the application')
         ->and($result['citations'])->not->toBeEmpty();
 });
 
@@ -227,7 +243,7 @@ it('returns a clean civic meetings fallback when only unrelated library events a
         ->and($result['citations'])->toBe([]);
 });
 
-it('does not force local event override for meeting queries when LLM provides a grounded answer', function () {
+it('uses filtered local meeting results for the final answer instead of grounded unrelated source text', function () {
     config()->set('chat.vector_enabled', false);
     config()->set('chat.tools.web_search.enabled', false);
     config()->set('chat.tools.similarity.enabled', false);
@@ -308,7 +324,14 @@ it('does not force local event override for meeting queries when LLM provides a 
     );
 
     expect($result['answer'])
-        ->not->toContain('permit or formal review may be required');
+        ->toContain('Wichita City Council Workshop')
+        ->toContain('Planning Commission Regular Meeting')
+        ->not->toContain('Comedy Open Mic')
+        ->not->toContain('Wichita Thunder vs. Kansas City Mavericks')
+        ->and(collect($result['citations'])->pluck('source_url')->all())
+        ->toContain('https://www.wichita.gov/AgendaCenter/Wichita-City-Council-Meetings-34')
+        ->toContain('https://www.wichita.gov/AgendaCenter/planning-commission')
+        ->not->toContain('https://example.com/events/weekend-roundup');
 });
 
 it('does not use the procedural fallback for service alerts queries', function () {

@@ -568,8 +568,8 @@ class Dashboard extends Component
                 'prompt' => __('What city council, board, and public meetings are coming up in :city in the next 14 days? Include dates, times, and where to find the agenda.', ['city' => $cityName]),
             ],
             [
-                'label' => __('New permits & projects'),
-                'prompt' => __('What new permits, rezonings, or major development projects were recently filed or approved in :city? Include status and key locations.', ['city' => $cityName]),
+                'label' => __('How do I...?'),
+                'prompt' => __('How do I apply for a building permit in :city? What documents do I need and where do I submit the application?', ['city' => $cityName]),
             ],
             [
                 'label' => __('Service alerts'),
