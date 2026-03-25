@@ -16,10 +16,11 @@ use RuntimeException;
  * IMPORTANT ARCHITECTURE RULES
  *
  * - This is the ONLY orchestration path for chat.
- * - Do NOT add routing, analyzers, or branching logic here.
- * - Do NOT introduce multiple answer pipelines.
- * - ChatSourceSelector = retrieval only.
- * - AnswerSynthesizer = single authenticated synthesis path.
+ * - Keep one public chat entry point, even when evidence routes internally.
+ * - Keep routing limited to the documented evidence modes: reference, events, updates.
+ * - Do NOT introduce analyzer sprawl or extra public pipelines.
+ * - ChatSourceSelector = retrieval only for reference/event source selection.
+ * - AnswerSynthesizer = authenticated synthesis for reference and event answers.
  *
  * If behavior needs to change, update the prompt or synthesizer,
  * NOT the orchestration flow.
@@ -30,6 +31,8 @@ class AskService
         private readonly ChatSourceSelector $selector,
         private readonly AnswerSynthesizer $synthesizer,
         private readonly ?ConversationStore $conversationStore = null,
+        private readonly ?ChatEvidenceModeClassifier $evidenceModeClassifier = null,
+        private readonly ?ChatUpdatesAnswerService $updatesAnswerService = null,
     ) {}
 
     /**
@@ -52,9 +55,21 @@ class AskService
         $city = $this->resolveCityFromSelector($citySelector);
         $normalizedQuestion = $this->normalizeQuestionForCity($question, $city);
         $effectiveConversationId = $this->resolveConversationIdForQuestion($question, $conversationId);
+        $evidenceMode = $this->evidenceModeClassifier()->classify($normalizedQuestion);
+
+        if ($evidenceMode === ChatEvidenceModeClassifier::UPDATES) {
+            $response = $this->updatesAnswerService()->answer($normalizedQuestion, $city);
+
+            if (trim((string) ($response['answer'] ?? '')) !== '') {
+                $onDelta((string) $response['answer']);
+            }
+
+            return array_merge($response, ['conversation_id' => $effectiveConversationId]);
+        }
+
         $sources = $this->selector->select($city->id, $normalizedQuestion);
 
-        if ($sources->isEmpty()) {
+        if ($sources->isEmpty() && $evidenceMode === ChatEvidenceModeClassifier::REFERENCE) {
             $fallback = $this->resolveFallbackResponse($city, $sources);
             $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, 0.0, 'fallback', false, 'sources_empty');
 
@@ -91,6 +106,16 @@ class AskService
         );
 
         return array_merge($final, ['conversation_id' => $resolvedConversationId]);
+    }
+
+    private function evidenceModeClassifier(): ChatEvidenceModeClassifier
+    {
+        return $this->evidenceModeClassifier ?? app(ChatEvidenceModeClassifier::class);
+    }
+
+    private function updatesAnswerService(): ChatUpdatesAnswerService
+    {
+        return $this->updatesAnswerService ?? app(ChatUpdatesAnswerService::class);
     }
 
     private function resolveCity(?int $cityId, ?string $citySlug): City

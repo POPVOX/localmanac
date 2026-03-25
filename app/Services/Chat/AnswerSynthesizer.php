@@ -308,10 +308,9 @@ class AnswerSynthesizer
     /**
      * @param  Collection<int, \App\Models\ChatSource>  $sources
      * @param  array<string, mixed>|null  $eventContext
-     * @param  array<int, array<string, mixed>>  $seedEvidence
      * @return array<int, \Laravel\Ai\Contracts\Tool|\Laravel\Ai\Providers\Tools\ProviderTool>
      */
-    private function buildTools(City $city, Collection $sources, string $question, ?array $eventContext = null, array $seedEvidence = []): array
+    private function buildTools(City $city, Collection $sources, string $question, ?array $eventContext = null): array
     {
         $eventContext = $eventContext ?? $this->resolveEventContext($question, $city);
         $tools = [];
@@ -494,58 +493,6 @@ class AnswerSynthesizer
     }
 
     /**
-     * @param  Collection<int, mixed>  $metaCitations
-     * @return array<int, array{title: string, source_url: string, type: string}>
-     */
-    private function citationsFromMeta(Collection $metaCitations): array
-    {
-        return collect($metaCitations)
-            ->map(function ($citation): ?array {
-                $url = trim((string) ($citation->url ?? ''));
-
-                if ($url === '') {
-                    return null;
-                }
-
-                $title = trim((string) ($citation->title ?? 'Source')) ?: 'Source';
-
-                if (! $this->chatSourceGuard->isAllowedCitation($url, $title)) {
-                    return null;
-                }
-
-                return [
-                    'title' => $title,
-                    'source_url' => $url,
-                    'type' => $this->inferCitationType($url),
-                ];
-            })
-            ->filter()
-            ->unique('source_url')
-            ->values()
-            ->all();
-    }
-
-    /**
-     * @param  Collection<int, mixed>  $toolResults
-     * @return array<int, array{title: string, source_url: string, type: string}>
-     */
-    private function citationsFromToolResults(Collection $toolResults): array
-    {
-        $toolContext = [
-            'tool_results' => $toolResults
-                ->map(fn ($toolResult): array => [
-                    'name' => (string) ($toolResult->name ?? ''),
-                    'arguments' => $toolResult->arguments ?? [],
-                    'result' => $this->normalizeToolResultPayload($toolResult->result ?? null),
-                ])
-                ->values()
-                ->all(),
-        ];
-
-        return $this->citationsFromToolContext($toolContext);
-    }
-
-    /**
      * @param  Collection<int, mixed>  $events
      * @return array<string, mixed>
      */
@@ -669,10 +616,9 @@ class AnswerSynthesizer
     /**
      * @param  Collection<int, \App\Models\ChatSource>  $sources
      * @param  array<string, mixed>  $eventContext
-     * @param  array<string, mixed>  $proceduralContext
      * @return array<int, string>
      */
-    private function webAllowedDomains(Collection $sources, City $city, array $eventContext, array $proceduralContext = []): array
+    private function webAllowedDomains(Collection $sources, City $city, array $eventContext): array
     {
         return (bool) ($eventContext['intent'] ?? false)
             ? $this->eventWebAllowedDomains($city)
@@ -681,9 +627,8 @@ class AnswerSynthesizer
 
     /**
      * @param  array<string, mixed>  $eventContext
-     * @param  array<string, mixed>  $proceduralContext
      */
-    private function isWebSearchEnabledForQuestion(string $question, array $eventContext = [], array $proceduralContext = []): bool
+    private function isWebSearchEnabledForQuestion(string $question, array $eventContext = []): bool
     {
         if (! (bool) config('chat.tools.web_search.enabled', true)) {
             return false;
@@ -729,104 +674,6 @@ class AnswerSynthesizer
         }
 
         return preg_match('/\b(i|my|me|need|required|requirements?|documents?|fees?|cost|where|when|how|can i|do i|should i|get)\b/u', $normalized) === 1;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $seedEvidence
-     */
-    private function evidenceLooksGeneric(array $seedEvidence): bool
-    {
-        if ($seedEvidence === []) {
-            return true;
-        }
-
-        $proceduralHits = 0;
-        $genericHits = 0;
-
-        foreach ($seedEvidence as $item) {
-            $haystack = mb_strtolower(implode(' ', [
-                (string) ($item['title'] ?? ''),
-                (string) ($item['snippet'] ?? ''),
-                (string) ($item['source_url'] ?? ''),
-            ]));
-
-            foreach ($this->proceduralSignals() as $signal) {
-                if (str_contains($haystack, $signal)) {
-                    $proceduralHits++;
-                }
-            }
-
-            foreach ($this->genericEvidenceSignals() as $signal) {
-                if (str_contains($haystack, $signal)) {
-                    $genericHits++;
-                }
-            }
-        }
-
-        return $proceduralHits < 3 || $genericHits > $proceduralHits;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $seedEvidence
-     */
-    private function evidenceLooksOffTarget(string $question, array $seedEvidence): bool
-    {
-        if ($seedEvidence === []) {
-            return true;
-        }
-
-        $focusTerms = $this->proceduralFocusTerms($question);
-
-        if ($focusTerms === []) {
-            return false;
-        }
-
-        $matchingEvidence = collect($seedEvidence)
-            ->filter(function (array $item) use ($focusTerms): bool {
-                $haystack = mb_strtolower(implode(' ', [
-                    (string) ($item['title'] ?? ''),
-                    (string) ($item['snippet'] ?? ''),
-                    (string) ($item['source_url'] ?? ''),
-                ]));
-
-                foreach ($focusTerms as $term) {
-                    if (str_contains($haystack, $term)) {
-                        return true;
-                    }
-                }
-
-                return false;
-            })
-            ->count();
-
-        if ($matchingEvidence === 0) {
-            return true;
-        }
-
-        $topEvidence = array_slice($seedEvidence, 0, min(4, count($seedEvidence)));
-        $topMatches = collect($topEvidence)
-            ->filter(function (array $item) use ($focusTerms): bool {
-                $haystack = mb_strtolower(implode(' ', [
-                    (string) ($item['title'] ?? ''),
-                    (string) ($item['snippet'] ?? ''),
-                    (string) ($item['source_url'] ?? ''),
-                ]));
-
-                foreach ($focusTerms as $term) {
-                    if (str_contains($haystack, $term)) {
-                        return true;
-                    }
-                }
-
-                return false;
-            })
-            ->count();
-
-        if ($topMatches === 0) {
-            return true;
-        }
-
-        return ($matchingEvidence / max(count($seedEvidence), 1)) < 0.35;
     }
 
     /**
@@ -1117,15 +964,6 @@ class AnswerSynthesizer
         }
 
         return false;
-    }
-
-    private function normalizedConfidence(mixed $confidence): float
-    {
-        if (! is_numeric($confidence)) {
-            return 0.0;
-        }
-
-        return max(0.0, min(1.0, (float) $confidence));
     }
 
     private function deterministicSourceConfidence(): float
@@ -2641,9 +2479,8 @@ class AnswerSynthesizer
 
     /**
      * @param  array<string, mixed>  $eventContext
-     * @param  array<string, mixed>  $proceduralContext
      */
-    private function chatModelForQuestion(string $question, array $eventContext = [], array $proceduralContext = []): string
+    private function chatModelForQuestion(string $question, array $eventContext = []): string
     {
         return (string) config('chat.model', config('enrichment.model', 'gpt-4o-mini'));
     }

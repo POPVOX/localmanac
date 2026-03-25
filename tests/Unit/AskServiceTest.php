@@ -5,7 +5,9 @@ use App\Models\City;
 use App\Models\User;
 use App\Services\Chat\AnswerSynthesizer;
 use App\Services\Chat\AskService;
+use App\Services\Chat\ChatEvidenceModeClassifier;
 use App\Services\Chat\ChatSourceSelector;
+use App\Services\Chat\ChatUpdatesAnswerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -73,6 +75,241 @@ it('uses a single authenticated selector to synthesizer orchestration path for s
         ->and($response['citations'][0]['source_url'])->toBe('https://example.com/trash')
         ->and($response['conversation_id'])->toBe('conv_trash')
         ->and(array_keys($response))->toBe(['answer', 'citations', 'city', 'meta', 'conversation_id']);
+});
+
+it('routes event questions through the event-aware synthesis path even when no chat sources are selected', function () {
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+    $user = User::factory()->create();
+
+    $classifier = Mockery::mock(ChatEvidenceModeClassifier::class);
+    $classifier->shouldReceive('classify')
+        ->once()
+        ->with('What city council, board, and public meetings are coming up in Wichita in the next 14 days?')
+        ->andReturn(ChatEvidenceModeClassifier::EVENTS);
+
+    $selector = Mockery::mock(ChatSourceSelector::class);
+    $selector->shouldReceive('select')
+        ->once()
+        ->with($city->id, 'What city council, board, and public meetings are coming up in Wichita in the next 14 days?')
+        ->andReturn(collect());
+
+    $synthesizer = Mockery::mock(AnswerSynthesizer::class);
+    $synthesizer->shouldReceive('synthesizeStreaming')
+        ->once()
+        ->with(
+            'What city council, board, and public meetings are coming up in Wichita in the next 14 days?',
+            Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)),
+            Mockery::on(fn (Collection $sources): bool => $sources->isEmpty()),
+            Mockery::on(fn (User $resolvedUser): bool => $resolvedUser->is($user)),
+            null,
+            Mockery::type('callable'),
+            'What city council, board, and public meetings are coming up in Wichita in the next 14 days?'
+        )
+        ->andReturn([
+            'answer' => 'Upcoming meetings include a city council workshop and a planning commission hearing.',
+            'citations' => [
+                [
+                    'title' => 'Meeting Calendar',
+                    'source_url' => 'https://example.com/meetings',
+                    'type' => 'html',
+                ],
+            ],
+            'confidence' => 0.95,
+            'source_mode' => 'local',
+            'conversation_id' => 'conv_events',
+        ]);
+
+    $updates = Mockery::mock(ChatUpdatesAnswerService::class);
+    $updates->shouldNotReceive('answer');
+
+    $service = new AskService($selector, $synthesizer, null, $classifier, $updates);
+    $response = $service->answerStreamingForUser(
+        'What city council, board, and public meetings are coming up in Wichita in the next 14 days?',
+        $city->id,
+        $user,
+        null,
+        fn () => null,
+    );
+
+    expect($response['answer'])->toContain('Upcoming meetings')
+        ->and($response['citations'][0]['source_url'])->toBe('https://example.com/meetings')
+        ->and($response['conversation_id'])->toBe('conv_events');
+});
+
+it('routes digest-style updates queries to article-backed updates retrieval', function () {
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+    $user = User::factory()->create();
+
+    $classifier = Mockery::mock(ChatEvidenceModeClassifier::class);
+    $classifier->shouldReceive('classify')
+        ->once()
+        ->with('Summarize the most important local updates in Wichita from the last 7 days.')
+        ->andReturn(ChatEvidenceModeClassifier::UPDATES);
+
+    $selector = Mockery::mock(ChatSourceSelector::class);
+    $selector->shouldNotReceive('select');
+
+    $synthesizer = Mockery::mock(AnswerSynthesizer::class);
+    $synthesizer->shouldNotReceive('synthesizeStreaming');
+
+    $updates = Mockery::mock(ChatUpdatesAnswerService::class);
+    $updates->shouldReceive('answer')
+        ->once()
+        ->with('Summarize the most important local updates in Wichita from the last 7 days.', Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)))
+        ->andReturn([
+            'answer' => "Here are the most important local updates I found from the last 7 days:\n- Mar 24: Water Service Alert Update.\n- Mar 23: Rezoning Filing Update.\n- Mar 21: Downtown Project Approval.",
+            'citations' => [
+                [
+                    'title' => 'Water Service Alert Update',
+                    'source_url' => 'https://example.com/updates/service-alert-march-24',
+                    'type' => 'html',
+                ],
+            ],
+            'city' => [
+                'id' => $city->id,
+                'name' => $city->name,
+                'slug' => $city->slug,
+            ],
+            'meta' => [
+                'sources_used' => 3,
+                'pages_fetched' => 1,
+                'cache_hits' => 0,
+            ],
+        ]);
+
+    $streamed = '';
+    $service = new AskService($selector, $synthesizer, null, $classifier, $updates);
+    $response = $service->answerStreamingForUser(
+        'Summarize the most important local updates in Wichita from the last 7 days.',
+        $city->id,
+        $user,
+        null,
+        function (string $delta) use (&$streamed): null {
+            $streamed .= $delta;
+
+            return null;
+        },
+    );
+
+    expect($response['answer'])->toContain('Water Service Alert Update')
+        ->and($streamed)->toBe($response['answer'])
+        ->and($response['meta']['sources_used'])->toBe(3)
+        ->and($response['conversation_id'])->toBeNull();
+});
+
+it('routes service alert queries to updates mode instead of reference retrieval and fallback', function () {
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+    $user = User::factory()->create();
+
+    $classifier = Mockery::mock(ChatEvidenceModeClassifier::class);
+    $classifier->shouldReceive('classify')
+        ->once()
+        ->with('What active service alerts or disruptions should residents in Wichita know about right now? Focus on roads, utilities, water, trash, and public services.')
+        ->andReturn(ChatEvidenceModeClassifier::UPDATES);
+
+    $selector = Mockery::mock(ChatSourceSelector::class);
+    $selector->shouldNotReceive('select');
+
+    $synthesizer = Mockery::mock(AnswerSynthesizer::class);
+    $synthesizer->shouldNotReceive('synthesizeStreaming');
+
+    $updates = Mockery::mock(ChatUpdatesAnswerService::class);
+    $updates->shouldReceive('answer')
+        ->once()
+        ->andReturn([
+            'answer' => 'I could not find active local service alerts or disruptions in the available article sources right now.',
+            'citations' => [],
+            'city' => [
+                'id' => $city->id,
+                'name' => $city->name,
+                'slug' => $city->slug,
+            ],
+            'meta' => [
+                'sources_used' => 0,
+                'pages_fetched' => 0,
+                'cache_hits' => 0,
+            ],
+        ]);
+
+    $service = new AskService($selector, $synthesizer, null, $classifier, $updates);
+    $response = $service->answerStreamingForUser(
+        'What active service alerts or disruptions should residents in Wichita know about right now? Focus on roads, utilities, water, trash, and public services.',
+        $city->id,
+        $user,
+        null,
+        fn () => null,
+    );
+
+    expect($response['answer'])->toBe('I could not find active local service alerts or disruptions in the available article sources right now.')
+        ->and($response['answer'])->not->toContain('Try a different wording or a more specific question.')
+        ->and($response['citations'])->toBe([]);
+});
+
+it('drops legacy resources from the authenticated chat answer contract', function () {
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+    $user = User::factory()->create();
+
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Trash Service',
+        'source_url' => 'https://example.com/trash',
+        'is_active' => true,
+    ]);
+
+    $selector = Mockery::mock(ChatSourceSelector::class);
+    $selector->shouldReceive('select')
+        ->once()
+        ->with($city->id, 'Who do I call about trash pickup?')
+        ->andReturn(collect([$source]));
+
+    $synthesizer = Mockery::mock(AnswerSynthesizer::class);
+    $synthesizer->shouldReceive('synthesizeStreaming')
+        ->once()
+        ->andReturn([
+            'answer' => 'Call Public Works at (316) 555-1212.',
+            'citations' => [
+                [
+                    'title' => 'Trash Service',
+                    'source_url' => 'https://example.com/trash',
+                    'type' => 'html',
+                ],
+            ],
+            'confidence' => 0.95,
+            'source_mode' => 'local',
+            'conversation_id' => 'conv_trash',
+            'resources' => [
+                [
+                    'label' => 'Legacy Resource',
+                    'url' => 'https://example.com/legacy',
+                ],
+            ],
+        ]);
+
+    $service = new AskService($selector, $synthesizer);
+    $response = $service->answerStreamingForUser(
+        'Who do I call about trash pickup?',
+        $city->id,
+        $user,
+        null,
+        fn () => null,
+    );
+
+    expect($response['answer'])->toBe('Call Public Works at (316) 555-1212.')
+        ->and($response['citations'][0]['source_url'])->toBe('https://example.com/trash')
+        ->and(array_keys($response))->toBe(['answer', 'citations', 'city', 'meta', 'conversation_id'])
+        ->and(array_key_exists('resources', $response))->toBeFalse();
 });
 
 it('normalizes generic city phrasing before authenticated retrieval and synthesis', function () {
@@ -506,7 +743,7 @@ it('reuses conversation memory for short contextual follow-up questions', functi
         ->and($response['conversation_id'])->toBe($existingConversationId);
 });
 
-it('returns a clean fallback for unrelated empty-source queries without carrying the previous conversation', function () {
+it('returns a clean fallback for unrelated empty-source reference queries without carrying the previous conversation', function () {
     config()->set('chat.memory_enabled', true);
 
     $city = City::factory()->create([
@@ -546,7 +783,7 @@ it('returns a clean fallback for unrelated empty-source queries without carrying
     $selector = Mockery::mock(ChatSourceSelector::class);
     $selector->shouldReceive('select')
         ->once()
-        ->with($city->id, 'What upcoming meetings are scheduled?')
+        ->with($city->id, 'Who do I call about trash pickup?')
         ->andReturn(collect());
 
     $synthesizer = Mockery::mock(AnswerSynthesizer::class);
@@ -554,7 +791,7 @@ it('returns a clean fallback for unrelated empty-source queries without carrying
 
     $service = new AskService($selector, $synthesizer);
     $response = $service->answerStreamingForUser(
-        'What upcoming meetings are scheduled?',
+        'Who do I call about trash pickup?',
         $city->id,
         $user,
         $existingConversationId,
@@ -564,4 +801,109 @@ it('returns a clean fallback for unrelated empty-source queries without carrying
     expect($response['answer'])->toBe('I could not find the answer in the sources I checked. Try a different wording or a more specific question.')
         ->and($response['citations'])->toBe([])
         ->and($response['conversation_id'])->toBeNull();
+});
+
+it('returns the deterministic fallback when the synthesizer yields an empty answer', function () {
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+    $user = User::factory()->create();
+
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Trash Service',
+        'source_url' => 'https://example.com/trash',
+        'is_active' => true,
+    ]);
+
+    $selector = Mockery::mock(ChatSourceSelector::class);
+    $selector->shouldReceive('select')
+        ->once()
+        ->with($city->id, 'Who do I call about trash pickup?')
+        ->andReturn(collect([$source]));
+
+    $synthesizer = Mockery::mock(AnswerSynthesizer::class);
+    $synthesizer->shouldReceive('synthesizeStreaming')
+        ->once()
+        ->andReturn([
+            'answer' => '',
+            'citations' => [
+                [
+                    'title' => 'Trash Service',
+                    'source_url' => 'https://example.com/trash',
+                    'type' => 'html',
+                ],
+            ],
+            'confidence' => 0.95,
+            'source_mode' => 'local',
+            'conversation_id' => 'conv_trash',
+        ]);
+
+    $service = new AskService($selector, $synthesizer);
+    $response = $service->answerStreamingForUser(
+        'Who do I call about trash pickup?',
+        $city->id,
+        $user,
+        null,
+        fn () => null,
+    );
+
+    expect($response['answer'])->toBe('I could not find the answer in the sources I checked. Try a different wording or a more specific question.')
+        ->and($response['citations'])->toBe([])
+        ->and($response['meta']['sources_used'])->toBe(1)
+        ->and($response['meta']['pages_fetched'])->toBe(0)
+        ->and($response['conversation_id'])->toBe('conv_trash');
+});
+
+it('returns the deterministic fallback when the synthesizer responds with no-answer phrasing', function () {
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+    $user = User::factory()->create();
+
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Meeting Calendar',
+        'source_url' => 'https://example.com/meetings',
+        'is_active' => true,
+    ]);
+
+    $selector = Mockery::mock(ChatSourceSelector::class);
+    $selector->shouldReceive('select')
+        ->once()
+        ->with($city->id, 'What upcoming meetings are scheduled?')
+        ->andReturn(collect([$source]));
+
+    $synthesizer = Mockery::mock(AnswerSynthesizer::class);
+    $synthesizer->shouldReceive('synthesizeStreaming')
+        ->once()
+        ->andReturn([
+            'answer' => 'I could not find the answer in the sources I checked.',
+            'citations' => [
+                [
+                    'title' => 'Meeting Calendar',
+                    'source_url' => 'https://example.com/meetings',
+                    'type' => 'html',
+                ],
+            ],
+            'confidence' => 0.95,
+            'source_mode' => 'local',
+            'conversation_id' => 'conv_meetings',
+        ]);
+
+    $service = new AskService($selector, $synthesizer);
+    $response = $service->answerStreamingForUser(
+        'What upcoming meetings are scheduled?',
+        $city->id,
+        $user,
+        null,
+        fn () => null,
+    );
+
+    expect($response['answer'])->toBe('I could not find the answer in the sources I checked. Try a different wording or a more specific question.')
+        ->and($response['citations'])->toBe([])
+        ->and($response['meta']['sources_used'])->toBe(1)
+        ->and($response['conversation_id'])->toBe('conv_meetings');
 });

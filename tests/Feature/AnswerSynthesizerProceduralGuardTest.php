@@ -134,7 +134,13 @@ it('narrows procedural answers when ordinance-style evidence does not support a 
         originalQuestion: 'How do I get a demolition permit?',
     );
 
-    expect($result['answer'])
+    $answer = $result['answer'];
+    $sentences = array_values(array_filter(
+        preg_split('/(?<=[.?!])\s+/u', trim($answer)) ?: [],
+        fn (string $sentence): bool => $sentence !== ''
+    ));
+
+    expect($answer)
         ->toContain('permit or formal review may be required')
         ->toContain('additional review may apply in cases involving historic properties or historic districts')
         ->toContain('The full step-by-step process is not clearly described in the available sources.')
@@ -142,8 +148,15 @@ it('narrows procedural answers when ordinance-style evidence does not support a 
         ->not->toContain('post a bond')
         ->not->toContain('central inspection office')
         ->not->toContain('c)')
+        ->not->toContain('If the project involves')
+        ->not->toContain('prohibited from issuing')
         ->not->toContain('The sources mention:')
         ->not->toContain('subsection')
+        ->not->toContain("\n")
+        ->not->toContain('  ')
+        ->toEndWith('.')
+        ->and($sentences)->toHaveCount(3)
+        ->and(collect($sentences)->every(fn (string $sentence): bool => preg_match('/^[A-Z]/u', $sentence) === 1))->toBeTrue()
         ->and($result['citations'])->not->toBeEmpty();
 });
 
