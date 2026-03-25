@@ -138,6 +138,25 @@ class AnswerSynthesizer
             $answer = self::NO_ANSWER_MESSAGE;
         }
 
+        if (($answer === '' || $this->isNoAnswerMessage($answer)) && $seedEvidence !== []) {
+            $seedAnswer = $this->answerFromSeedEvidence($question, $city, $seedEvidence);
+
+            if ($seedAnswer !== ''
+                && ! $this->isNoAnswerMessage($seedAnswer)
+                && $this->isAnswerGrounded($question, $seedAnswer, $city, $seedEvidence, $seedCitations)
+            ) {
+                $answer = $seedAnswer;
+
+                if ($streamedText === '') {
+                    $onDelta($answer);
+                }
+
+                $citations = $seedCitations;
+                $confidence = max($confidence, $this->deterministicSourceConfidence());
+                $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
+            }
+        }
+
         if ($answer === '' || $this->isNoAnswerMessage($answer)) {
             $answer = self::NO_ANSWER_MESSAGE;
 
@@ -680,6 +699,57 @@ class AnswerSynthesizer
             ->take((int) config('chat.retrieval_chunk_limit', 8))
             ->values()
             ->all();
+    }
+
+    /**
+     * Re-generate an answer strictly from seed evidence when the streamed answer fails grounding.
+     */
+    private function answerFromSeedEvidence(string $question, City $city, array $seedEvidence): string
+    {
+        if ($seedEvidence === []) {
+            return '';
+        }
+
+        $prompt = implode("\n", [
+            'You are a civic information assistant.',
+            'Answer only from the provided evidence excerpts.',
+            'Do not invent facts, URLs, dates, numbers, or contacts.',
+            'If the evidence includes a phone number, URL, or street address that helps answer the question, include it directly in the answer.',
+            'If you tell the user to call, show the actual phone number.',
+            'If you tell the user to visit a site or GIS tool, show the exact URL.',
+            'If you tell the user to go somewhere, show the exact address when the evidence provides one.',
+            'Do not name any department, agency, provider, company, office, or organization unless that exact name appears in the evidence excerpts.',
+            'If the evidence supports the action but not the responsible entity, say you could not verify the exact organization from the sources.',
+            'If the evidence is insufficient, answer exactly: "'.self::NO_ANSWER_MESSAGE.'"',
+            '',
+            'City:',
+            $city->name,
+            '',
+            'Time context:',
+            ...$this->temporalContextLines($city),
+            '',
+            'Question:',
+            $question,
+            '',
+            'Evidence excerpts:',
+            json_encode($this->compactSeedEvidence($seedEvidence), JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) ?: '[]',
+        ]);
+
+        try {
+            $response = StreamingChatAnswerAgent::make(tools: [])->prompt(
+                $prompt,
+                provider: $this->providerPreference(
+                    chainConfigKey: 'chat.provider_chain',
+                    fallbackProviderConfigKey: 'chat.provider',
+                    model: (string) config('chat.model', config('enrichment.model', 'gpt-4o-mini')),
+                ),
+                timeout: (int) config('chat.http_timeout', 20),
+            );
+        } catch (\Throwable) {
+            return '';
+        }
+
+        return trim((string) ($response->text ?? ''));
     }
 
     /**

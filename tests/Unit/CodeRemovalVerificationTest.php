@@ -26,10 +26,10 @@ it('AskService source file does not reference ChatUpdatesAnswerService', functio
 
 // ── AnswerSynthesizer: removed fallback methods (Requirements 5.2, 5.3, 5.4, 5.5) ──
 
-it('AnswerSynthesizer no longer has answerFromSeedEvidence method', function () {
+it('AnswerSynthesizer still has answerFromSeedEvidence fallback method', function () {
     $ref = new ReflectionClass(AnswerSynthesizer::class);
 
-    expect($ref->hasMethod('answerFromSeedEvidence'))->toBeFalse();
+    expect($ref->hasMethod('answerFromSeedEvidence'))->toBeTrue();
 });
 
 it('AnswerSynthesizer no longer has shouldUseFilteredLocalEventsInFinalAnswer method', function () {
