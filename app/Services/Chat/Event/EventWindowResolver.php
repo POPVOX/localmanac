@@ -114,6 +114,12 @@ class EventWindowResolver
             );
         }
 
+        $relativeDuration = $this->extractRelativeDuration($normalized, $now);
+
+        if ($relativeDuration !== null) {
+            return $relativeDuration;
+        }
+
         $range = $this->extractRange($question, $timezone);
 
         if ($range !== null) {
@@ -133,6 +139,34 @@ class EventWindowResolver
         }
 
         return null;
+    }
+
+    /**
+     * @return array{
+     *     start_at: Carbon,
+     *     end_at: Carbon,
+     *     label: string,
+     *     is_explicit: bool,
+     *     parse_confidence: float
+     * }|null
+     */
+    private function extractRelativeDuration(string $question, Carbon $now): ?array
+    {
+        if (preg_match('/\bnext\s+(\d{1,2})\s+days?\b/u', $question, $matches) !== 1) {
+            return null;
+        }
+
+        $days = max(1, (int) ($matches[1] ?? 0));
+        $start = $now->copy()->startOfDay();
+        $end = $start->copy()->addDays($days - 1)->endOfDay();
+
+        return $this->window(
+            $start,
+            $end,
+            "next {$days} days",
+            true,
+            1.0,
+        );
     }
 
     /**

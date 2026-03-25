@@ -223,6 +223,177 @@ it('filters meeting-focused queries to civic meetings and excludes library progr
         ->and(collect($result['events'])->pluck('title')->all())->not->toContain('Tuesday Topics: Understanding Immigration');
 });
 
+it('filters generic meeting queries to civic meetings and excludes unrelated programs', function () {
+    $city = City::factory()->create([
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $window = [
+        'start_at' => Carbon::parse('2026-03-24 00:00:00', 'America/Chicago'),
+        'end_at' => Carbon::parse('2026-04-07 23:59:59', 'America/Chicago'),
+        'label' => 'next 14 days',
+        'is_explicit' => true,
+        'parse_confidence' => 1.0,
+    ];
+
+    $agendaSource = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita Agenda Center',
+        'source_url' => 'https://www.wichita.gov/AgendaCenter',
+        'is_active' => true,
+    ]);
+
+    $librarySource = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita Public Library',
+        'source_url' => 'https://wichitalibrary.org/events',
+        'is_active' => true,
+    ]);
+
+    $cityCouncil = Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'City Council Workshop',
+        'starts_at' => Carbon::parse('2026-04-02 09:00:00', 'America/Chicago'),
+        'ends_at' => Carbon::parse('2026-04-02 11:00:00', 'America/Chicago'),
+        'event_url' => 'https://www.wichita.gov/AgendaCenter/city-council',
+        'source_hash' => sha1('city-council-workshop-priority'),
+    ]);
+
+    EventSourceItem::factory()->create([
+        'event_id' => $cityCouncil->id,
+        'event_source_id' => $agendaSource->id,
+        'source_url' => 'https://www.wichita.gov/AgendaCenter/city-council',
+        'fetched_at' => Carbon::parse('2026-03-24 12:00:00', 'America/Chicago'),
+    ]);
+
+    $commission = Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Planning Commission Regular Meeting',
+        'starts_at' => Carbon::parse('2026-04-03 09:00:00', 'America/Chicago'),
+        'ends_at' => Carbon::parse('2026-04-03 11:00:00', 'America/Chicago'),
+        'event_url' => 'https://www.wichita.gov/AgendaCenter/planning-commission',
+        'source_hash' => sha1('planning-commission-meeting'),
+    ]);
+
+    EventSourceItem::factory()->create([
+        'event_id' => $commission->id,
+        'event_source_id' => $agendaSource->id,
+        'source_url' => 'https://www.wichita.gov/AgendaCenter/planning-commission',
+        'fetched_at' => Carbon::parse('2026-03-24 12:05:00', 'America/Chicago'),
+    ]);
+
+    $libraryProgram = Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Book Club: Wichita Reads',
+        'description' => 'Library program and community discussion for this month.',
+        'starts_at' => Carbon::parse('2026-03-26 18:00:00', 'America/Chicago'),
+        'ends_at' => Carbon::parse('2026-03-26 19:00:00', 'America/Chicago'),
+        'event_url' => 'https://wichitalibrary.libnet.info/event/book-club',
+        'source_hash' => sha1('library-book-club'),
+    ]);
+
+    EventSourceItem::factory()->create([
+        'event_id' => $libraryProgram->id,
+        'event_source_id' => $librarySource->id,
+        'source_url' => 'https://wichitalibrary.libnet.info/event/book-club',
+        'fetched_at' => Carbon::parse('2026-03-24 12:10:00', 'America/Chicago'),
+    ]);
+
+    Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Comedy Night Downtown',
+        'description' => 'Stand-up comedy showcase at the theater.',
+        'starts_at' => Carbon::parse('2026-03-29 13:00:00', 'America/Chicago'),
+        'ends_at' => Carbon::parse('2026-03-29 16:00:00', 'America/Chicago'),
+        'event_url' => 'https://example.com/comedy-night',
+        'source_hash' => sha1('comedy-night-downtown'),
+    ]);
+
+    Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Youth Basketball Tournament',
+        'description' => 'Weekend sports event at the rec center.',
+        'starts_at' => Carbon::parse('2026-03-30 10:00:00', 'America/Chicago'),
+        'ends_at' => Carbon::parse('2026-03-30 15:00:00', 'America/Chicago'),
+        'event_url' => 'https://example.com/basketball-tournament',
+        'source_hash' => sha1('youth-basketball-tournament'),
+    ]);
+
+    $result = app(EventSearchService::class)->search(
+        city: $city,
+        window: $window,
+        question: 'What meetings are coming up in Wichita in the next 14 days?',
+        limit: 8,
+    );
+
+    $titles = collect($result['events'])->pluck('title');
+
+    expect($result['total'])->toBe(2)
+        ->and($titles->all())->toContain('City Council Workshop')
+        ->and($titles->all())->toContain('Planning Commission Regular Meeting')
+        ->and($titles->all())->not->toContain('Book Club: Wichita Reads')
+        ->and($titles->all())->not->toContain('Comedy Night Downtown')
+        ->and($titles->all())->not->toContain('Youth Basketball Tournament');
+});
+
+it('returns no event results for meeting queries when only library programs and general events exist', function () {
+    $city = City::factory()->create([
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $window = [
+        'start_at' => Carbon::parse('2026-03-24 00:00:00', 'America/Chicago'),
+        'end_at' => Carbon::parse('2026-04-07 23:59:59', 'America/Chicago'),
+        'label' => 'next 14 days',
+        'is_explicit' => true,
+        'parse_confidence' => 1.0,
+    ];
+
+    $librarySource = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Wichita Public Library',
+        'source_url' => 'https://wichitalibrary.org/events',
+        'is_active' => true,
+    ]);
+
+    $bookClub = Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Book Club: Prairie Stories',
+        'description' => 'Library program for readers this month.',
+        'starts_at' => Carbon::parse('2026-03-26 18:00:00', 'America/Chicago'),
+        'ends_at' => Carbon::parse('2026-03-26 19:00:00', 'America/Chicago'),
+        'event_url' => 'https://wichitalibrary.libnet.info/event/prairie-stories',
+        'source_hash' => sha1('prairie-stories-book-club'),
+    ]);
+
+    EventSourceItem::factory()->create([
+        'event_id' => $bookClub->id,
+        'event_source_id' => $librarySource->id,
+        'source_url' => 'https://wichitalibrary.libnet.info/event/prairie-stories',
+        'fetched_at' => Carbon::parse('2026-03-24 12:10:00', 'America/Chicago'),
+    ]);
+
+    Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Spring Community Festival',
+        'description' => 'General event with food trucks and family activities.',
+        'starts_at' => Carbon::parse('2026-03-29 13:00:00', 'America/Chicago'),
+        'ends_at' => Carbon::parse('2026-03-29 16:00:00', 'America/Chicago'),
+        'event_url' => 'https://example.com/festival',
+        'source_hash' => sha1('spring-community-festival-no-civic'),
+    ]);
+
+    $result = app(EventSearchService::class)->search(
+        city: $city,
+        window: $window,
+        question: 'What meetings are coming up in Wichita in the next 14 days?',
+        limit: 8,
+    );
+
+    expect($result['total'])->toBe(0)
+        ->and($result['events'])->toBe([]);
+});
+
 it('uses citation url fallback chain from event to source item to source home', function () {
     $city = City::factory()->create([
         'timezone' => 'America/Chicago',

@@ -66,6 +66,8 @@ class AnswerSynthesizer
         $seedEvidence = $this->seedEvidence($sources, $question);
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
         $eventCitations = $this->citationsFromLocalEvents($eventContext['local_events'] ?? []);
+        $forcedEventCitations = [];
+        $forcedEventContextAnswer = false;
         $usedSeedAnswer = false;
         $model = $this->chatModelForQuestion($question, $eventContext);
 
@@ -160,7 +162,22 @@ class AnswerSynthesizer
             $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
         }
 
-        if (($eventContext['intent'] ?? false) && ($answer === '' || $this->isNoAnswerMessage($answer))) {
+        if ($this->shouldUseFilteredLocalEventsInFinalAnswer($question, $eventContext)) {
+            $forcedEventContextAnswer = true;
+
+            if ((int) ($eventContext['local_total'] ?? 0) > 0 && is_array($eventContext['local_events'] ?? null)) {
+                $answer = $this->answerFromLocalEvents($city, $eventContext['window'] ?? null, $eventContext['local_events']);
+                $forcedEventCitations = $this->citationsFromLocalEvents($eventContext['local_events']);
+                $citations = $forcedEventCitations;
+                $confidence = max($confidence, $this->deterministicSourceConfidence());
+                $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
+            } else {
+                $answer = $this->noEventsFoundMessage($city, $eventContext['window'] ?? null, $question);
+                $citations = [];
+                $forcedEventCitations = [];
+                $sourceMode = 'none';
+            }
+        } elseif (($eventContext['intent'] ?? false) && ($answer === '' || $this->isNoAnswerMessage($answer))) {
             if ((int) ($eventContext['local_total'] ?? 0) > 0 && is_array($eventContext['local_events'] ?? null)) {
                 $answer = $this->answerFromLocalEvents($city, $eventContext['window'] ?? null, $eventContext['local_events']);
                 $confidence = max($confidence, $this->deterministicSourceConfidence());
@@ -214,6 +231,15 @@ class AnswerSynthesizer
         $citations = $citationSelection['citations'];
         $alignedEvidence = $citationSelection['aligned_evidence'];
         $droppedCitations = $citationSelection['dropped'];
+
+        if ($forcedEventContextAnswer) {
+            $citations = $forcedEventCitations;
+            $alignedEvidence = [];
+            $droppedCitations = [];
+            $sourceMode = $citations === []
+                ? 'none'
+                : $this->detectSourceModeFromCitations($citations, $sources, $city);
+        }
 
         if ($this->isRefusalMessage($answer)) {
             $citations = [];
@@ -1210,6 +1236,35 @@ class AnswerSynthesizer
             'local_total' => $localTotal,
             'local_events' => $localEvents,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $eventContext
+     */
+    private function shouldUseFilteredLocalEventsInFinalAnswer(string $question, array $eventContext): bool
+    {
+        if (! (bool) ($eventContext['intent'] ?? false)) {
+            return false;
+        }
+
+        $question = mb_strtolower($question);
+
+        foreach ([
+            'meeting',
+            'meetings',
+            'city council',
+            'board',
+            'commission',
+            'public meeting',
+            'public meetings',
+            'agenda',
+        ] as $signal) {
+            if (str_contains($question, $signal)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -2358,7 +2413,7 @@ class AnswerSynthesizer
     private function noEventsFoundMessage(City $city, ?array $window, string $question = ''): string
     {
         if ($this->isMeetingFocusedEventQuery($question)) {
-            return 'I could not find upcoming city council or public meetings in the available sources.';
+            return 'I could not find any upcoming city council or public meetings in the available sources.';
         }
 
         $label = is_array($window) && is_string($window['label'] ?? null)

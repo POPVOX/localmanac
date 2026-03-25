@@ -254,8 +254,99 @@ it('returns a clean civic meetings fallback when only unrelated library events a
         originalQuestion: $query,
     );
 
-    expect($result['answer'])->toBe('I could not find upcoming city council or public meetings in the available sources.')
+    expect($result['answer'])->toBe('I could not find any upcoming city council or public meetings in the available sources.')
         ->and($result['citations'])->toBe([]);
+});
+
+it('uses filtered local meeting results for the final answer instead of grounded unrelated source text', function () {
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.tools.web_search.enabled', false);
+    config()->set('chat.tools.similarity.enabled', false);
+    config()->set('chat.retrieval_neighbor_window', 0);
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $user = User::factory()->create();
+
+    Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Wichita City Council Workshop',
+        'starts_at' => now('America/Chicago')->addDays(5)->setTime(9, 0),
+        'ends_at' => now('America/Chicago')->addDays(5)->setTime(11, 0),
+        'all_day' => false,
+        'location_name' => 'City Hall',
+        'description' => 'City council workshop with agenda posted online.',
+        'event_url' => 'https://www.wichita.gov/AgendaCenter/Wichita-City-Council-Meetings-34',
+        'source_hash' => 'city-council-workshop-final-answer',
+    ]);
+
+    Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Planning Commission Regular Meeting',
+        'starts_at' => now('America/Chicago')->addDays(7)->setTime(9, 0),
+        'ends_at' => now('America/Chicago')->addDays(7)->setTime(11, 0),
+        'all_day' => false,
+        'location_name' => 'City Hall',
+        'description' => 'Planning commission meeting with agenda posted online.',
+        'event_url' => 'https://www.wichita.gov/AgendaCenter/planning-commission',
+        'source_hash' => 'planning-commission-final-answer',
+    ]);
+
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Weekly Entertainment Guide',
+        'source_url' => 'https://example.com/events',
+        'priority' => 10,
+        'is_active' => true,
+    ]);
+
+    $page = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id,
+        'url' => 'https://example.com/events/weekend-roundup',
+        'canonical_url' => 'https://example.com/events/weekend-roundup',
+        'title' => 'Weekend Roundup',
+        'content_text' => 'Upcoming meetings and events in Wichita include Comedy Open Mic and Wichita Thunder vs. Kansas City Mavericks.',
+        'content_length' => 110,
+    ]);
+
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $page->id,
+        'chunk_index' => 0,
+        'content' => 'Upcoming meetings and events in Wichita include Comedy Open Mic and Wichita Thunder vs. Kansas City Mavericks.',
+        'content_length' => 110,
+        'embedding' => null,
+        'embedding_model' => null,
+    ]);
+
+    StreamingChatAnswerAgent::fake([
+        'The next meetings are Comedy Open Mic and Wichita Thunder vs. Kansas City Mavericks.',
+    ]);
+
+    $query = 'What meetings are coming up in Wichita in the next 14 days?';
+
+    $result = app(AnswerSynthesizer::class)->synthesizeStreaming(
+        question: $query,
+        city: $city,
+        sources: collect([$source]),
+        user: $user,
+        conversationId: null,
+        onDelta: fn (string $delta): null => null,
+        originalQuestion: $query,
+    );
+
+    expect($result['answer'])
+        ->toContain('Wichita City Council Workshop')
+        ->toContain('Planning Commission Regular Meeting')
+        ->not->toContain('Comedy Open Mic')
+        ->not->toContain('Wichita Thunder vs. Kansas City Mavericks')
+        ->and(collect($result['citations'])->pluck('source_url')->all())
+        ->toContain('https://www.wichita.gov/AgendaCenter/Wichita-City-Council-Meetings-34')
+        ->toContain('https://www.wichita.gov/AgendaCenter/planning-commission')
+        ->not->toContain('https://example.com/events/weekend-roundup');
 });
 
 it('does not use the procedural fallback for service alerts queries', function () {

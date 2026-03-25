@@ -38,7 +38,7 @@ class ChatEvidenceModeClassifier
     private function isUpdatesQuery(string $question): bool
     {
         return preg_match(
-            '/\b(what(?:\'s| is)? new|what changed|recent updates?|local updates?|service alerts?|alerts?|disruptions?|new permits?|rezonings?|projects?|recent decisions?|deadlines?|approved|filed|summary|summarize|digest|important updates?)\b/u',
+            '/\b(what(?:\'?s| is)? new|what changed|recent updates?|local updates?|service alerts?|alerts?|disruptions?|new permits?|rezonings?|projects?|recent decisions?|deadlines?|approved|filed|summary|summarize|digest|important updates?)\b/u',
             $question
         ) === 1;
     }
@@ -73,6 +73,7 @@ class ChatEvidenceModeClassifier
 
     private function normalize(string $question): string
     {
+        $question = str_replace(["\u{2018}", "\u{2019}", "\u{201B}", "\u{2032}"], "'", $question);
         $question = mb_strtolower($question);
         $question = preg_replace('/\s+/', ' ', $question) ?? '';
 

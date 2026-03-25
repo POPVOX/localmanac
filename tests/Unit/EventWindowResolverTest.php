@@ -61,6 +61,19 @@ it('resolves explicit date ranges', function () {
         ->and($window['end_at']->format('Y-m-d'))->toBe('2026-03-14');
 });
 
+it('resolves next 14 days as an explicit 14-day window', function () {
+    Carbon::setTestNow(Carbon::parse('2026-02-12 10:30:00', 'America/Chicago'));
+
+    $window = (new EventWindowResolver)->resolve('What meetings are coming up in Wichita in the next 14 days?', 'America/Chicago');
+
+    expect($window)->not->toBeNull()
+        ->and($window['label'])->toBe('next 14 days')
+        ->and($window['is_explicit'])->toBeTrue()
+        ->and($window['parse_confidence'])->toBe(1.0)
+        ->and($window['start_at']->format('Y-m-d H:i:s'))->toBe('2026-02-12 00:00:00')
+        ->and($window['end_at']->format('Y-m-d H:i:s'))->toBe('2026-02-25 23:59:59');
+});
+
 it('returns null for unsupported temporal phrasing', function () {
     Carbon::setTestNow(Carbon::parse('2026-02-12 10:30:00', 'America/Chicago'));
 

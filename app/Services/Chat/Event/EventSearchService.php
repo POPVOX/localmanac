@@ -76,24 +76,14 @@ class EventSearchService
                 return $eventStart->lessThanOrEqualTo($windowEnd)
                     && $eventEnd->greaterThanOrEqualTo($windowStart);
             })
-            ->filter(function (Event $event) use ($terms): bool {
-                return $this->matchesKeywordTerms($event, $terms);
+            ->filter(function (Event $event) use ($terms, $meetingFocused): bool {
+                return $this->matchesKeywordTerms($event, $terms, $meetingFocused);
             })
             ->values();
 
         if ($meetingFocused) {
             $filtered = $filtered
                 ->filter(fn (Event $event): bool => $this->isRelevantMeetingEvent($event))
-                ->sort(function (Event $left, Event $right): int {
-                    $scoreComparison = $this->meetingRelevanceScore($right) <=> $this->meetingRelevanceScore($left);
-
-                    if ($scoreComparison !== 0) {
-                        return $scoreComparison;
-                    }
-
-                    return ($left->starts_at?->getTimestamp() ?? PHP_INT_MAX)
-                        <=> ($right->starts_at?->getTimestamp() ?? PHP_INT_MAX);
-                })
                 ->values();
         }
 
@@ -108,7 +98,7 @@ class EventSearchService
         ];
     }
 
-    private function matchesKeywordTerms(Event $event, array $terms): bool
+    private function matchesKeywordTerms(Event $event, array $terms, bool $meetingFocused = false): bool
     {
         if ($terms === []) {
             return true;
@@ -120,6 +110,14 @@ class EventSearchService
             if (str_contains($haystack, $term)) {
                 return true;
             }
+        }
+
+        if ($meetingFocused && $this->containsMeetingFilterSignal($haystack)) {
+            return true;
+        }
+
+        if ($meetingFocused && $this->containsMeetingFilterSignal($this->eventSourceHaystack($event))) {
+            return true;
         }
 
         return false;
@@ -200,6 +198,8 @@ class EventSearchService
         $question = mb_strtolower($question);
 
         foreach ([
+            'meeting',
+            'meetings',
             'city council',
             'board',
             'commission',
@@ -218,31 +218,10 @@ class EventSearchService
     private function isRelevantMeetingEvent(Event $event): bool
     {
         $title = mb_strtolower((string) ($event->title ?? ''));
-        $content = $this->eventContentHaystack($event);
+        $source = $this->eventSourceHaystack($event);
 
-        return $this->containsMeetingSignal($title)
-            || ($this->hasGovernmentMeetingSource($event) && $this->containsMeetingSignal($content));
-    }
-
-    private function meetingRelevanceScore(Event $event): int
-    {
-        $title = mb_strtolower((string) ($event->title ?? ''));
-        $content = $this->eventContentHaystack($event);
-        $score = 0;
-
-        if ($this->containsMeetingSignal($title)) {
-            $score += 10;
-        }
-
-        if ($this->containsMeetingSignal($content)) {
-            $score += 3;
-        }
-
-        if ($this->hasGovernmentMeetingSource($event)) {
-            $score += 4;
-        }
-
-        return $score;
+        return $this->containsMeetingFilterSignal($title)
+            || $this->containsMeetingFilterSignal($source);
     }
 
     private function eventContentHaystack(Event $event): string
@@ -269,47 +248,18 @@ class EventSearchService
         ]));
     }
 
-    private function hasGovernmentMeetingSource(Event $event): bool
+    private function containsMeetingFilterSignal(string $haystack): bool
     {
-        $source = $this->eventSourceHaystack($event);
-
         foreach ([
-            'agenda center',
-            'civicengage',
-            '/agenda',
-            'government',
             'city council',
+            'council',
             'board',
             'commission',
-            'committee',
-            'minutes',
+            'meeting',
+            'meetings',
+            'agenda',
             'public meeting',
             'public meetings',
-        ] as $signal) {
-            if (str_contains($source, $signal)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function containsMeetingSignal(string $haystack): bool
-    {
-        foreach ([
-            'city council',
-            'council meeting',
-            'board meeting',
-            'board of',
-            'commission',
-            'committee',
-            'public meeting',
-            'public hearing',
-            'hearing',
-            'agenda',
-            'study session',
-            'special session',
-            'regular session',
         ] as $signal) {
             if (str_contains($haystack, $signal)) {
                 return true;

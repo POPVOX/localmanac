@@ -7,7 +7,6 @@ use App\Models\City;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
 
 class ChatUpdatesAnswerService
 {
@@ -175,41 +174,195 @@ class ChatUpdatesAnswerService
             : 'Here are the most important local updates I found from the last '.$windowDays.' days:';
 
         $lines = $articles
-            ->map(function (Article $article): string {
-                $date = $this->formatDate($article);
-                $title = trim((string) $article->title) ?: 'Update';
-                $summary = $this->articleSummary($article);
-
-                return '- '.$date.': '.$title.'. '.$summary;
-            })
+            ->map(fn (Article $article): string => $this->formatUpdateLine($article))
             ->values()
             ->all();
 
         return implode("\n", array_merge([$intro], $lines));
     }
 
-    private function articleSummary(Article $article): string
+    private function formatUpdateLine(Article $article): string
     {
-        $text = trim((string) ($article->explainer?->whats_happening
-            ?? $article->summary
-            ?? $article->body?->cleaned_text
-            ?? ''));
+        $date = $this->formatDate($article);
+        $title = $this->cleanTitle((string) $article->title);
+        $description = $this->bestReadableSentence([
+            (string) ($article->explainer?->whats_happening ?? ''),
+            (string) ($article->summary ?? ''),
+            (string) ($article->body?->cleaned_text ?? ''),
+        ]);
+        $meaning = $this->bestReadableSentence([
+            (string) ($article->explainer?->why_it_matters ?? ''),
+            ...$this->readableSentences((string) ($article->explainer?->whats_happening ?? '')),
+            ...$this->readableSentences((string) ($article->body?->cleaned_text ?? '')),
+        ], [$description]);
+
+        if ($description === '') {
+            $description = 'recent local coverage is available from the linked source';
+        }
+
+        $parts = [$title];
+        $descriptionClause = $this->sentenceToClause($description);
+
+        if ($descriptionClause !== '' && ! $this->sameMeaning($title, $descriptionClause)) {
+            $parts[] = $descriptionClause;
+        }
+
+        $meaningClause = $this->meaningClause($meaning);
+
+        if ($meaningClause !== '' && ! $this->sameMeaning($descriptionClause, $meaningClause)) {
+            $parts[] = $meaningClause;
+        }
+
+        return '- '.$date.': '.implode(', ', array_filter($parts)).'.';
+    }
+
+    private function cleanTitle(string $title): string
+    {
+        $title = $this->cleanFragment($title);
+
+        if ($title === '') {
+            return 'Update';
+        }
+
+        return preg_replace('/\s+/', ' ', $title) ?? $title;
+    }
+
+    /**
+     * @param  array<int, string>  $candidates
+     * @param  array<int, string>  $exclude
+     */
+    private function bestReadableSentence(array $candidates, array $exclude = []): string
+    {
+        foreach ($candidates as $candidate) {
+            foreach ($this->readableSentences($candidate) as $sentence) {
+                if ($sentence === '') {
+                    continue;
+                }
+
+                if (collect($exclude)->contains(fn (string $excluded): bool => $this->sameMeaning($excluded, $sentence))) {
+                    continue;
+                }
+
+                return $sentence;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function readableSentences(string $text): array
+    {
+        $text = $this->cleanFragment($text);
 
         if ($text === '') {
-            return 'Recent local coverage is available from the linked source.';
+            return [];
         }
 
+        $rawSentences = preg_split('/(?<=[.?!])\s+/u', $text) ?: [$text];
+
+        return collect($rawSentences)
+            ->map(fn (string $sentence): string => $this->normalizeSentence($sentence))
+            ->filter(fn (string $sentence): bool => $sentence !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function normalizeSentence(string $sentence): string
+    {
+        $sentence = $this->cleanFragment($sentence);
+
+        if ($sentence === '' || $this->looksIncomplete($sentence)) {
+            return '';
+        }
+
+        return rtrim($sentence, '.!? ').'.';
+    }
+
+    private function cleanFragment(string $text): string
+    {
+        $text = trim(strip_tags($text));
         $text = preg_replace('/\s+/', ' ', $text) ?? $text;
-        $sentence = preg_split('/(?<=[.?!])\s+/u', $text) ?: [$text];
-        $summary = trim((string) ($sentence[0] ?? $text));
+        $text = preg_replace('/\s*[\(\[\{][^)\]\}]*$/u', '', $text) ?? $text;
 
-        if ($summary === '') {
-            $summary = $text;
+        while (substr_count($text, '(') > substr_count($text, ')')) {
+            $position = strrpos($text, '(');
+
+            if ($position === false) {
+                break;
+            }
+
+            $text = rtrim(substr($text, 0, $position));
         }
 
-        $summary = Str::limit($summary, 180, '...');
+        return trim((string) preg_replace('/[\s,;:\-\/|]+$/u', '', $text));
+    }
 
-        return Str::finish(rtrim($summary, '. '), '.');
+    private function looksIncomplete(string $sentence): bool
+    {
+        if ($sentence === '') {
+            return true;
+        }
+
+        if (preg_match('/\.\.\.$/u', $sentence) === 1) {
+            return true;
+        }
+
+        if (preg_match('/[(:;\-\/|]$/u', $sentence) === 1) {
+            return true;
+        }
+
+        if (preg_match('/\b(?:and|or|with|for|to|of|in|on|at|by|from|about|including|during|because|after|before|through)\.?$/iu', $sentence) === 1) {
+            return true;
+        }
+
+        if (preg_match('/[.?!]$/u', $sentence) !== 1) {
+            return str_word_count($sentence) < 7;
+        }
+
+        return false;
+    }
+
+    private function sentenceToClause(string $sentence): string
+    {
+        $clause = rtrim($this->cleanFragment($sentence), '.!? ');
+
+        if ($clause === '') {
+            return '';
+        }
+
+        return lcfirst($clause);
+    }
+
+    private function meaningClause(string $sentence): string
+    {
+        $clause = $this->sentenceToClause($sentence);
+
+        if ($clause === '') {
+            return '';
+        }
+
+        $clause = preg_replace('/^(?:this|it|that)\s+means\s+/iu', '', $clause) ?? $clause;
+
+        return 'which means '.$clause;
+    }
+
+    private function sameMeaning(string $left, string $right): bool
+    {
+        $normalize = function (string $value): string {
+            $value = mb_strtolower($this->cleanFragment($value));
+            $value = preg_replace('/[^\p{L}\p{N}\s]/u', '', $value) ?? $value;
+
+            return trim($value);
+        };
+
+        $left = $normalize($left);
+        $right = $normalize($right);
+
+        return $left !== '' && $left === $right;
     }
 
     private function articleHaystack(Article $article): string

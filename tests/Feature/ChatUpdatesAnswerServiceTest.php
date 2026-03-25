@@ -159,3 +159,73 @@ it('returns a clean updates fallback for service-alert queries without using pro
 
     Carbon::setTestNow();
 });
+
+it('formats updates-mode items as clean readable sentences without truncated fragments', function () {
+    Carbon::setTestNow(Carbon::parse('2026-03-24 15:00:00', 'UTC'));
+
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+
+    $article = Article::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Water Main Repair Update (',
+        'summary' => 'Crews closed Main Street near City Hall (',
+        'published_at' => Carbon::parse('2026-03-24 12:00:00', 'UTC'),
+        'canonical_url' => 'https://example.com/updates/water-main-repair',
+    ]);
+
+    ArticleBody::factory()->create([
+        'article_id' => $article->id,
+        'cleaned_text' => 'Crews closed Main Street near City Hall for water-line repairs. Drivers should use Douglas or Market until the work is complete.',
+    ]);
+
+    ArticleExplainer::create([
+        'article_id' => $article->id,
+        'city_id' => $city->id,
+        'whats_happening' => 'Crews closed Main Street near City Hall for water-line repairs. Drivers should use Douglas or Market until the work is complete.',
+        'why_it_matters' => 'This means drivers should use Douglas or Market until the work is complete.',
+        'key_details' => [],
+        'what_to_watch' => [],
+        'evidence_json' => [],
+        'source' => 'test',
+        'source_payload' => [],
+    ]);
+
+    ArticleAnalysis::factory()->create([
+        'article_id' => $article->id,
+        'coverage_scope' => 'local',
+        'local_relevance_score' => 0.9,
+        'civic_relevance_score' => 0.9,
+        'final_scores' => [
+            'agency' => 0.8,
+            'timeliness' => 0.9,
+        ],
+    ]);
+
+    ArticleSource::create([
+        'city_id' => $city->id,
+        'article_id' => $article->id,
+        'organization_id' => null,
+        'source_url' => 'https://example.com/updates/water-main-repair',
+        'source_type' => 'html',
+        'source_uid' => null,
+        'accessed_at' => Carbon::parse('2026-03-24 12:00:00', 'UTC'),
+    ]);
+
+    $result = app(ChatUpdatesAnswerService::class)->answer(
+        'What is new this week in Wichita?',
+        $city,
+    );
+
+    expect($result['answer'])
+        ->toContain('Here are the most important local updates I found from the last 7 days:')
+        ->toContain('- Mar 24: Water Main Repair Update, crews closed Main Street near City Hall for water-line repairs, which means drivers should use Douglas or Market until the work is complete.')
+        ->not->toContain('...')
+        ->not->toContain('(,')
+        ->not->toContain('Update (')
+        ->not->toContain('City Hall (');
+
+    Carbon::setTestNow();
+});

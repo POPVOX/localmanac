@@ -203,6 +203,65 @@ it('routes digest-style updates queries to article-backed updates retrieval', fu
         ->and($response['conversation_id'])->toBeNull();
 });
 
+it('routes whats new this week queries to updates mode instead of event retrieval', function () {
+    $city = City::factory()->create([
+        'name' => 'Wichita',
+        'slug' => 'wichita',
+    ]);
+    $user = User::factory()->create();
+
+    $selector = Mockery::mock(ChatSourceSelector::class);
+    $selector->shouldNotReceive('select');
+
+    $synthesizer = Mockery::mock(AnswerSynthesizer::class);
+    $synthesizer->shouldNotReceive('synthesizeStreaming');
+
+    $updates = Mockery::mock(ChatUpdatesAnswerService::class);
+    $updates->shouldReceive('answer')
+        ->once()
+        ->with('What’s new this week?', Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)))
+        ->andReturn([
+            'answer' => "Here are the most important local updates I found from the last 7 days:\n- Mar 24: Water Service Alert Update.",
+            'citations' => [
+                [
+                    'title' => 'Water Service Alert Update',
+                    'source_url' => 'https://example.com/updates/service-alert-march-24',
+                    'type' => 'html',
+                ],
+            ],
+            'city' => [
+                'id' => $city->id,
+                'name' => $city->name,
+                'slug' => $city->slug,
+            ],
+            'meta' => [
+                'sources_used' => 1,
+                'pages_fetched' => 1,
+                'cache_hits' => 0,
+            ],
+        ]);
+
+    $service = new AskService(
+        $selector,
+        $synthesizer,
+        null,
+        app(ChatEvidenceModeClassifier::class),
+        $updates,
+    );
+
+    $response = $service->answerStreamingForUser(
+        'What’s new this week?',
+        $city->id,
+        $user,
+        null,
+        fn () => null,
+    );
+
+    expect($response['answer'])->toContain('Water Service Alert Update')
+        ->and($response['citations'][0]['source_url'])->toBe('https://example.com/updates/service-alert-march-24')
+        ->and($response['conversation_id'])->toBeNull();
+});
+
 it('routes service alert queries to updates mode instead of reference retrieval and fallback', function () {
     $city = City::factory()->create([
         'name' => 'Wichita',
