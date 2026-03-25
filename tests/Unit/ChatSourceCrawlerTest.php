@@ -5,6 +5,7 @@ use App\Models\City;
 use App\Services\Chat\ChatSourceGuard;
 use App\Services\Chat\HtmlTextExtractor;
 use App\Services\Chat\Ingestion\ChatSourceCrawler;
+use App\Services\Chat\Ingestion\NavigationPageClassifier;
 use App\Services\Chat\Ingestion\PageFetcher;
 use App\Services\Chat\PdfTextExtractor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -47,6 +48,7 @@ it('skips cloudflare infrastructure links during crawl', function () {
         app(HtmlTextExtractor::class),
         app(PdfTextExtractor::class),
         app(ChatSourceGuard::class),
+        app(NavigationPageClassifier::class),
     );
 
     $pages = $crawler->crawl($source);

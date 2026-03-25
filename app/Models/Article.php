@@ -86,6 +86,11 @@ class Article extends Model
         return $this->hasMany(ArticleKeyword::class);
     }
 
+    public function articleChunks(): HasMany
+    {
+        return $this->hasMany(ArticleChunk::class);
+    }
+
     public function articleIssueAreas(): HasMany
     {
         return $this->hasMany(ArticleIssueArea::class)

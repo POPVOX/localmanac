@@ -6,6 +6,8 @@ use App\Models\ChatSourceChunk;
 use App\Models\City;
 use App\Models\EventSource;
 use App\Models\User;
+use App\Services\Chat\Agents\AnswerQualityJudge;
+use App\Services\Chat\Agents\QueryExpander;
 use App\Services\Chat\Agents\StreamingChatAnswerAgent;
 use App\Services\Chat\Event\EventIntentDetector;
 use App\Services\Chat\Event\EventSearchService;
@@ -20,6 +22,7 @@ use Laravel\Ai\Streaming\Events\ProviderToolEvent;
 use Laravel\Ai\Streaming\Events\TextDelta;
 use Laravel\Ai\Streaming\Events\ToolResult;
 use Laravel\Ai\Tools\SimilaritySearch;
+use Throwable;
 
 /**
  * IMPORTANT ARCHITECTURE RULES
@@ -62,7 +65,7 @@ class AnswerSynthesizer
     ): array {
         $originalQuestion ??= $question;
         $eventContext = $this->resolveEventContext($question, $city);
-        $seedEvidence = $this->seedEvidence($sources, $question, $city->id);
+        $seedEvidence = $this->seedEvidence($sources, $question, $city);
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
         $eventCitations = $this->citationsFromLocalEvents($eventContext['local_events'] ?? []);
 
@@ -184,6 +187,8 @@ class AnswerSynthesizer
             droppedCitations: $droppedCitations,
             answer: $answer,
         );
+
+        $this->judgeAnswerQuality($question, $answer, $seedEvidence);
 
         return [
             'answer' => $answer,
@@ -612,7 +617,39 @@ class AnswerSynthesizer
      * @param  Collection<int, \App\Models\ChatSource>  $sources
      * @return array<int, array<string, mixed>>
      */
-    private function seedEvidence(Collection $sources, string $question, ?int $cityId = null): array
+    private function seedEvidence(Collection $sources, string $question, ?City $city = null): array
+    {
+        $cityId = $city?->id;
+        $queries = $city ? $this->expandQuery($question, $city) : [$question];
+
+        if (count($queries) <= 1) {
+            return $this->retrieveEvidence($sources, $question, $cityId);
+        }
+
+        $maxEvidence = (int) config('chat.retrieval_max_evidence', 24);
+
+        $allEvidence = collect();
+
+        foreach ($queries as $query) {
+            $evidence = $this->retrieveEvidence($sources, $query, $cityId);
+            $allEvidence = $allEvidence->concat($evidence);
+        }
+
+        return $allEvidence
+            ->unique('id')
+            ->sortByDesc('score')
+            ->take($maxEvidence)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Execute a single retrieval pass and normalize the evidence items.
+     *
+     * @param  Collection<int, \App\Models\ChatSource>  $sources
+     * @return array<int, array<string, mixed>>
+     */
+    private function retrieveEvidence(Collection $sources, string $question, ?int $cityId = null): array
     {
         try {
             $retrieved = $this->chatSourceRetriever->retrieve($sources, $question, $cityId);
@@ -883,6 +920,50 @@ class AnswerSynthesizer
             'dropped_citations' => $droppedCitations,
             'no_answer' => $this->isNoAnswerMessage($answer) || $answer === '',
         ]);
+    }
+
+    /**
+     * Run the answer quality judge in a non-blocking fashion.
+     * Failures are logged and never block the response.
+     *
+     * @param  array<int, array<string, mixed>>  $seedEvidence
+     */
+    private function judgeAnswerQuality(string $question, string $answer, array $seedEvidence): void
+    {
+        try {
+            $snippets = collect($seedEvidence)
+                ->pluck('snippet')
+                ->filter(fn ($s): bool => is_string($s) && trim($s) !== '')
+                ->values()
+                ->all();
+
+            $judge = new AnswerQualityJudge(
+                question: $question,
+                answer: $answer,
+                evidenceSnippets: $snippets,
+            );
+
+            $response = $judge->prompt(
+                "Question: {$question}\n\nAnswer: {$answer}",
+                provider: $this->providerPreference(
+                    'chat.provider_chain',
+                    'chat.provider',
+                    (string) config('chat.model', 'gpt-4o-mini'),
+                ),
+            );
+
+            $classification = $response->structured['classification'] ?? null;
+
+            Log::info('chat.answer_quality', [
+                'question' => $question,
+                'classification' => $classification,
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('chat.answer_quality.failed', [
+                'question' => $question,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -1681,5 +1762,64 @@ class AnswerSynthesizer
         }
 
         return $resolved;
+    }
+
+    /**
+     * Expand a broad question into multiple sub-queries for better retrieval coverage.
+     *
+     * @return list<string>
+     */
+    private function expandQuery(string $question, City $city): array
+    {
+        if (! config('chat.query_expansion_enabled', true)) {
+            return [$question];
+        }
+
+        if (! $this->isBroadQuestion($question)) {
+            return [$question];
+        }
+
+        try {
+            $expander = new QueryExpander(cityName: $city->name);
+            $response = $expander->prompt(
+                "City: {$city->name}\nQuestion: {$question}",
+                provider: $this->queryExpanderProvider(),
+            );
+
+            $queries = $response->structured['queries'] ?? [];
+
+            return array_merge([$question], array_slice($queries, 0, 3));
+        } catch (Throwable) {
+            return [$question];
+        }
+    }
+
+    /**
+     * Determine if a question is broad enough to benefit from query expansion.
+     */
+    private function isBroadQuestion(string $question): bool
+    {
+        $words = array_filter(preg_split('/\s+/', mb_strtolower(trim($question))) ?: []);
+        $contentWords = array_filter($words, fn (string $w): bool => mb_strlen($w) >= 3);
+
+        if (count($contentWords) < 4) {
+            return true;
+        }
+
+        $normalized = mb_strtolower(trim($question));
+
+        return (bool) preg_match('/\b(what\'?s new|latest|recent|updates?|alerts?|announcements?)\b/u', $normalized);
+    }
+
+    /**
+     * @return array<string, string|null>
+     */
+    private function queryExpanderProvider(): array
+    {
+        return $this->providerPreference(
+            'chat.provider_chain',
+            'chat.query_expansion_provider',
+            (string) config('chat.model', 'gpt-4o-mini'),
+        );
     }
 }

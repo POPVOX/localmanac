@@ -24,6 +24,15 @@ return [
     'retrieval_fts_limit' => 6,
     'vector_enabled' => (bool) env('CHAT_VECTOR_ENABLED', true),
     'fts_enabled' => (bool) env('CHAT_FTS_ENABLED', true),
+    'query_expansion_enabled' => (bool) env('CHAT_QUERY_EXPANSION_ENABLED', true),
+    'query_expansion_provider' => env('CHAT_QUERY_EXPANSION_PROVIDER', null),
+    'article_chunks_enabled' => (bool) env('CHAT_ARTICLE_CHUNKS_ENABLED', true),
+    'reranking_enabled' => (bool) env('CHAT_RERANKING_ENABLED', true),
+    'reranking_provider' => env('CHAT_RERANKING_PROVIDER', 'cohere'),
+    'reranking_provider_chain' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('CHAT_RERANKING_PROVIDER_CHAIN', 'cohere,jina'))
+    ))),
     'embedding_provider' => env('CHAT_EMBEDDING_PROVIDER', 'openai'),
     'embedding_provider_chain' => array_values(array_filter(array_map(
         'trim',

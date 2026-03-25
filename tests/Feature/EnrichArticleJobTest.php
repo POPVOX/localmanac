@@ -16,6 +16,7 @@ use App\Services\Analysis\CivicRelevanceCalculator;
 use App\Services\Analysis\ProcessTimelineProjector;
 use App\Services\Analysis\ScoreDimensions;
 use App\Services\Articles\ArticleTextService;
+use App\Services\Chat\Ingestion\ArticleChunkEmbedder;
 use App\Services\Extraction\ClaimWriter;
 use App\Services\Extraction\Enricher;
 use App\Services\Extraction\ProjectionWriter;
@@ -138,7 +139,8 @@ it('writes claims and projections when enrichment job runs', function () {
         app(ArticleExplainerProjector::class),
         app(CivicRelevanceCalculator::class),
         app(ArticleTextService::class),
-        app(PostgresSequenceSynchronizer::class)
+        app(PostgresSequenceSynchronizer::class),
+        app(ArticleChunkEmbedder::class)
     );
 
     expect(Claim::count())->toBe(3)

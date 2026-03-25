@@ -8,6 +8,7 @@ use App\Services\Analysis\CivicActionProjector;
 use App\Services\Analysis\CivicRelevanceCalculator;
 use App\Services\Analysis\ProcessTimelineProjector;
 use App\Services\Articles\ArticleTextService;
+use App\Services\Chat\Ingestion\ArticleChunkEmbedder;
 use App\Services\Extraction\ClaimWriter;
 use App\Services\Extraction\Enricher;
 use App\Services\Extraction\ProjectionWriter;
@@ -33,6 +34,7 @@ function makeEnrichmentDependencies(): array
         M::mock(ArticleExplainerProjector::class),
         M::mock(CivicRelevanceCalculator::class),
         M::mock(ArticleTextService::class),
+        M::mock(ArticleChunkEmbedder::class),
     ];
 }
 
@@ -98,7 +100,8 @@ it('retries enrichment once after recoverable sequence drift is repaired', funct
             ProcessTimelineProjector $processTimelineProjector,
             ArticleExplainerProjector $articleExplainerProjector,
             CivicRelevanceCalculator $calculator,
-            ArticleTextService $articleTextService
+            ArticleTextService $articleTextService,
+            ArticleChunkEmbedder $articleChunkEmbedder
         ): void {
             $this->attempts++;
 
@@ -117,6 +120,7 @@ it('retries enrichment once after recoverable sequence drift is repaired', funct
         $articleExplainerProjector,
         $calculator,
         $articleTextService,
+        $articleChunkEmbedder,
     ] = makeEnrichmentDependencies();
 
     $job->handle(
@@ -128,7 +132,8 @@ it('retries enrichment once after recoverable sequence drift is repaired', funct
         $articleExplainerProjector,
         $calculator,
         $articleTextService,
-        $synchronizer
+        $synchronizer,
+        $articleChunkEmbedder
     );
 
     expect($article->fresh())->not->toBeNull()
@@ -164,7 +169,8 @@ it('does not retry on non-recoverable unique constraint errors', function () {
             ProcessTimelineProjector $processTimelineProjector,
             ArticleExplainerProjector $articleExplainerProjector,
             CivicRelevanceCalculator $calculator,
-            ArticleTextService $articleTextService
+            ArticleTextService $articleTextService,
+            ArticleChunkEmbedder $articleChunkEmbedder
         ): void {
             throw recoverablePrimaryKeyViolation('article_analyses_article_id_unique');
         }
@@ -179,6 +185,7 @@ it('does not retry on non-recoverable unique constraint errors', function () {
         $articleExplainerProjector,
         $calculator,
         $articleTextService,
+        $articleChunkEmbedder,
     ] = makeEnrichmentDependencies();
 
     expect(fn () => $job->handle(
@@ -190,7 +197,8 @@ it('does not retry on non-recoverable unique constraint errors', function () {
         $articleExplainerProjector,
         $calculator,
         $articleTextService,
-        $synchronizer
+        $synchronizer,
+        $articleChunkEmbedder
     ))->toThrow(UniqueConstraintViolationException::class);
 });
 
@@ -226,7 +234,8 @@ it('fails when sequence drift is detected but not repaired', function () {
             ProcessTimelineProjector $processTimelineProjector,
             ArticleExplainerProjector $articleExplainerProjector,
             CivicRelevanceCalculator $calculator,
-            ArticleTextService $articleTextService
+            ArticleTextService $articleTextService,
+            ArticleChunkEmbedder $articleChunkEmbedder
         ): void {
             throw recoverablePrimaryKeyViolation('article_explainers_pkey');
         }
@@ -241,6 +250,7 @@ it('fails when sequence drift is detected but not repaired', function () {
         $articleExplainerProjector,
         $calculator,
         $articleTextService,
+        $articleChunkEmbedder,
     ] = makeEnrichmentDependencies();
 
     expect(fn () => $job->handle(
@@ -252,6 +262,7 @@ it('fails when sequence drift is detected but not repaired', function () {
         $articleExplainerProjector,
         $calculator,
         $articleTextService,
-        $synchronizer
+        $synchronizer,
+        $articleChunkEmbedder
     ))->toThrow(UniqueConstraintViolationException::class);
 });

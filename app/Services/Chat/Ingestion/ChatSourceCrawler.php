@@ -8,6 +8,7 @@ use App\Services\Chat\HtmlTextExtractor;
 use App\Services\Chat\PdfTextExtractor;
 use GuzzleHttp\Psr7\Uri;
 use GuzzleHttp\Psr7\UriResolver;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class ChatSourceCrawler
@@ -17,6 +18,7 @@ class ChatSourceCrawler
         private readonly HtmlTextExtractor $htmlTextExtractor,
         private readonly PdfTextExtractor $pdfTextExtractor,
         private readonly ChatSourceGuard $chatSourceGuard,
+        private readonly NavigationPageClassifier $navigationPageClassifier,
     ) {}
 
     /**
@@ -79,6 +81,12 @@ class ChatSourceCrawler
             }
 
             if ($this->chatSourceGuard->isBlockedPage($url, $canonicalUrl, $title, $contentText)) {
+                continue;
+            }
+
+            if ($this->navigationPageClassifier->isNavigationPage($contentText)) {
+                Log::debug('Skipping navigation page during crawl', ['url' => $url, 'title' => $title]);
+
                 continue;
             }
 

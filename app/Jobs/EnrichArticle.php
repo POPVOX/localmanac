@@ -9,6 +9,7 @@ use App\Services\Analysis\CivicActionProjector;
 use App\Services\Analysis\CivicRelevanceCalculator;
 use App\Services\Analysis\ProcessTimelineProjector;
 use App\Services\Articles\ArticleTextService;
+use App\Services\Chat\Ingestion\ArticleChunkEmbedder;
 use App\Services\Extraction\ClaimWriter;
 use App\Services\Extraction\Enricher;
 use App\Services\Extraction\ProjectionWriter;
@@ -51,7 +52,8 @@ class EnrichArticle implements ShouldQueue
         ArticleExplainerProjector $articleExplainerProjector,
         CivicRelevanceCalculator $calculator,
         ArticleTextService $articleTextService,
-        PostgresSequenceSynchronizer $sequenceSynchronizer
+        PostgresSequenceSynchronizer $sequenceSynchronizer,
+        ArticleChunkEmbedder $articleChunkEmbedder
     ): void {
         $article = Article::query()
             ->with(['body', 'city', 'scraper.organization'])
@@ -75,7 +77,8 @@ class EnrichArticle implements ShouldQueue
                 $processTimelineProjector,
                 $articleExplainerProjector,
                 $calculator,
-                $articleTextService
+                $articleTextService,
+                $articleChunkEmbedder
             );
         } catch (UniqueConstraintViolationException $exception) {
             if (! $this->isRecoverablePrimaryKeyViolation($exception)) {
@@ -101,7 +104,8 @@ class EnrichArticle implements ShouldQueue
                 $processTimelineProjector,
                 $articleExplainerProjector,
                 $calculator,
-                $articleTextService
+                $articleTextService,
+                $articleChunkEmbedder
             );
         }
     }
@@ -115,7 +119,8 @@ class EnrichArticle implements ShouldQueue
         ProcessTimelineProjector $processTimelineProjector,
         ArticleExplainerProjector $articleExplainerProjector,
         CivicRelevanceCalculator $calculator,
-        ArticleTextService $articleTextService
+        ArticleTextService $articleTextService,
+        ArticleChunkEmbedder $articleChunkEmbedder
     ): void {
         $payload = $enricher->enrich($article);
         $analysis = is_array($payload['analysis'] ?? null) ? $payload['analysis'] : [];
@@ -167,6 +172,15 @@ class EnrichArticle implements ShouldQueue
         $processTimelineProjector->projectForArticle($article, $payload);
         $articleExplainerProjector->projectForArticle($article, $payload);
         $articleTextService->refresh($article);
+
+        try {
+            $articleChunkEmbedder->embed($article);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to generate article chunk embeddings after enrichment.', [
+                'article_id' => $article->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function isRecoverablePrimaryKeyViolation(UniqueConstraintViolationException $exception): bool
