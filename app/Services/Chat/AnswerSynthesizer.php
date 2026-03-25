@@ -16,7 +16,6 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Laravel\Ai\Providers\Tools\WebSearch;
 use Laravel\Ai\Streaming\Events\ProviderToolEvent;
 use Laravel\Ai\Streaming\Events\TextDelta;
 use Laravel\Ai\Streaming\Events\ToolResult;
@@ -63,13 +62,9 @@ class AnswerSynthesizer
     ): array {
         $originalQuestion ??= $question;
         $eventContext = $this->resolveEventContext($question, $city);
-        $seedEvidence = $this->seedEvidence($sources, $question);
+        $seedEvidence = $this->seedEvidence($sources, $question, $city->id);
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
         $eventCitations = $this->citationsFromLocalEvents($eventContext['local_events'] ?? []);
-        $forcedEventCitations = [];
-        $forcedEventContextAnswer = false;
-        $usedSeedAnswer = false;
-        $model = $this->chatModelForQuestion($question, $eventContext);
 
         $agent = StreamingChatAnswerAgent::make(
             tools: $this->buildTools($city, $sources, $question, $eventContext),
@@ -84,7 +79,7 @@ class AnswerSynthesizer
         $stream = $agent->stream(
             $this->streamingPrompt($question, $city, $seedEvidence, $eventContext),
             provider: $this->streamProvider(),
-            model: $model,
+            model: (string) config('chat.model', config('enrichment.model', 'gpt-4o-mini')),
             timeout: (int) config('chat.http_timeout', 20),
         );
         $resolvedConversationId = $conversationId;
@@ -128,10 +123,6 @@ class AnswerSynthesizer
             $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
         }
 
-        if (($eventContext['intent'] ?? false) && $this->shouldRejectProceduralEventAnswer($question, $answer)) {
-            $answer = self::NO_ANSWER_MESSAGE;
-        }
-
         if ($answer !== ''
             && ! $this->isNoAnswerMessage($answer)
             && ! $this->isRefusalMessage($answer)
@@ -140,44 +131,17 @@ class AnswerSynthesizer
             $answer = self::NO_ANSWER_MESSAGE;
         }
 
-        if (($answer === '' || $this->isNoAnswerMessage($answer)) && $seedEvidence !== []) {
-            $seedAnswer = $this->answerFromSeedEvidence($question, $city, $seedEvidence);
+        if ($answer === '' || $this->isNoAnswerMessage($answer)) {
+            $answer = self::NO_ANSWER_MESSAGE;
 
-            if ($seedAnswer !== ''
-                && ! $this->isNoAnswerMessage($seedAnswer)
-                && $this->isAnswerGrounded($question, $seedAnswer, $city, $seedEvidence, $seedCitations)
-            ) {
-                $answer = $seedAnswer;
-                $usedSeedAnswer = true;
-
-                if ($streamedText === '') {
-                    $onDelta($answer);
-                }
-            }
-        }
-
-        if (($usedSeedAnswer || $citations === []) && $seedCitations !== []) {
-            $citations = $seedCitations;
-            $confidence = max($confidence, $this->deterministicSourceConfidence());
-            $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
-        }
-
-        if ($this->shouldUseFilteredLocalEventsInFinalAnswer($question, $eventContext)) {
-            $forcedEventContextAnswer = true;
-
-            if ((int) ($eventContext['local_total'] ?? 0) > 0 && is_array($eventContext['local_events'] ?? null)) {
-                $answer = $this->answerFromLocalEvents($city, $eventContext['window'] ?? null, $eventContext['local_events']);
-                $forcedEventCitations = $this->citationsFromLocalEvents($eventContext['local_events']);
-                $citations = $forcedEventCitations;
+            if ($citations === [] && $seedCitations !== []) {
+                $citations = $seedCitations;
                 $confidence = max($confidence, $this->deterministicSourceConfidence());
                 $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
-            } else {
-                $answer = $this->noEventsFoundMessage($city, $eventContext['window'] ?? null, $question);
-                $citations = [];
-                $forcedEventCitations = [];
-                $sourceMode = 'none';
             }
-        } elseif (($eventContext['intent'] ?? false) && ($answer === '' || $this->isNoAnswerMessage($answer))) {
+        }
+
+        if (($eventContext['intent'] ?? false) && ($answer === '' || $this->isNoAnswerMessage($answer))) {
             if ((int) ($eventContext['local_total'] ?? 0) > 0 && is_array($eventContext['local_events'] ?? null)) {
                 $answer = $this->answerFromLocalEvents($city, $eventContext['window'] ?? null, $eventContext['local_events']);
                 $confidence = max($confidence, $this->deterministicSourceConfidence());
@@ -191,36 +155,6 @@ class AnswerSynthesizer
             }
         }
 
-        if ($this->shouldRejectProceduralAnswerForNonProceduralQuery(
-            question: $question,
-            answer: $answer,
-            eventIntent: (bool) ($eventContext['intent'] ?? false),
-        )) {
-            $answer = self::NO_ANSWER_MESSAGE;
-            $citations = [];
-            $confidence = 0.0;
-            $sourceMode = 'none';
-        }
-
-        $preliminaryAlignedEvidence = $this->alignedEvidenceForAnswer($question, $answer, $seedEvidence);
-
-        if ($this->shouldConstrainProceduralAnswer(
-            question: $question,
-            answer: $answer,
-            seedEvidence: $seedEvidence,
-            alignedEvidence: $preliminaryAlignedEvidence,
-            eventIntent: (bool) ($eventContext['intent'] ?? false),
-        )) {
-            $narrowEvidence = $preliminaryAlignedEvidence !== [] ? $preliminaryAlignedEvidence : $seedEvidence;
-            $answer = $this->narrowProceduralAnswerFromEvidence($narrowEvidence);
-
-            if ($seedCitations !== []) {
-                $citations = $seedCitations;
-                $confidence = max($confidence, $this->deterministicSourceConfidence());
-                $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
-            }
-        }
-
         $answer = $this->cleanAnswerText($answer);
         $citationSelection = $this->finalizeCitations(
             question: $question,
@@ -231,15 +165,6 @@ class AnswerSynthesizer
         $citations = $citationSelection['citations'];
         $alignedEvidence = $citationSelection['aligned_evidence'];
         $droppedCitations = $citationSelection['dropped'];
-
-        if ($forcedEventContextAnswer) {
-            $citations = $forcedEventCitations;
-            $alignedEvidence = [];
-            $droppedCitations = [];
-            $sourceMode = $citations === []
-                ? 'none'
-                : $this->detectSourceModeFromCitations($citations, $sources, $city);
-        }
 
         if ($this->isRefusalMessage($answer)) {
             $citations = [];
@@ -275,7 +200,6 @@ class AnswerSynthesizer
      */
     private function streamingPrompt(string $question, City $city, array $seedEvidence = [], array $eventContext = []): string
     {
-        $webEnabled = $this->isWebSearchEnabledForQuestion($question, $eventContext);
         $eventIntent = (bool) ($eventContext['intent'] ?? false);
         $eventWindow = $eventContext['window'] ?? null;
 
@@ -293,7 +217,6 @@ class AnswerSynthesizer
             'Do not name any department, agency, provider, company, office, or organization unless that exact name appears in retrieved evidence.',
             'If the evidence supports the action but not the responsible entity, say you could not verify the exact organization from the sources.',
             '',
-            'Web search available: '.($webEnabled ? 'yes' : 'no'),
             'Event intent detected: '.($eventIntent ? 'yes' : 'no'),
             '',
             'City:',
@@ -352,31 +275,6 @@ class AnswerSynthesizer
                 city: $city,
                 defaultWindow: $eventContext['window'] ?? null,
             );
-        }
-
-        if ($this->isWebSearchEnabledForQuestion($question, $eventContext)) {
-            $webSearch = new WebSearch(
-                maxSearches: (int) config('chat.tools.web_search.max_searches', 2),
-            );
-
-            $allowedDomains = $this->webAllowedDomains($sources, $city, $eventContext);
-
-            if ($allowedDomains !== []) {
-                $webSearch->allow($allowedDomains);
-            }
-
-            if ((bool) config('chat.tools.web_search.use_city_location', true)) {
-                // TODO: Switch to $webSearch->location(...) after laravel/ai fixes
-                // WebSearch::location() to return $this in the installed version.
-                $configuredCity = config('chat.tools.web_search.location_city');
-                $webSearch->city = is_string($configuredCity) && trim($configuredCity) !== ''
-                    ? $configuredCity
-                    : $city->name;
-                $webSearch->region = config('chat.tools.web_search.location_region');
-                $webSearch->country = (string) config('chat.tools.web_search.default_country', 'US');
-            }
-
-            $tools[] = $webSearch;
         }
 
         return $tools;
@@ -640,119 +538,6 @@ class AnswerSynthesizer
     }
 
     /**
-     * @param  Collection<int, \App\Models\ChatSource>  $sources
-     * @param  array<string, mixed>  $eventContext
-     * @return array<int, string>
-     */
-    private function webAllowedDomains(Collection $sources, City $city, array $eventContext): array
-    {
-        return (bool) ($eventContext['intent'] ?? false)
-            ? $this->eventWebAllowedDomains($city)
-            : [];
-    }
-
-    /**
-     * @param  array<string, mixed>  $eventContext
-     */
-    private function isWebSearchEnabledForQuestion(string $question, array $eventContext = []): bool
-    {
-        if (! (bool) config('chat.tools.web_search.enabled', true)) {
-            return false;
-        }
-
-        if (! (bool) ($eventContext['intent'] ?? false)) {
-            return false;
-        }
-
-        if (! (bool) config('chat.events.web_fallback.enabled', true)) {
-            return false;
-        }
-
-        if ((bool) config('chat.events.web_fallback.only_when_local_empty', true)) {
-            return ((int) ($eventContext['local_total'] ?? 0)) === 0;
-        }
-
-        return true;
-    }
-
-    private function isProceduralQuestion(string $question): bool
-    {
-        if ($this->eventIntentDetector->isEventIntent($question)) {
-            return false;
-        }
-
-        $normalized = mb_strtolower(trim($question));
-
-        if ($normalized === '') {
-            return false;
-        }
-
-        if (preg_match('/\b(how do i|how to|what do i need|where do i apply|where can i apply|steps?|step by step|process|procedure)\b/u', $normalized) === 1) {
-            return true;
-        }
-
-        if (preg_match('/\b(apply|application|permit|license|renew|register|file|submit|request|obtain)\b/u', $normalized) !== 1) {
-            return false;
-        }
-
-        if (preg_match('/\b(what new|new permits|rezonings|projects|project|active service alerts?|service alerts?|alerts?|status|summary|summarize|overview|updates?|recently|coming up)\b/u', $normalized) === 1) {
-            return false;
-        }
-
-        return preg_match('/\b(i|my|me|need|required|requirements?|documents?|fees?|cost|where|when|how|can i|do i|should i|get)\b/u', $normalized) === 1;
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function proceduralFocusTerms(string $question): array
-    {
-        $ignored = [
-            'how', 'what', 'when', 'where', 'which', 'who', 'does', 'need', 'want',
-            'apply', 'application', 'obtain', 'get', 'renew', 'register', 'file',
-            'submit', 'request', 'schedule', 'report', 'permit', 'permits',
-            'license', 'licenses', 'process', 'procedure', 'steps', 'step', 'city',
-        ];
-
-        return collect($this->keywordTerms($question))
-            ->reject(fn (string $term): bool => in_array($term, $ignored, true))
-            ->values()
-            ->all();
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function proceduralSignals(): array
-    {
-        return [
-            'apply',
-            'application',
-            'submit',
-            'submitted',
-            'approval',
-            'approved',
-            'inspection',
-            'inspections',
-            'required',
-            'requirements',
-            'document',
-            'documents',
-            'portal',
-            'review',
-            'certificate',
-            'fee',
-            'fees',
-            'bond',
-            'before',
-            'after',
-            'then',
-            'next',
-            'finally',
-        ];
-    }
-
-    /**
      * @return array<int, string>
      */
     private function genericEvidenceSignals(): array
@@ -827,10 +612,10 @@ class AnswerSynthesizer
      * @param  Collection<int, \App\Models\ChatSource>  $sources
      * @return array<int, array<string, mixed>>
      */
-    private function seedEvidence(Collection $sources, string $question): array
+    private function seedEvidence(Collection $sources, string $question, ?int $cityId = null): array
     {
         try {
-            $retrieved = $this->chatSourceRetriever->retrieve($sources, $question);
+            $retrieved = $this->chatSourceRetriever->retrieve($sources, $question, $cityId);
         } catch (\Throwable) {
             return [];
         }
@@ -995,57 +780,6 @@ class AnswerSynthesizer
     private function deterministicSourceConfidence(): float
     {
         return max((float) config('chat.source_display_min_confidence', 0.85), 0.9);
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $seedEvidence
-     */
-    private function answerFromSeedEvidence(string $question, City $city, array $seedEvidence): string
-    {
-        if ($seedEvidence === []) {
-            return '';
-        }
-
-        $prompt = implode("\n", [
-            'You are a civic information assistant.',
-            'Answer only from the provided evidence excerpts.',
-            'Do not invent facts, URLs, dates, numbers, or contacts.',
-            'If the evidence includes a phone number, URL, or street address that helps answer the question, include it directly in the answer.',
-            'If you tell the user to call, show the actual phone number.',
-            'If you tell the user to visit a site or GIS tool, show the exact URL.',
-            'If you tell the user to go somewhere, show the exact address when the evidence provides one.',
-            'Do not name any department, agency, provider, company, office, or organization unless that exact name appears in the evidence excerpts.',
-            'If the evidence supports the action but not the responsible entity, say you could not verify the exact organization from the sources.',
-            'If the evidence is insufficient, answer exactly: "'.self::NO_ANSWER_MESSAGE.'"',
-            '',
-            'City:',
-            $city->name,
-            '',
-            'Time context:',
-            ...$this->temporalContextLines($city),
-            '',
-            'Question:',
-            $question,
-            '',
-            'Evidence excerpts:',
-            json_encode($this->compactSeedEvidence($seedEvidence), JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) ?: '[]',
-        ]);
-
-        try {
-            $response = StreamingChatAnswerAgent::make(tools: [])->prompt(
-                $prompt,
-                provider: $this->providerPreference(
-                    chainConfigKey: 'chat.provider_chain',
-                    fallbackProviderConfigKey: 'chat.provider',
-                    model: (string) config('chat.model', config('enrichment.model', 'gpt-4o-mini')),
-                ),
-                timeout: (int) config('chat.http_timeout', 20),
-            );
-        } catch (\Throwable) {
-            return '';
-        }
-
-        return trim((string) ($response->text ?? ''));
     }
 
     private function phonePattern(): string
@@ -1239,35 +973,6 @@ class AnswerSynthesizer
     }
 
     /**
-     * @param  array<string, mixed>  $eventContext
-     */
-    private function shouldUseFilteredLocalEventsInFinalAnswer(string $question, array $eventContext): bool
-    {
-        if (! (bool) ($eventContext['intent'] ?? false)) {
-            return false;
-        }
-
-        $question = mb_strtolower($question);
-
-        foreach ([
-            'meeting',
-            'meetings',
-            'city council',
-            'board',
-            'commission',
-            'public meeting',
-            'public meetings',
-            'agenda',
-        ] as $signal) {
-            if (str_contains($question, $signal)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
      * @param  array{
      *     start_at: Carbon,
      *     end_at: Carbon,
@@ -1385,39 +1090,62 @@ class AnswerSynthesizer
         $supportDigits = preg_replace('/\D+/', '', $supportText) ?? '';
 
         if ($supportHaystack === '') {
+            Log::info('chat.grounding.failed', [
+                'question' => $question,
+                'reason' => 'empty_support_text',
+            ]);
+
             return false;
         }
 
         foreach ($this->extractAnswerUrls($answer) as $url) {
             if (! str_contains($supportHaystack, $this->normalizeSupportText($url))) {
+                Log::info('chat.grounding.failed', [
+                    'question' => $question,
+                    'claim_type' => 'url',
+                    'claim_value' => $url,
+                    'evidence_gap' => 'URL not found in seed or tool evidence',
+                ]);
+
                 return false;
             }
         }
 
         foreach ($this->extractAnswerPhones($answer) as $digits) {
             if (! str_contains($supportDigits, $digits)) {
+                Log::info('chat.grounding.failed', [
+                    'question' => $question,
+                    'claim_type' => 'phone',
+                    'claim_value' => $this->formatPhoneNumber($digits),
+                    'evidence_gap' => 'Phone number not found in seed or tool evidence',
+                ]);
+
                 return false;
             }
         }
 
         foreach ($this->extractAnswerCurrencyValues($answer) as $value) {
             if (! str_contains($supportHaystack, $this->normalizeSupportText($value))) {
+                Log::info('chat.grounding.failed', [
+                    'question' => $question,
+                    'claim_type' => 'currency',
+                    'claim_value' => $value,
+                    'evidence_gap' => 'Currency value not found in seed or tool evidence',
+                ]);
+
                 return false;
             }
         }
 
         foreach ($this->extractAnswerAddresses($answer) as $address) {
             if (! str_contains($supportHaystack, $this->normalizeSupportText($address))) {
-                return false;
-            }
-        }
+                Log::info('chat.grounding.failed', [
+                    'question' => $question,
+                    'claim_type' => 'address',
+                    'claim_value' => $address,
+                    'evidence_gap' => 'Address not found in seed or tool evidence',
+                ]);
 
-        if (! $this->requiresStrictEntityGrounding($question, $answer)) {
-            return true;
-        }
-
-        foreach ($this->extractReferredEntities($answer, $city) as $entity) {
-            if (! str_contains($supportHaystack, $this->normalizeSupportText($entity))) {
                 return false;
             }
         }
@@ -1466,7 +1194,6 @@ class AnswerSynthesizer
         }
 
         $alignedEvidence = $this->alignedEvidenceForAnswer($question, $answer, $seedEvidence);
-        $alignedEvidence = $this->filterProceduralAlignedEvidence($question, $alignedEvidence);
         $dropped = [];
         $alignedUrls = collect($alignedEvidence)
             ->pluck('source_url')
@@ -1510,8 +1237,6 @@ class AnswerSynthesizer
             })
             ->values();
 
-        $preferredCitations = $this->filterProceduralCitations($question, $preferredCitations, $alignedEvidence, $dropped);
-
         if ($preferredCitations->isEmpty() && $evidenceCitations->isNotEmpty()) {
             $preferredCitations = $evidenceCitations
                 ->map(function (array $citation): array {
@@ -1549,8 +1274,6 @@ class AnswerSynthesizer
                 })
                 ->unique('source_url')
                 ->values();
-
-            $supportedCandidates = $this->filterProceduralCitations($question, $supportedCandidates, $alignedEvidence, $dropped);
 
             if ($supportedCandidates->isEmpty() && $alignedUrls->isEmpty()) {
                 $supportedCandidates = collect($candidateCitations)
@@ -1611,11 +1334,9 @@ class AnswerSynthesizer
         }
 
         $terms = $this->answerAlignmentTerms($question, $answer);
-        $isProcedural = $this->isProceduralQuestion($question);
-        $proceduralFocusTerms = $isProcedural ? $this->proceduralFocusTerms($question) : [];
 
         $ranked = collect($seedEvidence)
-            ->map(function (array $item) use ($terms, $answer, $isProcedural, $question, $proceduralFocusTerms): array {
+            ->map(function (array $item) use ($terms, $answer): array {
                 $snippet = mb_strtolower((string) ($item['snippet'] ?? ''));
                 $title = mb_strtolower((string) ($item['title'] ?? ''));
                 $url = mb_strtolower((string) ($item['source_url'] ?? ''));
@@ -1654,18 +1375,7 @@ class AnswerSynthesizer
                     }
                 }
 
-                if ($isProcedural) {
-                    $alignmentScore += $this->proceduralEvidenceAlignmentBoost($proceduralFocusTerms, $item);
-                    $alignmentScore -= $this->proceduralEvidenceMismatchPenalty($question, $proceduralFocusTerms, $item);
-
-                    foreach ($this->proceduralSignals() as $signal) {
-                        if (str_contains($snippet, $signal)) {
-                            $alignmentScore += 1.25;
-                        }
-                    }
-                }
-
-                $alignmentScore -= $this->genericEvidencePenalty($item) * ($isProcedural ? 1.5 : 1.0);
+                $alignmentScore -= $this->genericEvidencePenalty($item);
                 $item['alignment_score'] = $alignmentScore + min($score, 10.0);
 
                 return $item;
@@ -1687,185 +1397,6 @@ class AnswerSynthesizer
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $alignedEvidence
-     * @return array<int, array<string, mixed>>
-     */
-    private function filterProceduralAlignedEvidence(string $question, array $alignedEvidence): array
-    {
-        if (! $this->questionRequiresProceduralSteps($question) || $alignedEvidence === []) {
-            return $alignedEvidence;
-        }
-
-        $filtered = collect($alignedEvidence)
-            ->filter(fn (array $item): bool => $this->supportsProceduralEvidence($question, $item))
-            ->values();
-
-        return $filtered->isNotEmpty() ? $filtered->all() : $alignedEvidence;
-    }
-
-    /**
-     * @param  array<int, array{title: string, source_url: string, type: string}>  $citations
-     * @param  array<int, array<string, mixed>>  $alignedEvidence
-     * @param  array<int, array{source_url: string, reason: string}>  $dropped
-     * @return \Illuminate\Support\Collection<int, array{title: string, source_url: string, type: string}>
-     */
-    private function filterProceduralCitations(string $question, Collection $citations, array $alignedEvidence, array &$dropped): Collection
-    {
-        if (! $this->questionRequiresProceduralSteps($question) || $citations->isEmpty()) {
-            return $citations;
-        }
-
-        $supportedUrls = collect($alignedEvidence)
-            ->filter(fn (array $item): bool => $this->supportsProceduralEvidence($question, $item))
-            ->pluck('source_url')
-            ->filter(fn ($url): bool => is_string($url) && trim($url) !== '')
-            ->unique()
-            ->values();
-
-        if ($supportedUrls->isEmpty()) {
-            return $citations;
-        }
-
-        $filtered = $citations
-            ->filter(function (array $citation) use ($supportedUrls, &$dropped): bool {
-                $url = trim((string) ($citation['source_url'] ?? ''));
-
-                if (! $supportedUrls->contains($url)) {
-                    $dropped[] = [
-                        'source_url' => $url,
-                        'reason' => 'procedural_mismatch',
-                    ];
-
-                    return false;
-                }
-
-                return true;
-            })
-            ->values();
-
-        return $filtered->isNotEmpty() ? $filtered : $citations;
-    }
-
-    /**
-     * @param  array<string, mixed>  $item
-     */
-    private function supportsProceduralEvidence(string $question, array $item): bool
-    {
-        if (! $this->questionRequiresProceduralSteps($question)) {
-            return true;
-        }
-
-        $focusTerms = $this->proceduralFocusTerms($question);
-
-        if ($focusTerms === []) {
-            return true;
-        }
-
-        $snippet = mb_strtolower((string) ($item['snippet'] ?? ''));
-        $title = mb_strtolower((string) ($item['title'] ?? ''));
-        $url = mb_strtolower((string) ($item['source_url'] ?? ''));
-        $context = $title.' '.$url;
-        $focusInSnippet = false;
-        $focusInContext = false;
-
-        foreach ($focusTerms as $term) {
-            if (str_contains($snippet, $term)) {
-                $focusInSnippet = true;
-            }
-
-            if (str_contains($context, $term)) {
-                $focusInContext = true;
-            }
-        }
-
-        $processSignals = $this->proceduralProcessSignalCount($snippet.' '.$context);
-
-        if ($this->genericEvidencePenalty($item) >= 4.0 && ! $focusInContext) {
-            return false;
-        }
-
-        if ($focusInContext) {
-            return true;
-        }
-
-        return $focusInSnippet && $processSignals >= 2;
-    }
-
-    /**
-     * @param  array<int, string>  $focusTerms
-     * @param  array<string, mixed>  $item
-     */
-    private function proceduralEvidenceAlignmentBoost(array $focusTerms, array $item): float
-    {
-        if ($focusTerms === []) {
-            return 0.0;
-        }
-
-        $snippet = mb_strtolower((string) ($item['snippet'] ?? ''));
-        $title = mb_strtolower((string) ($item['title'] ?? ''));
-        $url = mb_strtolower((string) ($item['source_url'] ?? ''));
-        $context = $title.' '.$url;
-        $boost = 0.0;
-
-        foreach ($focusTerms as $term) {
-            if (str_contains($snippet, $term)) {
-                $boost += 4.0;
-            }
-
-            if (str_contains($context, $term)) {
-                $boost += 8.0;
-            }
-        }
-
-        $boost += $this->proceduralProcessSignalCount($snippet.' '.$context) * 1.5;
-
-        return $boost;
-    }
-
-    /**
-     * @param  array<int, string>  $focusTerms
-     * @param  array<string, mixed>  $item
-     */
-    private function proceduralEvidenceMismatchPenalty(string $question, array $focusTerms, array $item): float
-    {
-        if (! $this->questionRequiresProceduralSteps($question) || $focusTerms === []) {
-            return 0.0;
-        }
-
-        $snippet = mb_strtolower((string) ($item['snippet'] ?? ''));
-        $title = mb_strtolower((string) ($item['title'] ?? ''));
-        $url = mb_strtolower((string) ($item['source_url'] ?? ''));
-        $context = $title.' '.$url;
-        $focusInSnippet = false;
-        $focusInContext = false;
-
-        foreach ($focusTerms as $term) {
-            if (str_contains($snippet, $term)) {
-                $focusInSnippet = true;
-            }
-
-            if (str_contains($context, $term)) {
-                $focusInContext = true;
-            }
-        }
-
-        $processSignals = $this->proceduralProcessSignalCount($snippet.' '.$context);
-        $penalty = 0.0;
-
-        if ($focusInSnippet && ! $focusInContext) {
-            $penalty += 18.0;
-        }
-
-        if ($processSignals === 0) {
-            $penalty += 18.0;
-        } elseif ($processSignals === 1) {
-            $penalty += 8.0;
-        }
-
-        return $penalty;
-    }
-
-    /**
      * @return array<int, string>
      */
     private function answerAlignmentTerms(string $question, string $answer): array
@@ -1883,361 +1414,6 @@ class AnswerSynthesizer
             $terms,
             fn (string $term): bool => mb_strlen($term) >= 3 && ! in_array($term, $stopwords, true)
         )));
-    }
-
-    private function questionRequiresProceduralSteps(string $question): bool
-    {
-        return $this->isProceduralQuestion($question);
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $seedEvidence
-     * @param  array<int, array<string, mixed>>  $alignedEvidence
-     */
-    private function shouldConstrainProceduralAnswer(
-        string $question,
-        string $answer,
-        array $seedEvidence,
-        array $alignedEvidence,
-        bool $eventIntent = false,
-    ): bool {
-        if ($eventIntent) {
-            return false;
-        }
-
-        if ($answer === '' || $this->isNoAnswerMessage($answer) || $this->isRefusalMessage($answer)) {
-            return false;
-        }
-
-        if (! $this->isProceduralQuestion($question)) {
-            return false;
-        }
-
-        if (! $this->answerLooksProcedural($answer)) {
-            return false;
-        }
-
-        $evidence = $alignedEvidence !== [] ? $alignedEvidence : $seedEvidence;
-
-        if ($evidence === []) {
-            return false;
-        }
-
-        return ! $this->proceduralEvidenceSupportsCompleteProcess($question, $evidence);
-    }
-
-    private function answerLooksProcedural(string $answer): bool
-    {
-        return preg_match('/(?:^|\n)\s*(?:\d+\.)\s+/m', $answer) === 1
-            || preg_match('/\b(step|steps|first|second|third|then|next|finally|before|after)\b/i', $answer) === 1;
-    }
-
-    private function shouldRejectProceduralEventAnswer(string $question, string $answer): bool
-    {
-        if ($answer === '' || ! $this->eventIntentDetector->isEventIntent($question)) {
-            return false;
-        }
-
-        $normalizedAnswer = mb_strtolower($answer);
-        $proceduralSignals = $this->proceduralProcessSignalCount($normalizedAnswer);
-
-        if (preg_match('/(?:^|\n)\s*(?:\d+\.)\s+/m', $answer) === 1 && $proceduralSignals >= 2) {
-            return true;
-        }
-
-        return $proceduralSignals >= 3 && ! $this->answerContainsEventSignals($normalizedAnswer);
-    }
-
-    private function answerContainsEventSignals(string $answer): bool
-    {
-        foreach ([
-            'meeting',
-            'meetings',
-            'agenda',
-            'agendas',
-            'event',
-            'events',
-            'calendar',
-            'city council',
-            'board',
-            'commission',
-            'workshop',
-            'hearing',
-            'city hall',
-        ] as $signal) {
-            if ($this->containsSignal($answer, $signal)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function shouldRejectProceduralAnswerForNonProceduralQuery(string $question, string $answer, bool $eventIntent = false): bool
-    {
-        if ($answer === '' || $eventIntent || $this->isProceduralQuestion($question)) {
-            return false;
-        }
-
-        if (preg_match(
-            '/permit or formal review may be required|full step-by-step process is not clearly described|additional review may apply|submit the application|final inspection/i',
-            $answer
-        ) === 1) {
-            return true;
-        }
-
-        $normalizedAnswer = mb_strtolower($answer);
-        $proceduralSignals = $this->proceduralProcessSignalCount($normalizedAnswer);
-
-        if (preg_match('/(?:^|\n)\s*(?:\d+\.)\s+/m', $answer) === 1 && $proceduralSignals >= 2) {
-            return true;
-        }
-
-        return $proceduralSignals >= 3 && ! $this->answerContainsEventSignals($normalizedAnswer);
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $evidence
-     */
-    private function proceduralEvidenceSupportsCompleteProcess(string $question, array $evidence): bool
-    {
-        $focusTerms = $this->proceduralFocusTerms($question);
-        $focusedEvidenceCount = 0;
-        $actionableEvidenceCount = 0;
-        $richEvidenceCount = 0;
-        $conditionalEvidenceCount = 0;
-        $sequencedEvidenceCount = 0;
-
-        foreach ($evidence as $item) {
-            $content = $this->normalizeSupportText(implode(' ', [
-                (string) ($item['title'] ?? ''),
-                (string) ($item['snippet'] ?? ''),
-                (string) ($item['source_url'] ?? ''),
-            ]));
-
-            if ($content === '') {
-                continue;
-            }
-
-            $focusMatches = $this->focusTermMatchCount($content, $focusTerms);
-            $processSignals = $this->proceduralProcessSignalCount($content);
-            $conditionalSignals = $this->conditionalSignalCount($content);
-            $legalSignals = $this->legalConstraintSignalCount($content);
-            $sequenceSignals = $this->sequenceSignalCount($content);
-
-            if ($focusMatches > 0 || $focusTerms === []) {
-                $focusedEvidenceCount++;
-            }
-
-            if ($conditionalSignals > 0 || $legalSignals >= 2) {
-                $conditionalEvidenceCount++;
-            }
-
-            if ($sequenceSignals >= 2) {
-                $sequencedEvidenceCount++;
-            }
-
-            if ($processSignals >= 3 && $focusMatches > 0 && $conditionalSignals === 0 && $legalSignals <= 1) {
-                $actionableEvidenceCount++;
-            }
-
-            if ($processSignals >= 5 && $focusMatches > 0) {
-                $richEvidenceCount++;
-            }
-        }
-
-        if ($focusedEvidenceCount === 0) {
-            return false;
-        }
-
-        if ($conditionalEvidenceCount >= max(1, (int) ceil($focusedEvidenceCount / 2))) {
-            return false;
-        }
-
-        if ($actionableEvidenceCount >= 2 || $richEvidenceCount >= 2) {
-            return true;
-        }
-
-        return $actionableEvidenceCount >= 1
-            && $sequencedEvidenceCount >= 2
-            && $focusedEvidenceCount >= 2;
-    }
-
-    /**
-     * @param  array<int, array<string, mixed>>  $evidence
-     */
-    private function narrowProceduralAnswerFromEvidence(array $evidence): string
-    {
-        $content = collect($evidence)
-            ->map(fn (array $item): string => $this->normalizeSupportText(implode(' ', [
-                (string) ($item['title'] ?? ''),
-                (string) ($item['snippet'] ?? ''),
-                (string) ($item['source_url'] ?? ''),
-            ])))
-            ->filter()
-            ->values();
-
-        if ($content->isEmpty()) {
-            return self::NO_ANSWER_MESSAGE;
-        }
-
-        $mentionsPermit = $content->contains(fn (string $item): bool => $this->containsSignal($item, 'permit'));
-        $mentionsReview = $content->contains(fn (string $item): bool => $this->containsSignal($item, 'review')
-            || $this->containsSignal($item, 'approval')
-            || $this->containsSignal($item, 'certificate'));
-        $mentionsHistoricCondition = $content->contains(fn (string $item): bool => $this->containsSignal($item, 'historic')
-            || $this->containsSignal($item, 'landmark')
-            || $this->containsSignal($item, 'district')
-            || $this->containsSignal($item, 'preservation'));
-        $mentionsInspection = $content->contains(fn (string $item): bool => $this->containsSignal($item, 'inspection'));
-        $mentionsCleanup = $content->contains(fn (string $item): bool => $this->containsSignal($item, 'debris')
-            || $this->containsSignal($item, 'foundation')
-            || $this->containsSignal($item, 'utilities')
-            || $this->containsSignal($item, 'disposed'));
-        $mentionsDocumentation = $content->contains(fn (string $item): bool => $this->containsSignal($item, 'photographs')
-            || $this->containsSignal($item, 'drawings')
-            || $this->containsSignal($item, 'documentation'));
-        $mentionsAppeal = $content->contains(fn (string $item): bool => $this->containsSignal($item, 'appeal')
-            || $this->containsSignal($item, 'hearing')
-            || $this->containsSignal($item, 'petition'));
-
-        $sentences = [];
-
-        if ($mentionsPermit || $mentionsReview) {
-            $sentences[] = 'The available sources indicate that a permit or formal review may be required.';
-        }
-
-        if ($mentionsHistoricCondition && $mentionsReview) {
-            $sentences[] = 'They suggest that additional review may apply in cases involving historic properties or historic districts.';
-        } elseif ($mentionsReview) {
-            $sentences[] = 'They mention some form of review or approval before the work can proceed.';
-        }
-
-        if ($mentionsInspection) {
-            $sentences[] = $mentionsCleanup
-                ? 'They also mention a final inspection after the work is complete and the site is cleared.'
-                : 'They also mention a final inspection after the work is complete.';
-        }
-
-        if ($mentionsDocumentation) {
-            $sentences[] = 'The sources also mention documentation requirements in some situations.';
-        }
-
-        if ($mentionsAppeal) {
-            $sentences[] = 'They reference a hearing or appeal process in limited situations.';
-        }
-
-        if ($sentences === []) {
-            $sentences[] = 'The available sources only provide partial legal or technical details about the process.';
-        }
-
-        $summary = collect($sentences)
-            ->unique()
-            ->take(2)
-            ->values()
-            ->all();
-
-        $summary[] = 'The full step-by-step process is not clearly described in the available sources.';
-
-        return implode(' ', $summary);
-    }
-
-    /**
-     * @param  array<int, string>  $focusTerms
-     */
-    private function focusTermMatchCount(string $content, array $focusTerms): int
-    {
-        $matches = 0;
-
-        foreach ($focusTerms as $term) {
-            if (str_contains($content, $term)) {
-                $matches++;
-            }
-        }
-
-        return $matches;
-    }
-
-    private function sequenceSignalCount(string $content): int
-    {
-        $matches = 0;
-
-        foreach (['first', 'second', 'third', 'then', 'next', 'finally', 'before', 'after', 'once'] as $signal) {
-            if ($this->containsSignal($content, $signal)) {
-                $matches++;
-            }
-        }
-
-        return $matches;
-    }
-
-    private function conditionalSignalCount(string $content): int
-    {
-        $matches = 0;
-
-        foreach (['if', 'unless', 'may', 'subject to', 'in the event', 'when', 'where'] as $signal) {
-            if ($this->containsSignal($content, $signal)) {
-                $matches++;
-            }
-        }
-
-        return $matches;
-    }
-
-    private function legalConstraintSignalCount(string $content): int
-    {
-        $matches = 0;
-
-        foreach (['ordinance', 'code', 'section', 'subsection', 'shall', 'prohibited', 'hearing', 'board', 'council', 'resolution', 'pursuant', 'aggrieved'] as $signal) {
-            if ($this->containsSignal($content, $signal)) {
-                $matches++;
-            }
-        }
-
-        return $matches;
-    }
-
-    private function containsSignal(string $content, string $signal): bool
-    {
-        if (str_contains($signal, ' ')) {
-            return str_contains($content, $signal);
-        }
-
-        return preg_match('/\b'.preg_quote($signal, '/').'\b/u', $content) === 1;
-    }
-
-    private function proceduralProcessSignalCount(string $content): int
-    {
-        $content = mb_strtolower($content);
-        $matches = 0;
-
-        foreach ([
-            'apply',
-            'application',
-            'submit',
-            'submitted',
-            'approval',
-            'approved',
-            'inspection',
-            'inspections',
-            'required',
-            'requirements',
-            'document',
-            'documents',
-            'portal',
-            'contractor',
-            'review',
-            'certificate',
-            'office',
-            'department',
-            'bond',
-        ] as $signal) {
-            if ($this->containsSignal($content, $signal)) {
-                $matches++;
-            }
-        }
-
-        return $matches;
     }
 
     /**
@@ -2361,46 +1537,6 @@ class AnswerSynthesizer
             ->all();
     }
 
-    private function requiresStrictEntityGrounding(string $question, string $answer): bool
-    {
-        return $this->isProceduralQuestion($question)
-            || preg_match('/\b(call|contact|report|notify|reach|visit|go to|apply|submit|office|department|provider|company|agency|utility)\b/i', $question.' '.$answer) === 1;
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function extractReferredEntities(string $answer, City $city): array
-    {
-        preg_match_all(
-            '/(?i:\b(?:call|contact|report(?:\s+(?:it|them))?\s+to|notify|visit|reach(?:\s+out)?\s+to|go to|through|via)\s+(?:the\s+)?)([A-Z][A-Za-z&.\'-]*(?:\s+[A-Z][A-Za-z&.\'-]*){0,3})\b/',
-            $answer,
-            $matches
-        );
-
-        $ignored = collect([
-            $city->name,
-            'Monday',
-            'Tuesday',
-            'Wednesday',
-            'Thursday',
-            'Friday',
-            'Saturday',
-            'Sunday',
-            'Today',
-            'Tomorrow',
-            'Source',
-        ])->map(fn (string $value): string => $this->normalizeSupportText($value))->all();
-
-        return collect($matches[1] ?? [])
-            ->map(fn (string $value): string => trim($value))
-            ->filter(fn (string $value): bool => $value !== '')
-            ->reject(fn (string $value): bool => in_array($this->normalizeSupportText($value), $ignored, true))
-            ->unique()
-            ->values()
-            ->all();
-    }
-
     /**
      * @param  array{
      *     start_at: Carbon,
@@ -2465,26 +1601,6 @@ class AnswerSynthesizer
     }
 
     /**
-     * @return array<int, string>
-     */
-    private function eventWebAllowedDomains(City $city): array
-    {
-        $mode = (string) config('chat.events.web_fallback.allowed_domains_mode', 'city_event_sources_merged');
-        $cityDomains = $this->eventSourceDomains($city);
-        $globalDomains = collect(config('chat.events.web_fallback.allowed_domains', []))
-            ->filter(fn ($domain): bool => is_string($domain) && trim($domain) !== '')
-            ->map(fn (string $domain): string => $this->normalizeDomain($domain))
-            ->filter()
-            ->values();
-
-        return match ($mode) {
-            'city_event_sources' => $cityDomains->all(),
-            'global' => $globalDomains->unique()->values()->all(),
-            default => $cityDomains->merge($globalDomains)->unique()->values()->all(),
-        };
-    }
-
-    /**
      * @return Collection<int, string>
      */
     private function eventSourceDomains(City $city): Collection
@@ -2530,14 +1646,6 @@ class AnswerSynthesizer
         }
 
         return (string) config('chat.provider', 'openai');
-    }
-
-    /**
-     * @param  array<string, mixed>  $eventContext
-     */
-    private function chatModelForQuestion(string $question, array $eventContext = []): string
-    {
-        return (string) config('chat.model', config('enrichment.model', 'gpt-4o-mini'));
     }
 
     /**

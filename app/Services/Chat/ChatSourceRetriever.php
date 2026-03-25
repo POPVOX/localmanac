@@ -2,6 +2,7 @@
 
 namespace App\Services\Chat;
 
+use App\Services\Chat\Event\EventIntentDetector;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
@@ -14,6 +15,7 @@ class ChatSourceRetriever
         private readonly EmbeddingClient $embeddingClient,
         private readonly VectorFormatter $vectorFormatter,
         private readonly ChatSourceGuard $chatSourceGuard,
+        private readonly EventIntentDetector $eventIntentDetector,
     ) {}
 
     /**
@@ -23,7 +25,7 @@ class ChatSourceRetriever
      *     meta: array<string, int>
      * }
      */
-    public function retrieve(Collection $sources, string $question): array
+    public function retrieve(Collection $sources, string $question, ?int $cityId = null): array
     {
         $question = trim($question);
 
@@ -71,9 +73,27 @@ class ChatSourceRetriever
             ->pipe(fn (Collection $items): Collection => $this->promoteDistinctPagesForAggregationQueries($items, $question))
             ->take((int) config('chat.retrieval_max_evidence', 24));
 
-        $evidence = $rows
+        $chunkEvidence = $rows
             ->map(fn (array $row) => $this->mapEvidence($row))
             ->filter(fn (array $item) => $item['snippet'] !== '')
+            ->values();
+
+        $articleEvidence = collect();
+
+        if ($cityId !== null) {
+            $articleFtsLimit = (int) config('chat.retrieval_fts_limit', 6);
+            $articleEvidence = collect($this->articleFtsSearch($cityId, $question, $articleFtsLimit))
+                ->filter(fn (array $item) => $item['snippet'] !== '')
+                ->values();
+        }
+
+        $maxEvidence = (int) config('chat.retrieval_max_evidence', 24);
+
+        $evidence = $chunkEvidence
+            ->concat($articleEvidence)
+            ->unique('id')
+            ->sortByDesc('score')
+            ->take($maxEvidence)
             ->values()
             ->all();
 
@@ -364,6 +384,101 @@ class ChatSourceRetriever
             'snippet' => trim($row['chunk'] ?? ''),
             'score' => max(1, (int) ceil($effectiveScore)),
         ];
+    }
+
+    /**
+     * Search published articles via PostgreSQL full-text search on title, summary, and body.
+     *
+     * @return array<int, array{id: string, title: string, source_url: string, type: string, snippet: string, score: int}>
+     */
+    private function articleFtsSearch(int $cityId, string $question, int $limit): array
+    {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            return [];
+        }
+
+        try {
+            $rows = $this->articleFtsQuery($cityId, $question, $limit, strict: true);
+
+            if ($rows->isEmpty()) {
+                $relaxedQuery = $this->buildRelaxedTsQuery($question);
+
+                if ($relaxedQuery !== null) {
+                    $rows = $this->articleFtsQuery($cityId, $relaxedQuery, $limit, strict: false);
+                }
+            }
+        } catch (Throwable) {
+            return [];
+        }
+
+        return $rows->map(fn (object $row): array => $this->mapArticleEvidence($row))
+            ->filter(fn (array $item): bool => $item['snippet'] !== '' && $item['source_url'] !== '')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return Collection<int, object>
+     */
+    private function articleFtsQuery(int $cityId, string $question, int $limit, bool $strict): Collection
+    {
+        $tsFunction = $strict ? 'websearch_to_tsquery' : 'to_tsquery';
+
+        $tsvector = "to_tsvector('english', coalesce(articles.title, '') || ' ' || coalesce(articles.summary, '') || ' ' || coalesce(article_bodies.cleaned_text, ''))";
+
+        return DB::table('articles')
+            ->leftJoin('article_bodies', 'article_bodies.article_id', '=', 'articles.id')
+            ->leftJoin('article_explainers', 'article_explainers.article_id', '=', 'articles.id')
+            ->leftJoin('article_sources', 'article_sources.article_id', '=', 'articles.id')
+            ->where('articles.city_id', $cityId)
+            ->where('articles.status', 'published')
+            ->whereRaw("{$tsvector} @@ {$tsFunction}('english', ?)", [$question])
+            ->selectRaw("articles.id, articles.title, articles.summary, article_bodies.cleaned_text, article_explainers.whats_happening, article_explainers.why_it_matters, article_sources.source_url, ts_rank_cd({$tsvector}, {$tsFunction}('english', ?)) as rank", [$question])
+            ->orderByDesc('rank')
+            ->limit($limit)
+            ->get();
+    }
+
+    /**
+     * Normalize an article row into the Evidence_Item format.
+     *
+     * @return array{id: string, title: string, source_url: string, type: string, snippet: string, score: int}
+     */
+    private function mapArticleEvidence(object $article): array
+    {
+        return [
+            'id' => 'article_'.$article->id,
+            'title' => (string) ($article->title ?? 'Article'),
+            'source_url' => (string) ($article->source_url ?? ''),
+            'type' => 'html',
+            'snippet' => $this->articleSnippet($article),
+            'score' => max(1, (int) ceil((float) ($article->rank ?? 1) * 10)),
+        ];
+    }
+
+    /**
+     * Resolve the best snippet text for an article row.
+     *
+     * Priority: explainer (whats_happening + why_it_matters), then summary, then cleaned_text truncated.
+     */
+    private function articleSnippet(object $row): string
+    {
+        $whatsHappening = trim((string) ($row->whats_happening ?? ''));
+        $whyItMatters = trim((string) ($row->why_it_matters ?? ''));
+
+        if ($whatsHappening !== '' || $whyItMatters !== '') {
+            return trim($whatsHappening.' '.$whyItMatters);
+        }
+
+        $summary = trim((string) ($row->summary ?? ''));
+
+        if ($summary !== '') {
+            return $summary;
+        }
+
+        $maxChars = (int) config('chat.chunk_max_chars', 1200);
+
+        return mb_substr(trim((string) ($row->cleaned_text ?? '')), 0, $maxChars);
     }
 
     /**
@@ -864,7 +979,13 @@ class ChatSourceRetriever
 
     private function questionRequiresProceduralSteps(string $question): bool
     {
-        return false;
+        $normalized = mb_strtolower(trim($question));
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        return preg_match('/\b(how do i|how to|what do i need|where do i apply|where can i apply|steps?|step by step|process|procedure)\b/u', $normalized) === 1;
     }
 
     private function countProceduralProcessSignals(string $content): int
@@ -883,6 +1004,22 @@ class ChatSourceRetriever
 
     private function questionAndChunkShareProceduralFocus(string $question, string $chunk, string $context): bool
     {
+        $focusTerms = $this->proceduralFocusTerms($question);
+
+        if ($focusTerms === []) {
+            return false;
+        }
+
+        $chunkLower = mb_strtolower($chunk);
+        $contextLower = mb_strtolower($context);
+        $haystack = $chunkLower.' '.$contextLower;
+
+        foreach ($focusTerms as $term) {
+            if (str_contains($haystack, $term)) {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -891,12 +1028,44 @@ class ChatSourceRetriever
      */
     private function proceduralFocusTerms(string $question): array
     {
-        return [];
+        $ignored = [
+            'how', 'what', 'when', 'where', 'which', 'who', 'does', 'need', 'want',
+            'apply', 'application', 'obtain', 'get', 'renew', 'register', 'file',
+            'submit', 'request', 'schedule', 'report', 'permit', 'permits',
+            'license', 'licenses', 'process', 'procedure', 'steps', 'step', 'city',
+        ];
+
+        return collect($this->keywordTerms($question))
+            ->reject(fn (string $term): bool => in_array($term, $ignored, true))
+            ->values()
+            ->all();
     }
 
     private function isProceduralQuestion(string $question): bool
     {
-        return false;
+        if ($this->eventIntentDetector->isEventIntent($question)) {
+            return false;
+        }
+
+        $normalized = mb_strtolower(trim($question));
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(how do i|how to|what do i need|where do i apply|where can i apply|steps?|step by step|process|procedure)\b/u', $normalized) === 1) {
+            return true;
+        }
+
+        if (preg_match('/\b(apply|application|permit|license|renew|register|file|submit|request|obtain)\b/u', $normalized) !== 1) {
+            return false;
+        }
+
+        if (preg_match('/\b(what new|new permits|rezonings|projects|project|active service alerts?|service alerts?|alerts?|status|summary|summarize|overview|updates?|recently|coming up)\b/u', $normalized) === 1) {
+            return false;
+        }
+
+        return preg_match('/\b(i|my|me|need|required|requirements?|documents?|fees?|cost|where|when|how|can i|do i|should i|get)\b/u', $normalized) === 1;
     }
 
     /**
@@ -904,7 +1073,31 @@ class ChatSourceRetriever
      */
     private function proceduralSignals(): array
     {
-        return [];
+        return [
+            'apply',
+            'application',
+            'submit',
+            'submitted',
+            'approval',
+            'approved',
+            'inspection',
+            'inspections',
+            'required',
+            'requirements',
+            'document',
+            'documents',
+            'portal',
+            'review',
+            'certificate',
+            'fee',
+            'fees',
+            'bond',
+            'before',
+            'after',
+            'then',
+            'next',
+            'finally',
+        ];
     }
 
     /**

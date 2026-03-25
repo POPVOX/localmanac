@@ -5,9 +5,7 @@ use App\Models\City;
 use App\Models\User;
 use App\Services\Chat\AnswerSynthesizer;
 use App\Services\Chat\AskService;
-use App\Services\Chat\ChatEvidenceModeClassifier;
 use App\Services\Chat\ChatSourceSelector;
-use App\Services\Chat\ChatUpdatesAnswerService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -77,18 +75,12 @@ it('uses a single authenticated selector to synthesizer orchestration path for s
         ->and(array_keys($response))->toBe(['answer', 'citations', 'city', 'meta', 'conversation_id']);
 });
 
-it('routes event questions through the event-aware synthesis path even when no chat sources are selected', function () {
+it('returns fallback when no chat sources are selected even for event questions', function () {
     $city = City::factory()->create([
         'name' => 'Wichita',
         'slug' => 'wichita',
     ]);
     $user = User::factory()->create();
-
-    $classifier = Mockery::mock(ChatEvidenceModeClassifier::class);
-    $classifier->shouldReceive('classify')
-        ->once()
-        ->with('What city council, board, and public meetings are coming up in Wichita in the next 14 days?')
-        ->andReturn(ChatEvidenceModeClassifier::EVENTS);
 
     $selector = Mockery::mock(ChatSourceSelector::class);
     $selector->shouldReceive('select')
@@ -97,35 +89,9 @@ it('routes event questions through the event-aware synthesis path even when no c
         ->andReturn(collect());
 
     $synthesizer = Mockery::mock(AnswerSynthesizer::class);
-    $synthesizer->shouldReceive('synthesizeStreaming')
-        ->once()
-        ->with(
-            'What city council, board, and public meetings are coming up in Wichita in the next 14 days?',
-            Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)),
-            Mockery::on(fn (Collection $sources): bool => $sources->isEmpty()),
-            Mockery::on(fn (User $resolvedUser): bool => $resolvedUser->is($user)),
-            null,
-            Mockery::type('callable'),
-            'What city council, board, and public meetings are coming up in Wichita in the next 14 days?'
-        )
-        ->andReturn([
-            'answer' => 'Upcoming meetings include a city council workshop and a planning commission hearing.',
-            'citations' => [
-                [
-                    'title' => 'Meeting Calendar',
-                    'source_url' => 'https://example.com/meetings',
-                    'type' => 'html',
-                ],
-            ],
-            'confidence' => 0.95,
-            'source_mode' => 'local',
-            'conversation_id' => 'conv_events',
-        ]);
+    $synthesizer->shouldNotReceive('synthesizeStreaming');
 
-    $updates = Mockery::mock(ChatUpdatesAnswerService::class);
-    $updates->shouldNotReceive('answer');
-
-    $service = new AskService($selector, $synthesizer, null, $classifier, $updates);
+    $service = new AskService($selector, $synthesizer);
     $response = $service->answerStreamingForUser(
         'What city council, board, and public meetings are coming up in Wichita in the next 14 days?',
         $city->id,
@@ -134,34 +100,43 @@ it('routes event questions through the event-aware synthesis path even when no c
         fn () => null,
     );
 
-    expect($response['answer'])->toContain('Upcoming meetings')
-        ->and($response['citations'][0]['source_url'])->toBe('https://example.com/meetings')
-        ->and($response['conversation_id'])->toBe('conv_events');
+    expect($response['answer'])->toBe('I could not find the answer in the sources I checked. Try a different wording or a more specific question.')
+        ->and($response['citations'])->toBe([])
+        ->and($response['conversation_id'])->toBeNull();
 });
 
-it('routes digest-style updates queries to article-backed updates retrieval', function () {
+it('routes digest-style updates queries through the unified synthesis path', function () {
     $city = City::factory()->create([
         'name' => 'Wichita',
         'slug' => 'wichita',
     ]);
     $user = User::factory()->create();
 
-    $classifier = Mockery::mock(ChatEvidenceModeClassifier::class);
-    $classifier->shouldReceive('classify')
-        ->once()
-        ->with('Summarize the most important local updates in Wichita from the last 7 days.')
-        ->andReturn(ChatEvidenceModeClassifier::UPDATES);
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'City Updates',
+        'source_url' => 'https://example.com/updates',
+        'is_active' => true,
+    ]);
 
     $selector = Mockery::mock(ChatSourceSelector::class);
-    $selector->shouldNotReceive('select');
+    $selector->shouldReceive('select')
+        ->once()
+        ->with($city->id, 'Summarize the most important local updates in Wichita from the last 7 days.')
+        ->andReturn(collect([$source]));
 
     $synthesizer = Mockery::mock(AnswerSynthesizer::class);
-    $synthesizer->shouldNotReceive('synthesizeStreaming');
-
-    $updates = Mockery::mock(ChatUpdatesAnswerService::class);
-    $updates->shouldReceive('answer')
+    $synthesizer->shouldReceive('synthesizeStreaming')
         ->once()
-        ->with('Summarize the most important local updates in Wichita from the last 7 days.', Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)))
+        ->with(
+            'Summarize the most important local updates in Wichita from the last 7 days.',
+            Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)),
+            Mockery::type(Collection::class),
+            Mockery::on(fn (User $resolvedUser): bool => $resolvedUser->is($user)),
+            null,
+            Mockery::type('callable'),
+            'Summarize the most important local updates in Wichita from the last 7 days.'
+        )
         ->andReturn([
             'answer' => "Here are the most important local updates I found from the last 7 days:\n- Mar 24: Water Service Alert Update.\n- Mar 23: Rezoning Filing Update.\n- Mar 21: Downtown Project Approval.",
             'citations' => [
@@ -171,55 +146,48 @@ it('routes digest-style updates queries to article-backed updates retrieval', fu
                     'type' => 'html',
                 ],
             ],
-            'city' => [
-                'id' => $city->id,
-                'name' => $city->name,
-                'slug' => $city->slug,
-            ],
-            'meta' => [
-                'sources_used' => 3,
-                'pages_fetched' => 1,
-                'cache_hits' => 0,
-            ],
+            'confidence' => 0.95,
+            'source_mode' => 'local',
+            'conversation_id' => null,
         ]);
 
-    $streamed = '';
-    $service = new AskService($selector, $synthesizer, null, $classifier, $updates);
+    $service = new AskService($selector, $synthesizer);
     $response = $service->answerStreamingForUser(
         'Summarize the most important local updates in Wichita from the last 7 days.',
         $city->id,
         $user,
         null,
-        function (string $delta) use (&$streamed): null {
-            $streamed .= $delta;
-
-            return null;
-        },
+        fn () => null,
     );
 
     expect($response['answer'])->toContain('Water Service Alert Update')
-        ->and($streamed)->toBe($response['answer'])
-        ->and($response['meta']['sources_used'])->toBe(3)
+        ->and($response['meta']['sources_used'])->toBe(1)
         ->and($response['conversation_id'])->toBeNull();
 });
 
-it('routes whats new this week queries to updates mode instead of event retrieval', function () {
+it('routes whats new this week queries through the unified synthesis path', function () {
     $city = City::factory()->create([
         'name' => 'Wichita',
         'slug' => 'wichita',
     ]);
     $user = User::factory()->create();
 
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'City Updates',
+        'source_url' => 'https://example.com/updates',
+        'is_active' => true,
+    ]);
+
     $selector = Mockery::mock(ChatSourceSelector::class);
-    $selector->shouldNotReceive('select');
+    $selector->shouldReceive('select')
+        ->once()
+        ->with($city->id, "What\u2019s new this week?")
+        ->andReturn(collect([$source]));
 
     $synthesizer = Mockery::mock(AnswerSynthesizer::class);
-    $synthesizer->shouldNotReceive('synthesizeStreaming');
-
-    $updates = Mockery::mock(ChatUpdatesAnswerService::class);
-    $updates->shouldReceive('answer')
+    $synthesizer->shouldReceive('synthesizeStreaming')
         ->once()
-        ->with('What’s new this week?', Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)))
         ->andReturn([
             'answer' => "Here are the most important local updates I found from the last 7 days:\n- Mar 24: Water Service Alert Update.",
             'citations' => [
@@ -229,28 +197,14 @@ it('routes whats new this week queries to updates mode instead of event retrieva
                     'type' => 'html',
                 ],
             ],
-            'city' => [
-                'id' => $city->id,
-                'name' => $city->name,
-                'slug' => $city->slug,
-            ],
-            'meta' => [
-                'sources_used' => 1,
-                'pages_fetched' => 1,
-                'cache_hits' => 0,
-            ],
+            'confidence' => 0.95,
+            'source_mode' => 'local',
+            'conversation_id' => null,
         ]);
 
-    $service = new AskService(
-        $selector,
-        $synthesizer,
-        null,
-        app(ChatEvidenceModeClassifier::class),
-        $updates,
-    );
-
+    $service = new AskService($selector, $synthesizer);
     $response = $service->answerStreamingForUser(
-        'What’s new this week?',
+        "What\u2019s new this week?",
         $city->id,
         $user,
         null,
@@ -262,44 +216,38 @@ it('routes whats new this week queries to updates mode instead of event retrieva
         ->and($response['conversation_id'])->toBeNull();
 });
 
-it('routes service alert queries to updates mode instead of reference retrieval and fallback', function () {
+it('routes service alert queries through the unified synthesis path', function () {
     $city = City::factory()->create([
         'name' => 'Wichita',
         'slug' => 'wichita',
     ]);
     $user = User::factory()->create();
 
-    $classifier = Mockery::mock(ChatEvidenceModeClassifier::class);
-    $classifier->shouldReceive('classify')
-        ->once()
-        ->with('What active service alerts or disruptions should residents in Wichita know about right now? Focus on roads, utilities, water, trash, and public services.')
-        ->andReturn(ChatEvidenceModeClassifier::UPDATES);
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Service Alerts',
+        'source_url' => 'https://example.com/alerts',
+        'is_active' => true,
+    ]);
 
     $selector = Mockery::mock(ChatSourceSelector::class);
-    $selector->shouldNotReceive('select');
+    $selector->shouldReceive('select')
+        ->once()
+        ->with($city->id, 'What active service alerts or disruptions should residents in Wichita know about right now? Focus on roads, utilities, water, trash, and public services.')
+        ->andReturn(collect([$source]));
 
     $synthesizer = Mockery::mock(AnswerSynthesizer::class);
-    $synthesizer->shouldNotReceive('synthesizeStreaming');
-
-    $updates = Mockery::mock(ChatUpdatesAnswerService::class);
-    $updates->shouldReceive('answer')
+    $synthesizer->shouldReceive('synthesizeStreaming')
         ->once()
         ->andReturn([
-            'answer' => 'I could not find active local service alerts or disruptions in the available article sources right now.',
+            'answer' => 'There are currently no active service alerts or disruptions reported.',
             'citations' => [],
-            'city' => [
-                'id' => $city->id,
-                'name' => $city->name,
-                'slug' => $city->slug,
-            ],
-            'meta' => [
-                'sources_used' => 0,
-                'pages_fetched' => 0,
-                'cache_hits' => 0,
-            ],
+            'confidence' => 0.85,
+            'source_mode' => 'local',
+            'conversation_id' => null,
         ]);
 
-    $service = new AskService($selector, $synthesizer, null, $classifier, $updates);
+    $service = new AskService($selector, $synthesizer);
     $response = $service->answerStreamingForUser(
         'What active service alerts or disruptions should residents in Wichita know about right now? Focus on roads, utilities, water, trash, and public services.',
         $city->id,
@@ -308,8 +256,7 @@ it('routes service alert queries to updates mode instead of reference retrieval 
         fn () => null,
     );
 
-    expect($response['answer'])->toBe('I could not find active local service alerts or disruptions in the available article sources right now.')
-        ->and($response['answer'])->not->toContain('Try a different wording or a more specific question.')
+    expect($response['answer'])->toBe('There are currently no active service alerts or disruptions reported.')
         ->and($response['citations'])->toBe([]);
 });
 
