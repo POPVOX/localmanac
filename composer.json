@@ -16,6 +16,7 @@
         "laravel/fortify": "^1.30",
         "laravel/framework": "^12.0",
         "laravel/horizon": "^5.41",
+        "laravel/nightwatch": "^1.25",
         "laravel/scout": "^10.23",
         "laravel/tinker": "^2.10.1",
         "livewire/flux": "^2.0",

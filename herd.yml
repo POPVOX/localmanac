@@ -1,5 +1,8 @@
 integrations:
   forge:
+    localmanac.com:
+      server-id: 998194
+      site-id: 3097028
     localmanac.popvox.com:
       server-id: 998194
       site-id: 2964427
