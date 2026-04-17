@@ -31,7 +31,7 @@ it('projects process timeline items from payload', function () {
                     'badge_text' => null,
                     'note' => null,
                     'evidence' => [
-                        ['quote' => 'Proposal submitted on Jan 1.'],
+                        ['quote' => 'Proposal submitted on Jan. 1, 2025.'],
                     ],
                 ],
                 [
@@ -43,7 +43,7 @@ it('projects process timeline items from payload', function () {
                     'badge_text' => 'OPEN NOW',
                     'note' => null,
                     'evidence' => [
-                        ['quote' => 'Public comment is open.'],
+                        ['quote' => 'Public comment is open from Jan. 10, 2025 through Jan. 20, 2025.'],
                     ],
                 ],
                 [
@@ -54,7 +54,7 @@ it('projects process timeline items from payload', function () {
                     'badge_text' => null,
                     'note' => 'Planning Commission',
                     'evidence' => [
-                        ['quote' => 'Hearing on Jan 20.'],
+                        ['quote' => 'Hearing on Jan. 20, 2025.'],
                     ],
                 ],
                 [
@@ -98,6 +98,50 @@ it('projects process timeline items from payload', function () {
 
     expect($submittedLocalDate)->toBe('2025-01-01')
         ->and($submitted?->has_time)->toBeFalse();
+
+    Carbon::setTestNow();
+});
+
+it('drops timeline dates when evidence does not contain an explicit year', function () {
+    Carbon::setTestNow(Carbon::parse('2026-04-17 12:00:00', 'America/Chicago'));
+
+    $city = City::factory()->create([
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $article = Article::factory()->create([
+        'city_id' => $city->id,
+    ]);
+
+    $payload = [
+        'process_timeline' => [
+            'items' => [
+                [
+                    'key' => 'classes_begin',
+                    'label' => 'Classes Begin',
+                    'date' => '2026-01-01',
+                    'status' => 'upcoming',
+                    'badge_text' => null,
+                    'note' => null,
+                    'evidence' => [
+                        ['quote' => 'Classes are scheduled to begin in January.'],
+                    ],
+                ],
+            ],
+            'current_key' => 'classes_begin',
+        ],
+    ];
+
+    app(ProcessTimelineProjector::class)->projectForArticle($article, $payload);
+
+    $item = ProcessTimelineItem::query()
+        ->where('article_id', $article->id)
+        ->first();
+
+    expect($item)->not->toBeNull()
+        ->and($item?->date)->toBeNull()
+        ->and($item?->has_time)->toBeFalse()
+        ->and($item?->status)->toBe('current');
 
     Carbon::setTestNow();
 });

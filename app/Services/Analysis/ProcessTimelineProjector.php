@@ -163,9 +163,19 @@ class ProcessTimelineProjector
 
             $seen[$dedupeKey] = true;
 
+            $evidence = $this->normalizeEvidence($item['evidence'] ?? []);
             $hasTime = false;
-            $date = $this->parseDate($this->stringValue($item['date'] ?? null), $timezone, $hasTime);
-            $endsAt = $this->parseDate($this->stringValue($item['ends_at'] ?? null), $timezone);
+            $date = $this->parseSupportedDate(
+                $this->stringValue($item['date'] ?? null),
+                $evidence,
+                $timezone,
+                $hasTime,
+            );
+            $endsAt = $this->parseSupportedDate(
+                $this->stringValue($item['ends_at'] ?? null),
+                $evidence,
+                $timezone,
+            );
             $statusAndBadge = $this->normalizeStatusAndBadge(
                 $key,
                 $date,
@@ -181,7 +191,6 @@ class ProcessTimelineProjector
                 $status = 'current';
             }
             $note = $this->stringValue($item['note'] ?? null);
-            $evidence = $this->normalizeEvidence($item['evidence'] ?? []);
             $orderIndex = is_numeric($item['position'] ?? null) ? (int) $item['position'] : (int) $index;
 
             $normalized[] = [
@@ -362,6 +371,24 @@ class ProcessTimelineProjector
         return $nowLocal->between($startsLocal, $endsLocal, true);
     }
 
+    /**
+     * @param  array<int, array{quote: string, start?: int, end?: int}>  $evidence
+     */
+    private function parseSupportedDate(
+        ?string $date,
+        array $evidence,
+        string $timezone,
+        ?bool &$hasTime = null
+    ): ?Carbon {
+        if (! $this->evidenceSupportsSpecificDate($evidence)) {
+            $hasTime = false;
+
+            return null;
+        }
+
+        return $this->parseDate($date, $timezone, $hasTime);
+    }
+
     private function parseDate(?string $date, string $timezone, ?bool &$hasTime = null): ?Carbon
     {
         if (! $date) {
@@ -394,6 +421,43 @@ class ProcessTimelineProjector
         }
 
         return Str::contains($date, 'T');
+    }
+
+    /**
+     * @param  array<int, array{quote: string, start?: int, end?: int}>  $evidence
+     */
+    private function evidenceSupportsSpecificDate(array $evidence): bool
+    {
+        foreach ($evidence as $entry) {
+            $quote = $entry['quote'] ?? '';
+
+            if (! is_string($quote) || trim($quote) === '') {
+                continue;
+            }
+
+            if ($this->quoteContainsSpecificDate($quote)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function quoteContainsSpecificDate(string $quote): bool
+    {
+        $patterns = [
+            '/\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,\s*|\s+)\d{4}\b/i',
+            '/\b\d{4}-\d{2}-\d{2}\b/',
+            '/\b\d{1,2}\/\d{1,2}\/\d{4}\b/',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $quote) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
