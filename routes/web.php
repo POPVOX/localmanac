@@ -28,8 +28,12 @@ use Laravel\Fortify\Features;
 Route::view('/', 'welcome')->name('home');
 
 Route::get('demo/calendar', DemoCalendar::class)->name('demo.calendar');
-Route::livewire('articles/{article}', ArticleExplainer::class)->name('articles.show');
-Route::get('articles/{article}/source', ArticleSourceController::class)->name('articles.source');
+Route::livewire('articles/{article}', ArticleExplainer::class)
+    ->whereNumber('article')
+    ->name('articles.show');
+Route::get('articles/{article}/source', ArticleSourceController::class)
+    ->whereNumber('article')
+    ->name('articles.source');
 Route::middleware(['auth'])->group(function () {
     Route::redirect('settings', 'settings/profile');
 

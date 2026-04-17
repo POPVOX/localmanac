@@ -53,3 +53,13 @@ test('article explainer page replaces weak meeting boilerplate with a fallback s
         ->assertDontSeeText('various items were discussed')
         ->assertDontSeeText('community decisions and local governance');
 });
+
+test('article explainer page returns not found for non-numeric article identifiers', function () {
+    $this->get('/articles/41E964A4-B928-4C38-98C0-CC80E62EC089')
+        ->assertNotFound();
+});
+
+test('article source page returns not found for non-numeric article identifiers', function () {
+    $this->get('/articles/41E964A4-B928-4C38-98C0-CC80E62EC089/source')
+        ->assertNotFound();
+});
