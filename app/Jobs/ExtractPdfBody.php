@@ -29,7 +29,7 @@ class ExtractPdfBody implements ShouldQueue
 
     public function __construct(public int $articleId, public string $pdfUrl)
     {
-        $this->onQueue('scraping');
+        $this->onConnection('redis')->onQueue('scraping');
     }
 
     public function handle(): void

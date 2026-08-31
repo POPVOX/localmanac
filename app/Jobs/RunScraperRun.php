@@ -22,7 +22,7 @@ class RunScraperRun implements ShouldQueue
 
     public function __construct(public int $runId)
     {
-        $this->onQueue('scraping');
+        $this->onConnection('redis')->onQueue('scraping');
     }
 
     public function handle(ScrapeRunner $runner): void

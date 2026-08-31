@@ -22,7 +22,7 @@ class RunEventSourceIngestion implements ShouldQueue
 
     public function __construct(public int $eventSourceId, public ?int $runId = null)
     {
-        $this->onQueue('calendar');
+        $this->onConnection('redis')->onQueue('calendar');
     }
 
     public function handle(EventIngestionRunner $runner): void

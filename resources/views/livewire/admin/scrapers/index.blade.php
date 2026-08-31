@@ -75,6 +75,7 @@
                         $lastScraped = $lastRun?->finished_at ?? $lastRun?->started_at;
                         $latestStatus = $lastRun?->status;
                         $isActiveRun = $lastRun?->isFreshActive() ?? false;
+                        $sourceNeedsUpdate = $lastRun?->sourceNeedsUpdate() ?? false;
                     @endphp
                     <flux:table.row :key="$scraper->id">
                         <flux:table.cell variant="strong" sticky class="w-[420px]">
@@ -89,6 +90,20 @@
                                         {{ $scraper->organization?->name ?? __('Unassigned') }}
                                     </flux:text>
                                 </div>
+                                @if ($sourceNeedsUpdate)
+                                    <div class="flex flex-wrap items-center gap-2 pt-1">
+                                        <flux:badge color="amber" variant="subtle" icon="exclamation-triangle">
+                                            {{ __('Source needs update') }}
+                                        </flux:badge>
+                                        <flux:link
+                                            :href="route('admin.scrapers.edit', $scraper)"
+                                            class="text-xs font-semibold"
+                                            wire:navigate
+                                        >
+                                            {{ __('Update scraper') }}
+                                        </flux:link>
+                                    </div>
+                                @endif
                             </div>
                         </flux:table.cell>
                         <flux:table.cell class="w-[112px]">
@@ -107,6 +122,8 @@
                                     <flux:text variant="subtle">
                                         {{ $latestStatus === 'queued' ? __('Queued') : __('Running') }}
                                     </flux:text>
+                                @elseif ($sourceNeedsUpdate)
+                                    <flux:badge color="amber" variant="subtle">{{ __('Source invalid') }}</flux:badge>
                                 @elseif ($latestStatus === 'failed')
                                     <flux:badge color="red" variant="subtle">{{ __('Failed') }}</flux:badge>
                                 @elseif ($lastScraped)
@@ -126,7 +143,7 @@
                                             {{ __('View') }}
                                         </flux:menu.item>
                                         <flux:menu.item :href="route('admin.scrapers.edit', $scraper)" icon="pencil-square" wire:navigate>
-                                            {{ __('Edit') }}
+                                            {{ $sourceNeedsUpdate ? __('Update scraper') : __('Edit') }}
                                         </flux:menu.item>
                                         <flux:menu.separator />
                                         @if ($isActiveRun)

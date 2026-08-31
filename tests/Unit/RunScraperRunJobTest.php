@@ -14,6 +14,13 @@ afterEach(function () {
     M::close();
 });
 
+it('dispatches through the redis scraping queue consumed by Horizon', function () {
+    $job = new RunScraperRun(123);
+
+    expect($job->connection)->toBe('redis')
+        ->and($job->queue)->toBe('scraping');
+});
+
 it('processes a queued run through the scrape runner', function () {
     $city = City::create(['name' => 'Job City', 'slug' => 'job-city']);
     $scraper = Scraper::create([

@@ -103,6 +103,7 @@ it('queues only due scrapers and avoids duplicate runs', function () {
 
     Queue::assertPushed(RunScraperRun::class, 1);
     Queue::assertPushed(RunScraperRun::class, fn (RunScraperRun $job): bool => $job->runId === $newDueRun?->id
+        && $job->connection === 'redis'
         && $job->queue === 'scraping');
 
     CarbonImmutable::setTestNow();
@@ -170,6 +171,7 @@ it('expires stale queued runs and still schedules due scrapers', function () {
         ->and($newRun?->id)->not->toBe($staleQueuedRun->id);
 
     Queue::assertPushed(RunScraperRun::class, fn (RunScraperRun $job): bool => $job->runId === $newRun?->id
+        && $job->connection === 'redis'
         && $job->queue === 'scraping');
 
     CarbonImmutable::setTestNow();

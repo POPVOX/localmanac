@@ -113,9 +113,11 @@ it('queues only due event sources and avoids duplicate runs', function () {
     Queue::assertPushed(RunEventSourceIngestion::class, 2);
     Queue::assertPushed(RunEventSourceIngestion::class, fn (RunEventSourceIngestion $job): bool => $job->eventSourceId === $dueHourlySource->id
         && $job->runId === $dueRun?->id
+        && $job->connection === 'redis'
         && $job->queue === 'calendar');
     Queue::assertPushed(RunEventSourceIngestion::class, fn (RunEventSourceIngestion $job): bool => $job->eventSourceId === $neverRunWeeklySource->id
         && $job->runId === $weeklyRun?->id
+        && $job->connection === 'redis'
         && $job->queue === 'calendar');
 
     CarbonImmutable::setTestNow();
@@ -166,7 +168,9 @@ it('expires stale event runs and queues a replacement', function () {
         ->and($replacement)->not->toBeNull()
         ->and($replacement?->id)->not->toBe($staleRun->id);
 
-    Queue::assertPushed(RunEventSourceIngestion::class, fn (RunEventSourceIngestion $job): bool => $job->runId === $replacement?->id);
+    Queue::assertPushed(RunEventSourceIngestion::class, fn (RunEventSourceIngestion $job): bool => $job->runId === $replacement?->id
+        && $job->connection === 'redis'
+        && $job->queue === 'calendar');
 
     CarbonImmutable::setTestNow();
 });

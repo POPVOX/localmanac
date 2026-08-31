@@ -3,6 +3,8 @@
     $latestStatus = $latestRun?->status;
     $lastScraped = $latestRun?->finished_at ?? $latestRun?->started_at;
     $isActiveRun = $latestRun?->isFreshActive() ?? false;
+    $sourceNeedsUpdate = $latestRun?->sourceNeedsUpdate() ?? false;
+    $sourceIssueSummary = $latestRun?->sourceIssueSummary();
     $tz = $scraper->city?->timezone ?? config('app.timezone', 'UTC');
     $statusColor = match ($latestStatus) {
         'success' => 'green',
@@ -61,6 +63,22 @@
             </flux:button>
         </div>
     </div>
+
+    @if ($sourceNeedsUpdate)
+        <flux:callout variant="warning" icon="exclamation-triangle" :heading="__('Source may no longer be valid')">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <flux:text>{{ $sourceIssueSummary }}</flux:text>
+                <flux:button
+                    size="sm"
+                    variant="primary"
+                    :href="route('admin.scrapers.edit', $scraper)"
+                    wire:navigate
+                >
+                    {{ __('Update scraper') }}
+                </flux:button>
+            </div>
+        </flux:callout>
+    @endif
 
     <div class="grid gap-4 lg:grid-cols-3">
         <flux:card padding="xl" variant="subtle" class="lg:col-span-2 space-y-4">

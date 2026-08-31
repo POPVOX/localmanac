@@ -74,6 +74,7 @@ it('queues pdf extraction jobs for pdf items', function () {
         function (ExtractPdfBody $job) use ($article): bool {
             return $job->articleId === $article?->id
                 && $job->pdfUrl === 'https://www.wichita.gov/Archive.aspx?ADID=9999'
+                && $job->connection === 'redis'
                 && $job->queue === 'scraping';
         }
     );
