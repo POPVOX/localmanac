@@ -254,7 +254,7 @@
                     @if ($showAdvancedConfig)
                         <div class="flex flex-wrap gap-2">
                             <flux:button type="button" variant="subtle" wire:click.prevent="applyTemplate('documenters')">
-                                {{ __('Documenters default') }}
+                                {{ __('Documenters reporting RSS') }}
                             </flux:button>
                             <flux:button type="button" variant="subtle" wire:click.prevent="applyTemplate('generic_listing')">
                                 {{ __('Generic listing default') }}

@@ -3,6 +3,7 @@
 namespace App\Livewire\Admin\EventSources;
 
 use App\Jobs\RunEventSourceIngestion;
+use App\Models\EventIngestionRun;
 use App\Models\EventSource;
 use App\Services\Ingestion\EventIngestionRunner;
 use Illuminate\Contracts\View\View;
@@ -45,12 +46,16 @@ class Show extends Component
 
     public function queueRun(): void
     {
+        $run = null;
+
         try {
             $this->source->loadMissing('latestRun');
 
+            EventIngestionRun::expireStaleActive();
+
             $hasActiveRun = $this->source
                 ->runs()
-                ->whereIn('status', ['queued', 'running'])
+                ->freshActive()
                 ->exists();
 
             if ($hasActiveRun) {
@@ -79,6 +84,15 @@ class Show extends Component
 
             $this->refreshSource();
         } catch (Throwable $exception) {
+            if ($run) {
+                $run->update([
+                    'status' => 'failed',
+                    'finished_at' => now(),
+                    'error_class' => $exception::class,
+                    'error_message' => __('Failed to dispatch run job: :message', ['message' => $exception->getMessage()]),
+                ]);
+            }
+
             report($exception);
 
             $this->dispatchToast(__('Queue failed'), __('We could not queue this run.'), 'danger');

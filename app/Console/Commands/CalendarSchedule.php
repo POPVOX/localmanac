@@ -24,6 +24,8 @@ class CalendarSchedule extends Command
         $skipped = 0;
 
         foreach ($dueSources as $source) {
+            $run = null;
+
             try {
                 $run = $runner->createRun($source);
 
@@ -31,6 +33,15 @@ class CalendarSchedule extends Command
 
                 $queued++;
             } catch (Throwable $exception) {
+                if ($run) {
+                    $run->update([
+                        'status' => 'failed',
+                        'finished_at' => now(),
+                        'error_class' => $exception::class,
+                        'error_message' => __('Failed to dispatch run job: :message', ['message' => $exception->getMessage()]),
+                    ]);
+                }
+
                 report($exception);
                 $skipped++;
             }

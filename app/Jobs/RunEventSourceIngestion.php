@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Throwable;
 
 class RunEventSourceIngestion implements ShouldQueue
 {
@@ -41,5 +42,22 @@ class RunEventSourceIngestion implements ShouldQueue
         }
 
         $runner->run($source);
+    }
+
+    public function failed(Throwable $exception): void
+    {
+        if (! $this->runId) {
+            return;
+        }
+
+        EventIngestionRun::query()
+            ->whereKey($this->runId)
+            ->whereIn('status', ['queued', 'running'])
+            ->update([
+                'status' => 'failed',
+                'finished_at' => now(),
+                'error_class' => $exception::class,
+                'error_message' => $exception->getMessage(),
+            ]);
     }
 }

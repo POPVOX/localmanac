@@ -102,6 +102,7 @@ class Form extends Component
         try {
             $payload = $this->validate($this->rules());
             $config = $this->decodeConfig();
+            $this->validateSourceConfiguration($config, (bool) $payload['isActive']);
 
             $payload['city_id'] = (int) $payload['cityId'];
             $payload['source_type'] = $payload['sourceType'];
@@ -261,6 +262,39 @@ class Form extends Component
         }
 
         return $parsed;
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    private function validateSourceConfiguration(array $config, bool $isActive): void
+    {
+        if (! $isActive) {
+            return;
+        }
+
+        if ($this->sourceType === 'html') {
+            $profile = data_get($config, 'profile');
+            $itemSelector = data_get($config, 'list.item_selector');
+
+            if ($profile !== 'wichita_chamber_events' && (! is_string($itemSelector) || trim($itemSelector) === '')) {
+                throw ValidationException::withMessages([
+                    'config' => __('Active HTML sources require list.item_selector or a supported profile.'),
+                ]);
+            }
+        }
+
+        if (in_array($this->sourceType, ['json', 'json_api'], true)) {
+            $jsonConfig = data_get($config, 'json', $config);
+            $hasListPath = is_array($jsonConfig)
+                && (array_key_exists('list_path', $jsonConfig) || array_key_exists('root_path', $jsonConfig));
+
+            if (! $hasListPath) {
+                throw ValidationException::withMessages([
+                    'config' => __('Active JSON sources require json.list_path or json.root_path.'),
+                ]);
+            }
+        }
     }
 
     private function dispatchToast(string $heading, string $message, string $variant = 'success'): void

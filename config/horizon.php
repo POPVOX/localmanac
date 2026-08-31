@@ -218,7 +218,7 @@ return [
         ],
         'supervisor-background' => [
             'connection' => 'redis',
-            'queue' => ['calendar', 'analysis', 'enrichment', 'embedding', 'scraping', 'ingestion'],
+            'queue' => ['analysis', 'enrichment', 'embedding', 'ingestion'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,
@@ -227,6 +227,19 @@ return [
             'memory' => 256,
             'tries' => 1,
             'timeout' => (int) env('CHAT_CRAWL_JOB_TIMEOUT', 1200),
+            'nice' => 0,
+        ],
+        'supervisor-scraping' => [
+            'connection' => 'redis',
+            'queue' => ['calendar', 'scraping'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 256,
+            'tries' => 1,
+            'timeout' => 180,
             'nice' => 0,
         ],
     ],
@@ -241,6 +254,9 @@ return [
             'supervisor-background' => [
                 'maxProcesses' => 1,
             ],
+            'supervisor-scraping' => [
+                'maxProcesses' => 1,
+            ],
         ],
 
         'local' => [
@@ -248,6 +264,9 @@ return [
                 'maxProcesses' => 1,
             ],
             'supervisor-background' => [
+                'maxProcesses' => 1,
+            ],
+            'supervisor-scraping' => [
                 'maxProcesses' => 1,
             ],
         ],

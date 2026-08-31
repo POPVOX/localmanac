@@ -16,9 +16,12 @@ class Calendar extends Component
 
     public ?int $cityId = null;
 
-    public function mount(): void
+    public bool $adminPreview = false;
+
+    public function mount(?City $city = null): void
     {
-        $this->cityId = $this->resolveCityId();
+        $this->cityId = $city?->id ?? $this->resolveCityId();
+        $this->adminPreview = $city !== null && request()->routeIs('admin.cities.calendar');
 
         $timezone = $this->resolveTimezone($this->resolveCity());
         $this->selectedDate = $this->resolveSelectedDate(request()->query('date'), $timezone)->toDateString();
@@ -34,7 +37,7 @@ class Calendar extends Component
         $date = $this->resolveSelectedDate($value, $timezone)->toDateString();
         $this->selectedDate = $date;
 
-        $this->redirectRoute('demo.calendar', $this->buildRouteParameters($date));
+        $this->redirectRoute($this->calendarRouteName(), $this->buildRouteParameters($date));
     }
 
     public function render(): View
@@ -51,13 +54,16 @@ class Calendar extends Component
             'city' => $city,
             'selectedDate' => $selectedDate,
             'selectedDateLabel' => $selectedDate->format('F j, Y'),
-            'previousDateUrl' => route('demo.calendar', $this->buildRouteParameters($previousDate)),
-            'nextDateUrl' => route('demo.calendar', $this->buildRouteParameters($nextDate)),
-            'todayDateUrl' => route('demo.calendar', $this->buildRouteParameters($todayDate)),
+            'previousDateUrl' => route($this->calendarRouteName(), $this->buildRouteParameters($previousDate)),
+            'nextDateUrl' => route($this->calendarRouteName(), $this->buildRouteParameters($nextDate)),
+            'todayDateUrl' => route($this->calendarRouteName(), $this->buildRouteParameters($todayDate)),
             'allDayEvents' => $allDayEvents,
             'timedEventGroups' => $timedEventGroups,
             'timezone' => $timezone,
-        ])->layout('layouts.app-dashboard');
+        ])->layout('layouts.app-dashboard', [
+            'city' => $city,
+            'adminPreview' => $this->adminPreview,
+        ]);
     }
 
     /**
@@ -148,16 +154,31 @@ class Calendar extends Component
     }
 
     /**
-     * @return array{date: string, city_id?: int}
+     * @return array{date: string, city?: City, city_id?: int}
      */
     private function buildRouteParameters(string $date): array
     {
         $parameters = ['date' => $date];
+
+        if ($this->adminPreview) {
+            $city = $this->resolveCity();
+
+            if ($city) {
+                $parameters['city'] = $city;
+            }
+
+            return $parameters;
+        }
 
         if ($this->cityId) {
             $parameters['city_id'] = $this->cityId;
         }
 
         return $parameters;
+    }
+
+    private function calendarRouteName(): string
+    {
+        return $this->adminPreview ? 'admin.cities.calendar' : 'demo.calendar';
     }
 }

@@ -76,6 +76,49 @@ it('validates config JSON before saving', function () {
     expect(EventSource::count())->toBe(0);
 });
 
+it('requires ingestion configuration before an html source can be activated', function () {
+    $user = User::factory()->create();
+    $city = City::create([
+        'name' => 'Pilot City',
+        'slug' => 'pilot-city',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    Livewire::actingAs($user)->test(EventSourceForm::class)
+        ->set('name', 'Unconfigured Calendar')
+        ->set('cityId', $city->id)
+        ->set('sourceType', 'html')
+        ->set('sourceUrl', 'https://example.com/events')
+        ->set('isActive', true)
+        ->set('config', '')
+        ->call('save')
+        ->assertHasErrors(['config']);
+
+    expect(EventSource::count())->toBe(0);
+});
+
+it('allows incomplete event sources to be saved as inactive drafts', function () {
+    $user = User::factory()->create();
+    $city = City::create([
+        'name' => 'Draft City',
+        'slug' => 'draft-city',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    Livewire::actingAs($user)->test(EventSourceForm::class)
+        ->set('name', 'Draft Calendar')
+        ->set('cityId', $city->id)
+        ->set('sourceType', 'html')
+        ->set('sourceUrl', 'https://example.com/events')
+        ->set('isActive', false)
+        ->set('config', '')
+        ->call('save')
+        ->assertHasNoErrors()
+        ->assertRedirect(route('admin.event-sources.index'));
+
+    expect(EventSource::first()?->is_active)->toBeFalse();
+});
+
 it('stores a valid JSON config as an array', function () {
     $user = User::factory()->create();
     $city = City::create([
@@ -128,6 +171,7 @@ it('accepts url templates with placeholders', function () {
         ->set('cityId', $city->id)
         ->set('sourceType', 'json_api')
         ->set('sourceUrl', 'https://www.century2.com/events/calendar/{year}/{month}')
+        ->set('config', '{"root_path":""}')
         ->call('save')
         ->assertHasNoErrors()
         ->assertRedirect(route('admin.event-sources.index'));

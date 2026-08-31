@@ -26,9 +26,20 @@
                         <flux:table.cell>{{ $city->slug }}</flux:table.cell>
                         <flux:table.cell align="end">{{ $city->created_at?->format('M j, Y') }}</flux:table.cell>
                         <flux:table.cell align="end">
-                            <flux:button size="sm" variant="ghost" :href="route('admin.cities.edit', $city)" wire:navigate>
-                                {{ __('Edit') }}
-                            </flux:button>
+                            <div class="flex justify-end gap-1">
+                                <flux:button
+                                    size="sm"
+                                    variant="ghost"
+                                    :href="route('admin.cities.preview', $city)"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                >
+                                    {{ __('Preview') }}
+                                </flux:button>
+                                <flux:button size="sm" variant="ghost" :href="route('admin.cities.edit', $city)" wire:navigate>
+                                    {{ __('Edit') }}
+                                </flux:button>
+                            </div>
                         </flux:table.cell>
                     </flux:table.row>
                 @empty

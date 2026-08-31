@@ -1,12 +1,21 @@
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+    @php
+        $isAdminPreview = ($adminPreview ?? false) && isset($city);
+        $dashboardUrl = $isAdminPreview
+            ? route('admin.cities.preview', $city)
+            : route('dashboard');
+        $calendarUrl = $isAdminPreview
+            ? route('admin.cities.calendar', $city)
+            : route('demo.calendar');
+    @endphp
     <head>
         @include('partials.head')
     </head>
     <body class="app-shell-bg text-zinc-900 antialiased dark:text-zinc-100">
         <flux:header container class="app-shell-header py-4">
             <div class="flex items-center gap-3">
-                <a href="{{ route('dashboard') }}" class="flex items-center" wire:navigate>
+                <a href="{{ $dashboardUrl }}" class="flex items-center" wire:navigate>
                     <x-app-logo />
                 </a>
 
@@ -19,8 +28,8 @@
 
             @auth
                 <flux:navbar class="-mb-px">
-                    <flux:navbar.item href="{{ route('dashboard') }}" wire:navigate>Dashboard</flux:navbar.item>
-                    <flux:navbar.item href="{{ route('demo.calendar') }}" wire:navigate>Calendar</flux:navbar.item>
+                    <flux:navbar.item href="{{ $dashboardUrl }}" wire:navigate>Dashboard</flux:navbar.item>
+                    <flux:navbar.item href="{{ $calendarUrl }}" wire:navigate>Calendar</flux:navbar.item>
                 </flux:navbar>
             @endauth
 

@@ -223,6 +223,13 @@ it('template buttons do not inject organization id for super admins', function (
         'best_effort' => true,
     ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
+    $documentersExpected = json_encode([
+        'feed_url' => 'https://wichita-ks.documenters.org/feed/rss/',
+        'default_content_type' => 'meeting_notes',
+        'lang' => 'en',
+        'max_items' => 50,
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
     $wichitaExpected = json_encode([
         'profile' => 'wichita_archive_pdf_list',
         'list' => [
@@ -235,7 +242,13 @@ it('template buttons do not inject organization id for super admins', function (
     ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
     Livewire::actingAs($user)->test(ScraperForm::class)
+        ->call('applyTemplate', 'documenters')
+        ->assertSet('type', 'rss')
+        ->assertSet('sourceUrl', 'https://wichita-ks.documenters.org/feed/rss/')
+        ->assertSet('config', $documentersExpected)
         ->call('applyTemplate', 'generic_listing')
+        ->assertSet('type', 'html')
+        ->assertSet('sourceUrl', '')
         ->assertSet('config', $genericExpected)
         ->call('applyTemplate', 'wichita_archive_pdf_list')
         ->assertSet('config', $wichitaExpected);

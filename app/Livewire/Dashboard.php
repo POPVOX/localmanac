@@ -50,11 +50,14 @@ class Dashboard extends Component
 
     public ?int $cityId = null;
 
+    public bool $adminPreview = false;
+
     public ?string $conversationId = null;
 
-    public function mount(): void
+    public function mount(?City $city = null): void
     {
-        $this->cityId = request()->integer('city_id') ?: null;
+        $this->cityId = $city?->id ?? (request()->integer('city_id') ?: null);
+        $this->adminPreview = $city !== null && request()->routeIs('admin.cities.preview');
         $this->conversationId = $this->storedConversationId();
     }
 
@@ -200,7 +203,10 @@ class Dashboard extends Component
                 'categoryCount' => $issueAreas->count(),
                 'locationLabel' => $city?->name ?? '—',
             ],
-        ])->layout('layouts.app-dashboard');
+        ])->layout('layouts.app-dashboard', [
+            'city' => $city,
+            'adminPreview' => $this->adminPreview,
+        ]);
     }
 
     private function appendMessage(string $role, string $content = '', array $citations = []): string
@@ -622,7 +628,7 @@ class Dashboard extends Component
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, Event>
+     * @return Collection<int, Event>
      */
     private function upcomingEvents(?City $city, string $timezone): Collection
     {

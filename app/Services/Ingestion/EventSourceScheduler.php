@@ -2,6 +2,7 @@
 
 namespace App\Services\Ingestion;
 
+use App\Models\EventIngestionRun;
 use App\Models\EventSource;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -15,12 +16,13 @@ class EventSourceScheduler
     public function dueSources(CarbonInterface $nowUtc): Collection
     {
         $immutableNow = $nowUtc instanceof CarbonImmutable ? $nowUtc : CarbonImmutable::instance($nowUtc);
+        EventIngestionRun::expireStaleActive();
 
         $sources = EventSource::query()
             ->where('is_active', true)
             ->whereIn('source_type', ['ics', 'rss', 'json', 'json_api', 'html'])
             ->whereDoesntHave('runs', function ($query) {
-                $query->whereIn('status', ['queued', 'running']);
+                $query->freshActive();
             })
             ->get();
 

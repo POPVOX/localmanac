@@ -16,6 +16,10 @@ use Throwable;
 
 class VisitWichitaSimpleviewProfile extends AbstractJsonProfile
 {
+    private const PAGE_SIZE = 100;
+
+    private const MAX_PAGES = 20;
+
     public function __construct(
         CalendarDateParser $dateParser,
         EventNormalizer $normalizer,
@@ -42,35 +46,29 @@ class VisitWichitaSimpleviewProfile extends AbstractJsonProfile
         $storedToken = $request['token'];
 
         if ($storedToken !== '') {
-            $response = $this->requestVisitWichitaPayload($requestUrl, $jsonPayload, $storedToken);
+            $result = $this->requestVisitWichitaPayloads($requestUrl, $jsonPayload, $storedToken, $config);
 
-            if ($response->successful()) {
-                return [[
-                    'request_url' => $requestUrl,
-                    'payload' => $response->json(),
-                ]];
+            if ($result['failure'] === null) {
+                return $result['payloads'];
             }
 
-            if (! $this->isInvalidCredentialResponse($response)) {
-                throw new InvalidArgumentException($this->formatFailedFetchMessage($response));
+            if (! $this->isInvalidCredentialResponse($result['failure'])) {
+                throw new InvalidArgumentException($this->formatFailedFetchMessage($result['failure']));
             }
         }
 
         $resolvedToken = $this->resolveVisitWichitaToken($sourceConfig);
-        $response = $this->requestVisitWichitaPayload($requestUrl, $jsonPayload, $resolvedToken);
+        $result = $this->requestVisitWichitaPayloads($requestUrl, $jsonPayload, $resolvedToken, $config);
 
-        if (! $response->successful()) {
+        if ($result['failure'] !== null) {
             throw new InvalidArgumentException(
-                'Visit Wichita token refresh retry failed. '.$this->formatFailedFetchMessage($response)
+                'Visit Wichita token refresh retry failed. '.$this->formatFailedFetchMessage($result['failure'])
             );
         }
 
         $this->persistResolvedToken($source, $sourceConfig, $resolvedToken);
 
-        return [[
-            'request_url' => $requestUrl,
-            'payload' => $response->json(),
-        ]];
+        return $result['payloads'];
     }
 
     /**
@@ -217,6 +215,76 @@ class VisitWichitaSimpleviewProfile extends AbstractJsonProfile
             ->get($requestUrl);
     }
 
+    /**
+     * @param  array<string, mixed>  $config
+     * @return array{
+     *     payloads: array<int, array{request_url: string, payload: mixed}>,
+     *     failure: Response|null
+     * }
+     */
+    private function requestVisitWichitaPayloads(
+        string $requestUrl,
+        string $jsonPayload,
+        string $token,
+        array $config,
+    ): array {
+        try {
+            $payload = json_decode($jsonPayload, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable $exception) {
+            throw new InvalidArgumentException('Visit Wichita JSON query must be valid JSON.', previous: $exception);
+        }
+
+        if (! is_array($payload)) {
+            throw new InvalidArgumentException('Visit Wichita JSON query must decode to an object.');
+        }
+
+        $configuredLimit = data_get($payload, 'options.limit', self::PAGE_SIZE);
+        $pageSize = is_numeric($configuredLimit)
+            ? max(1, min(self::PAGE_SIZE, (int) $configuredLimit))
+            : self::PAGE_SIZE;
+        $configuredSkip = data_get($payload, 'options.skip', 0);
+        $initialSkip = is_numeric($configuredSkip) ? max(0, (int) $configuredSkip) : 0;
+        $listPath = $this->resolveListPath($config);
+        $payloads = [];
+
+        for ($page = 0; $page < self::MAX_PAGES; $page++) {
+            data_set($payload, 'options.limit', $pageSize);
+            data_set($payload, 'options.skip', $initialSkip + ($page * $pageSize));
+
+            $encodedPayload = json_encode($payload, JSON_UNESCAPED_SLASHES);
+
+            if (! is_string($encodedPayload)) {
+                throw new InvalidArgumentException('Visit Wichita JSON query could not be encoded.');
+            }
+
+            $response = $this->requestVisitWichitaPayload($requestUrl, $encodedPayload, $token);
+
+            if (! $response->successful()) {
+                return [
+                    'payloads' => [],
+                    'failure' => $response,
+                ];
+            }
+
+            $responsePayload = $response->json();
+            $payloads[] = [
+                'request_url' => $requestUrl,
+                'payload' => $responsePayload,
+            ];
+
+            $items = $listPath === '' ? $responsePayload : data_get($responsePayload, $listPath, []);
+
+            if (! is_array($items) || count($items) < $pageSize) {
+                return [
+                    'payloads' => $payloads,
+                    'failure' => null,
+                ];
+            }
+        }
+
+        throw new InvalidArgumentException('Visit Wichita pagination exceeded the safety limit.');
+    }
+
     private function isInvalidCredentialResponse(Response $response): bool
     {
         if ($response->status() !== 403) {
@@ -346,7 +414,7 @@ class VisitWichitaSimpleviewProfile extends AbstractJsonProfile
                 ],
             ],
             'options' => [
-                'limit' => 200,
+                'limit' => self::PAGE_SIZE,
                 'skip' => 0,
                 'count' => true,
                 'castDocs' => false,

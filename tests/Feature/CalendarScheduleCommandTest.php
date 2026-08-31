@@ -120,3 +120,53 @@ it('queues only due event sources and avoids duplicate runs', function () {
 
     CarbonImmutable::setTestNow();
 });
+
+it('expires stale event runs and queues a replacement', function () {
+    Queue::fake();
+
+    $nowUtc = CarbonImmutable::parse('2026-08-31 12:00:00', 'UTC');
+    CarbonImmutable::setTestNow($nowUtc);
+
+    $city = City::create([
+        'name' => 'Recovery City',
+        'slug' => 'recovery-city',
+        'timezone' => 'UTC',
+    ]);
+    $source = EventSource::create([
+        'city_id' => $city->id,
+        'name' => 'Recoverable Calendar',
+        'source_type' => 'ics',
+        'source_url' => 'https://example.com/recovery.ics',
+        'frequency' => 'hourly',
+        'is_active' => true,
+        'config' => [],
+        'last_run_at' => $nowUtc->subHours(2),
+    ]);
+    $staleRun = EventIngestionRun::create([
+        'event_source_id' => $source->id,
+        'status' => 'queued',
+        'items_found' => 0,
+        'items_written' => 0,
+    ]);
+    $staleRun->forceFill([
+        'created_at' => $nowUtc->subMinutes(20),
+        'updated_at' => $nowUtc->subMinutes(20),
+    ])->save();
+
+    $this->artisan('calendar:schedule')->assertExitCode(0);
+
+    $replacement = EventIngestionRun::query()
+        ->where('event_source_id', $source->id)
+        ->where('status', 'queued')
+        ->latest('id')
+        ->first();
+
+    expect($staleRun->refresh()->status)->toBe('failed')
+        ->and($staleRun->finished_at)->not->toBeNull()
+        ->and($replacement)->not->toBeNull()
+        ->and($replacement?->id)->not->toBe($staleRun->id);
+
+    Queue::assertPushed(RunEventSourceIngestion::class, fn (RunEventSourceIngestion $job): bool => $job->runId === $replacement?->id);
+
+    CarbonImmutable::setTestNow();
+});

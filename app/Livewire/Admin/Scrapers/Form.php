@@ -304,12 +304,10 @@ class Form extends Component
     {
         $config = match ($template) {
             'documenters' => [
-                'profile' => 'wichitadocumenters',
-                'list' => [
-                    'link_selector' => 'a[href*="docs.google.com"]',
-                    'link_attr' => 'href',
-                    'max_links' => 25,
-                ],
+                'feed_url' => 'https://wichita-ks.documenters.org/feed/rss/',
+                'default_content_type' => 'meeting_notes',
+                'lang' => 'en',
+                'max_items' => 50,
             ],
             'generic_listing' => [
                 'profile' => 'generic_listing',
@@ -336,6 +334,17 @@ class Form extends Component
             ],
             default => [],
         };
+
+        if ($template === 'documenters') {
+            $this->type = 'rss';
+            $this->sourceUrl = 'https://wichita-ks.documenters.org/feed/rss/';
+        } elseif (in_array($template, ['generic_listing', 'wichita_archive_pdf_list'], true)) {
+            $this->type = 'html';
+
+            if ($this->sourceUrl === 'https://wichita-ks.documenters.org/feed/rss/') {
+                $this->sourceUrl = '';
+            }
+        }
 
         if ($this->isSuperAdmin) {
             $this->config = $this->prettyPrintConfig($config);

@@ -29,7 +29,7 @@ class ScrapeSchedule extends Command
             try {
                 $run = $runner->createRun($scraper);
 
-                RunScraperRun::dispatch($run->id)->onQueue('analysis');
+                RunScraperRun::dispatch($run->id);
 
                 $queued++;
             } catch (Throwable $exception) {

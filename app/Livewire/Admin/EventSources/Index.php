@@ -83,6 +83,8 @@ class Index extends Component
 
     public function queueRun(int $sourceId): void
     {
+        $run = null;
+
         try {
             $source = EventSource::findOrFail($sourceId);
 
@@ -98,9 +100,11 @@ class Index extends Component
                 return;
             }
 
+            EventIngestionRun::expireStaleActive();
+
             $hasActiveRun = EventIngestionRun::query()
                 ->where('event_source_id', $source->id)
-                ->whereIn('status', ['queued', 'running'])
+                ->freshActive()
                 ->exists();
 
             if ($hasActiveRun) {
@@ -118,6 +122,15 @@ class Index extends Component
             $this->dispatchToast(__('Source not found'), __('Refresh the page and try again.'), 'danger');
             report($exception);
         } catch (Throwable $exception) {
+            if ($run) {
+                $run->update([
+                    'status' => 'failed',
+                    'finished_at' => now(),
+                    'error_class' => $exception::class,
+                    'error_message' => __('Failed to dispatch run job: :message', ['message' => $exception->getMessage()]),
+                ]);
+            }
+
             report($exception);
 
             $this->dispatchToast(__('Queue failed'), __('We could not queue this run.'), 'danger');

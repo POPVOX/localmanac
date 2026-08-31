@@ -13,8 +13,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
 
-uses(Tests\TestCase::class, RefreshDatabase::class);
+uses(TestCase::class, RefreshDatabase::class);
 
 it('parses ics feeds into event dtos', function () {
     $ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:abc-123\r\nSUMMARY:Test Event\r\nDTSTART:20260115T190000\r\nDTEND:20260115T200000\r\nLOCATION:City Hall\r\nDESCRIPTION:Planning meeting\r\nURL:https://example.com/event\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
@@ -193,6 +194,63 @@ it('parses Visit Wichita simpleview json into event dtos', function () {
         ->and($events[1]->allDay)->toBeTrue();
 });
 
+it('paginates Visit Wichita requests at the upstream safe page size', function () {
+    $requestPayloads = [];
+    $buildItem = fn (int $id): array => [
+        'recid' => $id,
+        'title' => "Paged Event {$id}",
+        'description' => "Description {$id}",
+        'location' => 'Century II',
+        'address1' => '225 W Douglas Ave',
+        'city' => 'Wichita',
+        'state' => 'KS',
+        'url' => "/event/paged-event-{$id}/",
+        'date' => '2026-09-10T00:00:00.000Z',
+        'startTime' => '7:00 PM',
+    ];
+
+    Http::fake(function (Request $request) use (&$requestPayloads, $buildItem) {
+        $query = [];
+        parse_str(parse_url($request->url(), PHP_URL_QUERY) ?? '', $query);
+        $payload = json_decode($query['json'], true, 512, JSON_THROW_ON_ERROR);
+        $requestPayloads[] = $payload;
+        $skip = (int) data_get($payload, 'options.skip');
+
+        $items = $skip === 0
+            ? array_map($buildItem, range(1, 100))
+            : [$buildItem(101)];
+
+        return Http::response(['docs' => ['docs' => $items]], 200);
+    });
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'json_api',
+        'source_url' => 'https://www.visitwichita.com/includes/rest_v2/plugins_events_events_by_date/find/',
+        'config' => [
+            'profile' => 'visit_wichita_simpleview',
+            'json' => [
+                'root_path' => 'docs.docs',
+                'query' => [
+                    'filter' => ['active' => true],
+                    'options' => ['limit' => 200, 'skip' => 0],
+                ],
+            ],
+            'auth' => ['token' => 'simpleview-token'],
+        ],
+    ]);
+
+    $events = (new JsonApiFetcher(new CalendarDateParser, new EventNormalizer))->fetch($source);
+
+    expect($events)->toHaveCount(101)
+        ->and($requestPayloads)->toHaveCount(2)
+        ->and(data_get($requestPayloads[0], 'options.limit'))->toBe(100)
+        ->and(data_get($requestPayloads[0], 'options.skip'))->toBe(0)
+        ->and(data_get($requestPayloads[1], 'options.limit'))->toBe(100)
+        ->and(data_get($requestPayloads[1], 'options.skip'))->toBe(100);
+});
+
 it('refreshes Visit Wichita token and retries when credentials are stale', function () {
     $payload = json_decode(
         file_get_contents(base_path('tests/Fixtures/visit_wichita_simpleview.json')),
@@ -214,7 +272,7 @@ it('refreshes Visit Wichita token and retries when credentials are stale', funct
         return Http::response($payload, 200);
     });
 
-    $resolver = \Mockery::mock(VisitWichitaTokenResolver::class);
+    $resolver = Mockery::mock(VisitWichitaTokenResolver::class);
     $resolver->shouldReceive('resolve')
         ->once()
         ->with('https://www.visitwichita.com/events/?view=list&sort=date')
@@ -264,7 +322,7 @@ it('resolves and persists a Visit Wichita token when config is missing auth toke
         return Http::response($payload, 200);
     });
 
-    $resolver = \Mockery::mock(VisitWichitaTokenResolver::class);
+    $resolver = Mockery::mock(VisitWichitaTokenResolver::class);
     $resolver->shouldReceive('resolve')
         ->once()
         ->with('https://www.visitwichita.com/events/?view=list&sort=date')
@@ -299,7 +357,7 @@ it('fails with actionable message when Visit Wichita token refresh cannot resolv
         'https://www.visitwichita.com/includes/rest_v2/plugins_events_events_by_date/find/*' => Http::response('Invalid credentials', 403),
     ]);
 
-    $resolver = \Mockery::mock(VisitWichitaTokenResolver::class);
+    $resolver = Mockery::mock(VisitWichitaTokenResolver::class);
     $resolver->shouldReceive('resolve')
         ->once()
         ->andReturn([
@@ -335,7 +393,7 @@ it('does not attempt Visit Wichita token refresh for non-auth failures', functio
         'https://www.visitwichita.com/includes/rest_v2/plugins_events_events_by_date/find/*' => Http::response('Upstream outage', 500),
     ]);
 
-    $resolver = \Mockery::mock(VisitWichitaTokenResolver::class);
+    $resolver = Mockery::mock(VisitWichitaTokenResolver::class);
     $resolver->shouldReceive('resolve')->never();
 
     $city = City::factory()->create(['timezone' => 'America/Chicago']);
