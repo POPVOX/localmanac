@@ -18,10 +18,13 @@ class Calendar extends Component
 
     public bool $adminPreview = false;
 
+    public bool $cityRoute = false;
+
     public function mount(?City $city = null): void
     {
         $this->cityId = $city?->id ?? $this->resolveCityId();
         $this->adminPreview = $city !== null && request()->routeIs('admin.cities.calendar');
+        $this->cityRoute = $city !== null && request()->routeIs('cities.calendar');
 
         $timezone = $this->resolveTimezone($this->resolveCity());
         $this->selectedDate = $this->resolveSelectedDate(request()->query('date'), $timezone)->toDateString();
@@ -49,6 +52,10 @@ class Calendar extends Component
         $previousDate = $selectedDate->copy()->subDay()->toDateString();
         $nextDate = $selectedDate->copy()->addDay()->toDateString();
         $todayDate = Carbon::now($timezone)->toDateString();
+        $availableCities = City::query()
+            ->orderBy('name')
+            ->orderBy('state')
+            ->get();
 
         return view('livewire.demo.calendar', [
             'city' => $city,
@@ -63,6 +70,8 @@ class Calendar extends Component
         ])->layout('layouts.app-dashboard', [
             'city' => $city,
             'adminPreview' => $this->adminPreview,
+            'availableCities' => $availableCities,
+            'currentSurface' => 'calendar',
         ]);
     }
 
@@ -123,10 +132,7 @@ class Calendar extends Component
             return City::query()->find($this->cityId);
         }
 
-        return City::query()
-            ->where('slug', 'wichita')
-            ->first()
-            ?? City::query()->first();
+        return City::query()->orderBy('name')->first();
     }
 
     private function resolveCityId(): ?int
@@ -160,7 +166,7 @@ class Calendar extends Component
     {
         $parameters = ['date' => $date];
 
-        if ($this->adminPreview) {
+        if ($this->adminPreview || $this->cityRoute) {
             $city = $this->resolveCity();
 
             if ($city) {
@@ -179,6 +185,10 @@ class Calendar extends Component
 
     private function calendarRouteName(): string
     {
-        return $this->adminPreview ? 'admin.cities.calendar' : 'demo.calendar';
+        if ($this->adminPreview) {
+            return 'admin.cities.calendar';
+        }
+
+        return $this->cityRoute ? 'cities.calendar' : 'demo.calendar';
     }
 }

@@ -217,7 +217,7 @@ class ArticleTimestampRepairer
             ];
         }
 
-        if ($profile === 'wichitadocumenters') {
+        if (in_array($profile, ['documenters', 'wichitadocumenters'], true)) {
             $publishedAt = $this->resolveDocumentersPublishedAt($article, $timezone);
 
             if (! $publishedAt instanceof Carbon) {
@@ -230,7 +230,7 @@ class ArticleTimestampRepairer
             ];
         }
 
-        if ($profile === 'wichita_archive_pdf_list') {
+        if (in_array($profile, ['civicplus_archive_pdf_list', 'wichita_archive_pdf_list'], true)) {
             $publishedAt = $this->resolveArchivePdfPublishedAt($article, $timezone);
 
             if (! $publishedAt instanceof Carbon) {

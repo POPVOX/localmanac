@@ -52,6 +52,16 @@
                 viewable
             />
 
+            <flux:input
+                name="city_code"
+                :label="__('City access code (optional)')"
+                :value="old('city_code', request()->query('city_code'))"
+                type="text"
+                autocomplete="off"
+                :placeholder="__('Enter a code to unlock chat for your city')"
+                :description="__('You can browse every city without a code and add a city code after signing in.')"
+            />
+
             <div class="flex items-center justify-end">
                 <flux:button type="submit" variant="primary" class="w-full" data-test="register-user-button">
                     {{ __('Create account') }}

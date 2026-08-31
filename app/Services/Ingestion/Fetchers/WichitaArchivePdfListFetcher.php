@@ -22,8 +22,8 @@ class WichitaArchivePdfListFetcher
 
         $config = $scraper->config ?? [];
 
-        if (Arr::get($config, 'profile') !== 'wichita_archive_pdf_list') {
-            throw new InvalidArgumentException('Scraper profile must be wichita_archive_pdf_list');
+        if (! in_array(Arr::get($config, 'profile'), ['civicplus_archive_pdf_list', 'wichita_archive_pdf_list'], true)) {
+            throw new InvalidArgumentException('Scraper profile must be civicplus_archive_pdf_list');
         }
 
         $sourceUrl = $scraper->source_url;
@@ -151,7 +151,7 @@ class WichitaArchivePdfListFetcher
             'meta' => [
                 'href_contains' => $hrefContains,
                 'skipped' => $stats,
-                'profile' => 'wichita_archive_pdf_list',
+                'profile' => (string) Arr::get($config, 'profile'),
             ],
         ];
     }

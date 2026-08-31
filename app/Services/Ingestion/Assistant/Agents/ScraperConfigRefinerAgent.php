@@ -31,7 +31,7 @@ class ScraperConfigRefinerAgent implements Agent, HasStructuredOutput, HasTools
         return [
             'profile' => $schema
                 ->string()
-                ->enum(['rss', 'wichitadocumenters', 'generic_listing', 'wichita_archive_pdf_list'])
+                ->enum(['rss', 'documenters', 'generic_listing', 'civicplus_archive_pdf_list'])
                 ->required(),
             'config' => $schema
                 ->object([

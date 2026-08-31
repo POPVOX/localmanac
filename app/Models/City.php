@@ -4,7 +4,9 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Hash;
 
 class City extends Model
 {
@@ -19,6 +21,14 @@ class City extends Model
         'state',
         'country',
         'timezone',
+        'chat_access_code_hash',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    protected $hidden = [
+        'chat_access_code_hash',
     ];
 
     public function getRouteKeyName(): string
@@ -29,6 +39,37 @@ class City extends Model
     public function organizations(): HasMany
     {
         return $this->hasMany(Organization::class);
+    }
+
+    public function users(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class)->withTimestamps();
+    }
+
+    public function hasChatAccessCode(): bool
+    {
+        return is_string($this->chat_access_code_hash)
+            && $this->chat_access_code_hash !== '';
+    }
+
+    public function matchesChatAccessCode(string $code): bool
+    {
+        return $this->hasChatAccessCode()
+            && Hash::check(trim($code), $this->chat_access_code_hash);
+    }
+
+    public static function findByChatAccessCode(string $code): ?self
+    {
+        $code = trim($code);
+
+        if ($code === '') {
+            return null;
+        }
+
+        return static::query()
+            ->whereNotNull('chat_access_code_hash')
+            ->get()
+            ->first(fn (self $city): bool => $city->matchesChatAccessCode($code));
     }
 
     public function eventSources(): HasMany

@@ -17,9 +17,10 @@ it('reuses stored dashboard conversation memory and clears it on reset', functio
     ]);
 
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
-    session()->put('chat.conversation_id', 'conv_existing');
+    session()->put('chat.conversation_id.city.'.$city->id, 'conv_existing');
 
     $service = mock(AskService::class);
     $service->shouldReceive('answerStreamingForUser')
@@ -68,5 +69,5 @@ it('reuses stored dashboard conversation memory and clears it on reset', functio
         ->assertSet('conversationId', null)
         ->assertSet('messages', []);
 
-    expect(session()->has('chat.conversation_id'))->toBeFalse();
+    expect(session()->has('chat.conversation_id.city.'.$city->id))->toBeFalse();
 });

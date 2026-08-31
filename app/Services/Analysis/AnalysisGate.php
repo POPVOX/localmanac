@@ -16,7 +16,7 @@ class AnalysisGate
 
         $article->loadMissing('body', 'scraper.organization');
 
-        // Wichita V1: run LLM scoring broadly, but only when we have enough extracted text
+        // Run LLM scoring broadly, but only when we have enough extracted text
         // to avoid spending tokens on empty/placeholder bodies.
         $minChars = (int) config('analysis.llm.min_cleaned_text_chars', 800);
         $cleaned = (string) ($article->body?->cleaned_text ?? '');

@@ -112,14 +112,7 @@ class AskService
             }
         }
 
-        $city = City::query()->where('slug', 'wichita')->first()
-            ?? City::query()->first();
-
-        if (! $city) {
-            throw new RuntimeException('No city configured.');
-        }
-
-        return $city;
+        throw new RuntimeException('A city is required for every chat request.');
     }
 
     private function resolveCityFromSelector(int|string|null $citySelector): City

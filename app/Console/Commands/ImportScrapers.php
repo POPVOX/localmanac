@@ -15,10 +15,12 @@ class ImportScrapers extends Command
 
     public function handle(): int
     {
-        $cityOption = (string) ($this->option('city') ?? 'wichita');
+        $cityOption = trim((string) $this->option('city'));
 
-        if (! $this->option('city')) {
-            $this->warn("--city not provided; defaulting to '{$cityOption}' (legacy site was single-city).");
+        if ($cityOption === '') {
+            $this->error('The --city option is required so imported scrapers cannot be assigned to the wrong jurisdiction.');
+
+            return self::FAILURE;
         }
 
         $city = $this->findCity($cityOption);

@@ -25,6 +25,14 @@
                 </a>
 
                 <nav class="flex items-center gap-3 text-sm font-semibold text-zinc-700">
+                    @if ($cities->isNotEmpty())
+                        <a
+                            href="#cities"
+                            class="rounded-full px-4 py-2 transition hover:bg-white/70 hover:text-zinc-900"
+                        >
+                            {{ __('Browse cities') }}
+                        </a>
+                    @endif
                     @guest
                         @if (Route::has('login'))
                             <a
@@ -87,9 +95,14 @@
                         </div>
 
                         <div class="flex flex-wrap items-center gap-3 pt-1">
+                            @if ($cities->isNotEmpty())
+                                <flux:button href="{{ route('cities.show', $cities->first()) }}" variant="primary" wire:navigate>
+                                    {{ __('Explore local news') }}
+                                </flux:button>
+                            @endif
                             @guest
                                 @if (Route::has('register'))
-                                    <flux:button href="{{ route('register') }}" variant="primary" wire:navigate>
+                                    <flux:button href="{{ route('register') }}" variant="subtle" wire:navigate>
                                         {{ __('Create account') }}
                                     </flux:button>
                                 @endif
@@ -135,6 +148,45 @@
                         </div>
                     </div>
                 </section>
+
+                @if ($cities->isNotEmpty())
+                    <section id="cities" class="scroll-mt-8">
+                        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                            <div>
+                                <flux:heading size="xl" level="2" class="tracking-tight !mb-0">{{ __('Choose your city') }}</flux:heading>
+                                <flux:text class="mt-2 max-w-3xl text-zinc-700">
+                                    {{ __('News feeds and calendars are public. Chat is available after signing in with a city access code.') }}
+                                </flux:text>
+                            </div>
+                        </div>
+
+                        <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                            @foreach ($cities as $city)
+                                <a
+                                    href="{{ route('cities.show', $city) }}"
+                                    wire:navigate
+                                    class="group rounded-2xl border border-zinc-200 bg-white/90 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md"
+                                >
+                                    <div class="flex items-start justify-between gap-4">
+                                        <div>
+                                            <div class="text-lg font-semibold text-zinc-900 group-hover:text-emerald-700">{{ $city->name }}</div>
+                                            <div class="mt-1 text-sm text-zinc-500">
+                                                {{ collect([$city->state, $city->country])->filter()->implode(', ') }}
+                                            </div>
+                                        </div>
+                                        <span class="grid size-9 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-700 transition group-hover:bg-emerald-100">
+                                            <flux:icon icon="arrow-right" class="size-4" />
+                                        </span>
+                                    </div>
+                                    <div class="mt-5 flex items-center gap-4 text-xs font-medium text-zinc-500">
+                                        <span>{{ __('View news') }}</span>
+                                        <span>{{ __('View calendar') }}</span>
+                                    </div>
+                                </a>
+                            @endforeach
+                        </div>
+                    </section>
+                @endif
 
                 <section>
                     <flux:heading size="xl" level="2" class="tracking-tight !mb-0">{{ __('Features') }}</flux:heading>
@@ -224,7 +276,7 @@
                     <div class="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
                         <div class="space-y-2">
                             <flux:heading size="md" level="2">{{ __('Get local info in one place.') }}</flux:heading>
-                            <flux:text class="text-zinc-700">{{ __('We are building our pilot in Wichita, KS and expanding city by city.') }}</flux:text>
+                            <flux:text class="text-zinc-700">{{ __('Choose a city to browse its public news feed and event calendar.') }}</flux:text>
                         </div>
 
                         <div class="flex flex-wrap items-center gap-3">

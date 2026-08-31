@@ -239,7 +239,7 @@ class ScraperConfigDrafter
             return $result;
         }
 
-        if (! in_array($result['profile'] ?? null, ['generic_listing', 'wichitadocumenters'], true)) {
+        if (! in_array($result['profile'] ?? null, ['generic_listing', 'documenters', 'wichitadocumenters'], true)) {
             return $result;
         }
 

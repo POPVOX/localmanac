@@ -15,6 +15,7 @@
             <flux:table.columns sticky>
                 <flux:table.column sticky>{{ __('Name') }}</flux:table.column>
                 <flux:table.column>{{ __('Slug') }}</flux:table.column>
+                <flux:table.column>{{ __('Chat') }}</flux:table.column>
                 <flux:table.column align="end">{{ __('Created') }}</flux:table.column>
                 <flux:table.column align="end">{{ __('Actions') }}</flux:table.column>
             </flux:table.columns>
@@ -24,6 +25,11 @@
                     <flux:table.row :key="$city->id">
                         <flux:table.cell variant="strong" sticky>{{ $city->name }}</flux:table.cell>
                         <flux:table.cell>{{ $city->slug }}</flux:table.cell>
+                        <flux:table.cell>
+                            <flux:badge :color="$city->hasChatAccessCode() ? 'green' : 'zinc'" size="sm">
+                                {{ $city->hasChatAccessCode() ? __('Code set') : __('No code') }}
+                            </flux:badge>
+                        </flux:table.cell>
                         <flux:table.cell align="end">{{ $city->created_at?->format('M j, Y') }}</flux:table.cell>
                         <flux:table.cell align="end">
                             <div class="flex justify-end gap-1">
@@ -44,7 +50,7 @@
                     </flux:table.row>
                 @empty
                     <flux:table.row>
-                        <flux:table.cell colspan="4">
+                        <flux:table.cell colspan="5">
                             <flux:text variant="subtle">{{ __('No cities found.') }}</flux:text>
                         </flux:table.cell>
                     </flux:table.row>

@@ -40,7 +40,7 @@ class ScraperConfigAiRefiner
         $profile = (string) ($structured['profile'] ?? '');
         $config = is_array($structured['config'] ?? null) ? $structured['config'] : [];
 
-        if (! in_array($profile, ['rss', 'wichitadocumenters', 'generic_listing', 'wichita_archive_pdf_list'], true)) {
+        if (! in_array($profile, ['rss', 'documenters', 'generic_listing', 'civicplus_archive_pdf_list', 'wichitadocumenters', 'wichita_archive_pdf_list'], true)) {
             $heuristic['warnings'][] = 'AI refinement returned an unsupported profile. Using heuristic draft.';
 
             return $heuristic;
@@ -76,7 +76,7 @@ class ScraperConfigAiRefiner
 
         return implode("\n", [
             'Generate a valid scraper config for the supported profiles only.',
-            'Supported profiles: rss, wichitadocumenters, generic_listing, wichita_archive_pdf_list.',
+            'Supported profiles: rss, documenters, generic_listing, civicplus_archive_pdf_list.',
             'Do not invent new keys outside schema.',
             'Never output placeholder values like `proxy.example.com`, `path/to/storage/state`, `user`, or `pass`.',
             'For html profiles, prefer robust configs with specific selectors and fetch.playwright settings.',
@@ -226,7 +226,7 @@ class ScraperConfigAiRefiner
         unset($config['feed_url'], $config['lang'], $config['max_items']);
         $config['profile'] = $profile;
 
-        if (in_array($profile, ['generic_listing', 'wichitadocumenters'], true)) {
+        if (in_array($profile, ['generic_listing', 'documenters', 'wichitadocumenters'], true)) {
             unset($config['pdf']);
         }
 

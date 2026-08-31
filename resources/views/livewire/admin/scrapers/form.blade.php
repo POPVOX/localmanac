@@ -259,8 +259,8 @@
                             <flux:button type="button" variant="subtle" wire:click.prevent="applyTemplate('generic_listing')">
                                 {{ __('Generic listing default') }}
                             </flux:button>
-                            <flux:button type="button" variant="subtle" wire:click.prevent="applyTemplate('wichita_archive_pdf_list')">
-                                {{ __('Wichita Archive PDF list') }}
+                            <flux:button type="button" variant="subtle" wire:click.prevent="applyTemplate('civicplus_archive_pdf_list')">
+                                {{ __('CivicPlus archive PDF list') }}
                             </flux:button>
                         </div>
 

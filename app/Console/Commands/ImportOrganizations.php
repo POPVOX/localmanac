@@ -17,7 +17,13 @@ class ImportOrganizations extends Command
 
     public function handle(): int
     {
-        $cityOption = $this->option('city') ?? 'wichita';
+        $cityOption = trim((string) $this->option('city'));
+
+        if ($cityOption === '') {
+            $this->error('The --city option is required so imported organizations cannot be assigned to the wrong jurisdiction.');
+
+            return self::FAILURE;
+        }
 
         $city = $this->findCity($cityOption);
 

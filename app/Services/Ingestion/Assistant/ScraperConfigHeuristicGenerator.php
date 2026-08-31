@@ -59,9 +59,9 @@ class ScraperConfigHeuristicGenerator
     {
         if ($this->looksLikeArchiveProfile($sourceUrl, $html)) {
             return [
-                'profile' => 'wichita_archive_pdf_list',
+                'profile' => 'civicplus_archive_pdf_list',
                 'config' => [
-                    'profile' => 'wichita_archive_pdf_list',
+                    'profile' => 'civicplus_archive_pdf_list',
                     'list' => [
                         'href_contains' => 'Archive.aspx?ADID=',
                         'max_links' => 50,
@@ -77,9 +77,9 @@ class ScraperConfigHeuristicGenerator
 
         if ($this->looksLikeDocumentersProfile($html)) {
             return [
-                'profile' => 'wichitadocumenters',
+                'profile' => 'documenters',
                 'config' => [
-                    'profile' => 'wichitadocumenters',
+                    'profile' => 'documenters',
                     'list' => [
                         'link_selector' => 'a[href*="docs.google.com"]',
                         'link_attr' => 'href',

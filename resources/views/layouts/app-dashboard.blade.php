@@ -4,10 +4,12 @@
         $isAdminPreview = ($adminPreview ?? false) && isset($city);
         $dashboardUrl = $isAdminPreview
             ? route('admin.cities.preview', $city)
-            : route('dashboard');
+            : (isset($city) && $city ? route('cities.show', $city) : route('home'));
         $calendarUrl = $isAdminPreview
             ? route('admin.cities.calendar', $city)
-            : route('demo.calendar');
+            : (isset($city) && $city ? route('cities.calendar', $city) : route('demo.calendar'));
+        $availableCities = $availableCities ?? collect();
+        $currentSurface = $currentSurface ?? 'dashboard';
     @endphp
     <head>
         @include('partials.head')
@@ -26,12 +28,33 @@
 
             <flux:spacer />
 
-            @auth
-                <flux:navbar class="-mb-px">
-                    <flux:navbar.item href="{{ $dashboardUrl }}" wire:navigate>Dashboard</flux:navbar.item>
-                    <flux:navbar.item href="{{ $calendarUrl }}" wire:navigate>Calendar</flux:navbar.item>
-                </flux:navbar>
-            @endauth
+            @if ($availableCities->isNotEmpty())
+                <label class="flex items-center gap-2 text-sm font-medium text-zinc-600">
+                    <span class="hidden lg:inline">{{ __('City') }}</span>
+                    <select
+                        class="max-w-36 rounded-lg border border-zinc-200 bg-white px-2 py-2 text-sm text-zinc-800 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 sm:max-w-52 sm:px-3"
+                        aria-label="{{ __('Choose a city') }}"
+                        x-data
+                        x-on:change="window.location.href = $event.target.value"
+                    >
+                        @foreach ($availableCities as $availableCity)
+                            @php
+                                $cityUrl = $isAdminPreview
+                                    ? route($currentSurface === 'calendar' ? 'admin.cities.calendar' : 'admin.cities.preview', $availableCity)
+                                    : route($currentSurface === 'calendar' ? 'cities.calendar' : 'cities.show', $availableCity);
+                            @endphp
+                            <option value="{{ $cityUrl }}" @selected(isset($city) && $city?->is($availableCity))>
+                                {{ $availableCity->name }}@if ($availableCity->state), {{ $availableCity->state }}@endif
+                            </option>
+                        @endforeach
+                    </select>
+                </label>
+            @endif
+
+            <flux:navbar class="-mb-px">
+                <flux:navbar.item href="{{ $dashboardUrl }}" wire:navigate>{{ __('News') }}</flux:navbar.item>
+                <flux:navbar.item href="{{ $calendarUrl }}" wire:navigate>{{ __('Calendar') }}</flux:navbar.item>
+            </flux:navbar>
 
             @guest
                 <flux:navbar class="-mb-px">

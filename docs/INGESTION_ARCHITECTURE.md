@@ -24,7 +24,7 @@ Implemented scraper types in `ScrapeRunner`:
 
 Implemented HTML profile routing:
 
-- `wichitadocumenters`
+- `documenters` (legacy `wichitadocumenters` configs remain supported)
 - `generic_listing`
 - `wichita_archive_pdf_list`
 

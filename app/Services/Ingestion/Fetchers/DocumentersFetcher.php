@@ -49,7 +49,7 @@ class DocumentersFetcher
         $detailPlaywrightOptions = $this->resolveDetailPlaywrightOptions($listingPlaywrightOptions);
 
         $listingHtml = $this->fetchPageHtml($sourceUrl, $renderer, true, $listingPlaywrightOptions);
-        $links = $this->extractDocLinks($listingHtml, $linkSelector, $linkAttr, $maxLinks);
+        $links = $this->extractDocLinks($listingHtml, $sourceUrl, $linkSelector, $linkAttr, $maxLinks);
         $items = [];
         $blockedDetailCount = 0;
 
@@ -107,11 +107,11 @@ class DocumentersFetcher
     /**
      * @return array<int, string>
      */
-    private function extractDocLinks(string $html, string $linkSelector, string $linkAttr, int $maxLinks): array
+    private function extractDocLinks(string $html, string $sourceUrl, string $linkSelector, string $linkAttr, int $maxLinks): array
     {
-        $crawler = new Crawler($html, 'https://wichitadocumenters.org');
+        $crawler = new Crawler($html, $sourceUrl);
 
-        $links = $crawler->filter($linkSelector)->each(function (Crawler $node) use ($linkAttr) {
+        $links = $crawler->filter($linkSelector)->each(function (Crawler $node) use ($linkAttr, $sourceUrl) {
             $href = $node->attr($linkAttr) ?? '';
             $href = trim($href);
 
@@ -119,7 +119,7 @@ class DocumentersFetcher
                 return null;
             }
 
-            return $this->normalizeUrl($href);
+            return $this->normalizeUrl($href, $sourceUrl);
         });
 
         $links = array_values(array_unique(array_filter($links, function (?string $url) {
@@ -292,14 +292,35 @@ class DocumentersFetcher
         return trim(preg_replace('/\\s+/', ' ', $value) ?? '');
     }
 
-    private function normalizeUrl(string $url): string
+    private function normalizeUrl(string $url, string $sourceUrl): string
     {
         if (Str::startsWith($url, '//')) {
             return 'https:'.$url;
         }
 
         if (! Str::startsWith($url, ['http://', 'https://'])) {
-            return 'https://wichitadocumenters.org/'.ltrim($url, '/');
+            $parts = parse_url($sourceUrl);
+            $scheme = is_string($parts['scheme'] ?? null) ? $parts['scheme'] : 'https';
+            $host = is_string($parts['host'] ?? null) ? $parts['host'] : null;
+
+            if (! $host) {
+                return $url;
+            }
+
+            $origin = $scheme.'://'.$host;
+
+            if (isset($parts['port'])) {
+                $origin .= ':'.$parts['port'];
+            }
+
+            if (Str::startsWith($url, '/')) {
+                return $origin.$url;
+            }
+
+            $basePath = is_string($parts['path'] ?? null) ? $parts['path'] : '/';
+            $baseDirectory = trim((string) pathinfo($basePath, PATHINFO_DIRNAME), '/.');
+
+            return $origin.'/'.($baseDirectory !== '' ? $baseDirectory.'/' : '').ltrim($url, '/');
         }
 
         return $url;

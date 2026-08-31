@@ -18,6 +18,7 @@ it('uses the streaming chat path for authenticated dashboard users and stores co
     ]);
 
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
     $service = mock(AskService::class);
@@ -71,7 +72,7 @@ it('uses the streaming chat path for authenticated dashboard users and stores co
         ->assertSee('Recycling & Trash')
         ->assertSeeHtml('data-chat-role="assistant"');
 
-    expect(session('chat.conversation_id'))->toBe('conv_123');
+    expect(session('chat.conversation_id.city.'.$city->id))->toBe('conv_123');
 });
 
 it('uses the authenticated chat path even when the legacy streaming flag is disabled', function () {
@@ -84,6 +85,7 @@ it('uses the authenticated chat path even when the legacy streaming flag is disa
     ]);
 
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
     $service = mock(AskService::class);
@@ -125,6 +127,7 @@ it('keeps dashboard prompt chips on the streaming path without a fallback intent
     ]);
 
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
     $prompt = 'What new permits, rezonings, or major development projects were recently filed or approved in Wichita? Include status and key locations.';
@@ -182,6 +185,7 @@ it('renders a fresh assistant answer and citations for each new dashboard query'
     ]);
 
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
     $responses = [

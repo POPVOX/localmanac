@@ -163,9 +163,9 @@ class ScraperConfigPreviewer
         }
 
         return match ($profile) {
-            'wichitadocumenters' => $this->documentersFetcher->fetch($scraper),
+            'documenters', 'wichitadocumenters' => $this->documentersFetcher->fetch($scraper),
             'generic_listing' => $this->genericListingFetcher->fetch($scraper),
-            'wichita_archive_pdf_list' => $this->mapArchivePreview($scraper, $warnings),
+            'civicplus_archive_pdf_list', 'wichita_archive_pdf_list' => $this->mapArchivePreview($scraper, $warnings),
             default => throw new InvalidArgumentException('Unsupported html scraper profile for preview.'),
         };
     }

@@ -15,6 +15,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -54,11 +55,15 @@ class Dashboard extends Component
 
     public ?string $conversationId = null;
 
+    public string $cityAccessCode = '';
+
+    public bool $chatAccessGranted = false;
+
     public function mount(?City $city = null): void
     {
         $this->cityId = $city?->id ?? (request()->integer('city_id') ?: null);
         $this->adminPreview = $city !== null && request()->routeIs('admin.cities.preview');
-        $this->conversationId = $this->storedConversationId();
+        $this->conversationId = $this->storedConversationId($this->resolveCity());
     }
 
     public function ask(): void
@@ -69,22 +74,24 @@ class Dashboard extends Component
             return;
         }
 
+        $city = $this->resolveCity();
+        $user = auth()->user();
+
+        if (! $city || ! $user instanceof User || ! $user->hasVerifiedEmail() || ! $user->canAccessCity($city)) {
+            $this->addError('question', __('Enter the access code for this city to use chat.'));
+
+            return;
+        }
+
         $this->appendMessage('user', $question);
         $assistantMessageId = $this->appendMessage('assistant');
 
         try {
-            $city = $this->resolveCity();
-            $user = auth()->user();
-
-            if (! $user instanceof User) {
-                throw new \RuntimeException('Dashboard chat requires an authenticated user.');
-            }
-
             $response = app(AskService::class)->answerStreamingForUser(
                 question: $question,
                 citySelector: $city?->id,
                 user: $user,
-                conversationId: $this->storedConversationId(),
+                conversationId: $this->storedConversationId($city),
                 onDelta: function (string $delta) use ($assistantMessageId): null {
                     $this->appendAssistantDelta($assistantMessageId, $delta);
 
@@ -96,7 +103,7 @@ class Dashboard extends Component
                 ? $response['conversation_id']
                 : null;
 
-            $this->storeConversationId($this->conversationId);
+            $this->storeConversationId($this->conversationId, $city);
 
             $this->replaceMessage(
                 messageId: $assistantMessageId,
@@ -119,14 +126,73 @@ class Dashboard extends Component
     public function startNewConversation(): void
     {
         $this->conversationId = null;
-        $this->storeConversationId(null);
+        $this->storeConversationId(null, $this->resolveCity());
         $this->messages = [];
         $this->dispatch('chat-reset');
     }
 
     public function applyPrompt(string $prompt): void
     {
+        if (! $this->canUseChat($this->resolveCity())) {
+            return;
+        }
+
         $this->question = $prompt;
+    }
+
+    public function unlockCityChat(): void
+    {
+        $user = auth()->user();
+        $city = $this->resolveCity();
+
+        if (! $user instanceof User || ! $city) {
+            $this->addError('cityAccessCode', __('Sign in before entering a city access code.'));
+
+            return;
+        }
+
+        if (! $user->hasVerifiedEmail()) {
+            $this->addError('cityAccessCode', __('Verify your email address before unlocking chat.'));
+
+            return;
+        }
+
+        if ($user->isSuperAdmin() || $user->canAccessCity($city)) {
+            $this->chatAccessGranted = true;
+
+            return;
+        }
+
+        $this->validate([
+            'cityAccessCode' => ['required', 'string', 'max:100'],
+        ]);
+
+        $rateLimitKey = 'city-chat-access:'.$user->getKey().':'.$city->getKey();
+
+        if (RateLimiter::tooManyAttempts($rateLimitKey, 5)) {
+            $this->addError(
+                'cityAccessCode',
+                __('Too many attempts. Try again in :seconds seconds.', [
+                    'seconds' => RateLimiter::availableIn($rateLimitKey),
+                ]),
+            );
+
+            return;
+        }
+
+        if (! $city->matchesChatAccessCode($this->cityAccessCode)) {
+            RateLimiter::hit($rateLimitKey, 60);
+            $this->addError('cityAccessCode', __('That access code is not valid for :city.', ['city' => $city->name]));
+
+            return;
+        }
+
+        $user->cities()->syncWithoutDetaching([$city->getKey()]);
+        RateLimiter::clear($rateLimitKey);
+        $this->reset('cityAccessCode');
+        $this->resetErrorBag('cityAccessCode');
+        $this->chatAccessGranted = true;
+        $this->dispatch('chat-access-granted');
     }
 
     public function selectIssueArea(int $issueAreaId): void
@@ -173,6 +239,10 @@ class Dashboard extends Component
     {
         $city = $this->resolveCity();
         $timezone = $this->resolveTimezone($city);
+        $availableCities = City::query()
+            ->orderBy('name')
+            ->orderBy('state')
+            ->get();
 
         $issueAreas = $this->issueAreaQuery($city)
             ->orderBy('name')
@@ -197,6 +267,8 @@ class Dashboard extends Component
             'articleFallbackChips' => $articleFallbackChips,
             'articles' => $articles,
             'upcomingEvents' => $this->upcomingEvents($city, $timezone),
+            'canUseChat' => $this->canUseChat($city),
+            'chatAccessConfigured' => $city?->hasChatAccessCode() ?? false,
             'stats' => [
                 'totalArticles' => $totalArticles,
                 'addedToday' => $articlesAddedToday,
@@ -206,6 +278,8 @@ class Dashboard extends Component
         ])->layout('layouts.app-dashboard', [
             'city' => $city,
             'adminPreview' => $this->adminPreview,
+            'availableCities' => $availableCities,
+            'currentSurface' => 'dashboard',
         ]);
     }
 
@@ -331,10 +405,19 @@ class Dashboard extends Component
             return City::query()->find($this->cityId);
         }
 
-        return City::query()
-            ->where('slug', 'wichita')
-            ->first()
-            ?? City::query()->first();
+        $user = auth()->user();
+
+        if ($user instanceof User && ! $user->isSuperAdmin()) {
+            $authorizedCity = $user->cities()
+                ->orderBy('name')
+                ->first();
+
+            if ($authorizedCity) {
+                return $authorizedCity;
+            }
+        }
+
+        return City::query()->orderBy('name')->first();
     }
 
     private function resolveTimezone(?City $city): string
@@ -584,26 +667,26 @@ class Dashboard extends Component
         ];
     }
 
-    private function storedConversationId(): ?string
+    private function storedConversationId(?City $city): ?string
     {
-        if (! auth()->check() || ! (bool) config('chat.memory_enabled', true)) {
+        if (! auth()->check() || ! $city || ! (bool) config('chat.memory_enabled', true)) {
             return null;
         }
 
-        $conversationId = session((string) config('chat.memory_session_key', 'chat.conversation_id'));
+        $conversationId = session($this->conversationSessionKey($city));
 
         return is_string($conversationId) && trim($conversationId) !== ''
             ? $conversationId
             : null;
     }
 
-    private function storeConversationId(?string $conversationId): void
+    private function storeConversationId(?string $conversationId, ?City $city): void
     {
-        if (! auth()->check() || ! (bool) config('chat.memory_enabled', true)) {
+        if (! auth()->check() || ! $city || ! (bool) config('chat.memory_enabled', true)) {
             return;
         }
 
-        $sessionKey = (string) config('chat.memory_session_key', 'chat.conversation_id');
+        $sessionKey = $this->conversationSessionKey($city);
 
         if ($conversationId === null || trim($conversationId) === '') {
             session()->forget($sessionKey);
@@ -612,6 +695,21 @@ class Dashboard extends Component
         }
 
         session()->put($sessionKey, $conversationId);
+    }
+
+    private function conversationSessionKey(City $city): string
+    {
+        return (string) config('chat.memory_session_key', 'chat.conversation_id').'.city.'.$city->getKey();
+    }
+
+    private function canUseChat(?City $city): bool
+    {
+        $user = auth()->user();
+
+        return $city !== null
+            && $user instanceof User
+            && $user->hasVerifiedEmail()
+            && $user->canAccessCity($city);
     }
 
     /**

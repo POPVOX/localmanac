@@ -36,7 +36,13 @@ class Form extends Component
         6 => 'Saturday',
     ];
 
-    private const HTML_PROFILES = ['wichitadocumenters', 'generic_listing', 'wichita_archive_pdf_list'];
+    private const HTML_PROFILES = [
+        'documenters',
+        'generic_listing',
+        'civicplus_archive_pdf_list',
+        'wichitadocumenters',
+        'wichita_archive_pdf_list',
+    ];
 
     public ?Scraper $scraper = null;
 
@@ -304,7 +310,6 @@ class Form extends Component
     {
         $config = match ($template) {
             'documenters' => [
-                'feed_url' => 'https://wichita-ks.documenters.org/feed/rss/',
                 'default_content_type' => 'meeting_notes',
                 'lang' => 'en',
                 'max_items' => 50,
@@ -322,8 +327,8 @@ class Form extends Component
                 ],
                 'best_effort' => true,
             ],
-            'wichita_archive_pdf_list' => [
-                'profile' => 'wichita_archive_pdf_list',
+            'civicplus_archive_pdf_list', 'wichita_archive_pdf_list' => [
+                'profile' => 'civicplus_archive_pdf_list',
                 'list' => [
                     'href_contains' => 'Archive.aspx?ADID=',
                     'max_links' => 50,
@@ -337,13 +342,8 @@ class Form extends Component
 
         if ($template === 'documenters') {
             $this->type = 'rss';
-            $this->sourceUrl = 'https://wichita-ks.documenters.org/feed/rss/';
-        } elseif (in_array($template, ['generic_listing', 'wichita_archive_pdf_list'], true)) {
+        } elseif (in_array($template, ['generic_listing', 'civicplus_archive_pdf_list', 'wichita_archive_pdf_list'], true)) {
             $this->type = 'html';
-
-            if ($this->sourceUrl === 'https://wichita-ks.documenters.org/feed/rss/') {
-                $this->sourceUrl = '';
-            }
         }
 
         if ($this->isSuperAdmin) {

@@ -20,19 +20,23 @@ test('unverified users are redirected to verification notice', function () {
 });
 
 test('verified users can visit the dashboard', function () {
+    $city = City::factory()->create(['name' => 'Lawrence', 'slug' => 'lawrence-ks']);
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
     $response = $this->get(route('dashboard'));
     $response->assertOk()
         ->assertSee('data-testid="assistant-typing-indicator"', false)
         ->assertDontSee('data-testid="new-conversation-button"', false)
-        ->assertSee('Live with real Wichita data! Try our AI assistant to get your Wichita questions answered.')
-        ->assertDontSee('Live with real Wichita data! Try the AI assistant above.');
+        ->assertSee('Viewing current news and events for Lawrence.')
+        ->assertDontSee('Wichita');
 });
 
 test('dashboard scrolls to the start of the latest assistant answer', function () {
+    $city = City::factory()->create();
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
     $response = $this->get(route('dashboard'));
@@ -43,7 +47,9 @@ test('dashboard scrolls to the start of the latest assistant answer', function (
 });
 
 test('dashboard queues a bottom scroll when a follow-up question is submitted', function () {
+    $city = City::factory()->create();
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
     $response = $this->get(route('dashboard'));
@@ -54,7 +60,9 @@ test('dashboard queues a bottom scroll when a follow-up question is submitted', 
 });
 
 test('dashboard shows task-oriented chat prompt chips', function () {
+    $city = City::factory()->create();
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
     $response = $this->get(route('dashboard'));
@@ -67,10 +75,12 @@ test('dashboard shows task-oriented chat prompt chips', function () {
 });
 
 test('applying a chip prompt fills the composer question', function () {
+    $city = City::factory()->create(['name' => 'Lawrence', 'slug' => 'lawrence-ks']);
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
-    $prompt = 'How do I apply for a building permit in Wichita? What documents do I need and where do I submit the application?';
+    $prompt = 'How do I apply for a building permit in Lawrence? What documents do I need and where do I submit the application?';
 
     Livewire::test(\App\Livewire\Dashboard::class)
         ->call('applyPrompt', $prompt)
@@ -78,7 +88,9 @@ test('applying a chip prompt fills the composer question', function () {
 });
 
 test('dashboard renders assistant markdown links as clickable anchors', function () {
+    $city = City::factory()->create();
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
     Livewire::test(\App\Livewire\Dashboard::class)
@@ -95,7 +107,9 @@ test('dashboard renders assistant markdown links as clickable anchors', function
 });
 
 test('dashboard spaces paragraphs after markdown lists in assistant answers', function () {
+    $city = City::factory()->create();
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
     Livewire::test(\App\Livewire\Dashboard::class)
@@ -110,7 +124,9 @@ test('dashboard spaces paragraphs after markdown lists in assistant answers', fu
 });
 
 test('dashboard no longer renders legacy answer resources', function () {
+    $city = City::factory()->create();
     $user = User::factory()->create();
+    $user->cities()->attach($city);
     $this->actingAs($user);
 
     Livewire::test(\App\Livewire\Dashboard::class)

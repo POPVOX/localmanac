@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ArticleSourceController;
+use App\Http\Controllers\HomeController;
 use App\Livewire\Admin\ChatSources\Form as ChatSourcesForm;
 use App\Livewire\Admin\ChatSources\Index as ChatSourcesIndex;
 use App\Livewire\Admin\ChatSources\Show as ChatSourcesShow;
@@ -25,9 +26,11 @@ use App\Livewire\Demo\Calendar as DemoCalendar;
 use Illuminate\Support\Facades\Route;
 use Laravel\Fortify\Features;
 
-Route::view('/', 'welcome')->name('home');
+Route::get('/', HomeController::class)->name('home');
 
 Route::get('demo/calendar', DemoCalendar::class)->name('demo.calendar');
+Route::get('cities/{city:slug}', UserDashboard::class)->name('cities.show');
+Route::get('cities/{city:slug}/calendar', DemoCalendar::class)->name('cities.calendar');
 Route::livewire('articles/{article}', ArticleExplainer::class)
     ->whereNumber('article')
     ->name('articles.show');

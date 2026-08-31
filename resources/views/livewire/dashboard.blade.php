@@ -7,17 +7,24 @@
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         {{-- Query box (left) --}}
-        <div class="overflow-hidden rounded-3xl border border-zinc-200/60 bg-white shadow-lg">
+        <div @class([
+            'overflow-hidden rounded-3xl border shadow-lg',
+            'border-zinc-200/60 bg-white' => $canUseChat,
+            'border-zinc-200 bg-zinc-100/80' => ! $canUseChat,
+        ])>
             {{-- Header --}}
             <div class="px-6 pt-5 pb-4">
                 <flux:heading size="lg" level="1">
                     {{ __('Ask LocAlmanac About :city', ['city' => $city?->name ?? __('your city')]) }}
                 </flux:heading>
                 <flux:subheading class="mt-0.5">
-                    {{ __('Get answers on local services, meetings, and community updates.') }}
+                    {{ $canUseChat
+                        ? __('Get answers on local services, meetings, and community updates.')
+                        : __('Chat access is available to verified members of this city.') }}
                 </flux:subheading>
             </div>
 
+            @if ($canUseChat)
             {{-- Conversation body --}}
             <div
                 x-data="{
@@ -262,6 +269,55 @@
                     </form>
                 </div>
             </div>
+            @else
+                <div class="border-t border-zinc-200 bg-zinc-100/70 px-6 py-8" data-testid="chat-locked">
+                    <div class="mx-auto max-w-lg space-y-4 text-center">
+                        <div class="mx-auto grid size-12 place-items-center rounded-full bg-zinc-200 text-zinc-500">
+                            <flux:icon icon="lock-closed" class="size-5" />
+                        </div>
+                        <div>
+                            <div class="font-semibold text-zinc-700">{{ __('Chat is locked for :city', ['city' => $city?->name ?? __('this city')]) }}</div>
+                            <p class="mt-1 text-sm text-zinc-500">
+                                {{ __('The news feed and calendar are public. A city access code is required only for the AI assistant.') }}
+                            </p>
+                        </div>
+
+                        @guest
+                            <div class="flex flex-wrap justify-center gap-2">
+                                <flux:button :href="route('login')" variant="primary" wire:navigate>
+                                    {{ __('Log in') }}
+                                </flux:button>
+                                @if (Route::has('register'))
+                                    <flux:button :href="route('register')" variant="subtle" wire:navigate>
+                                        {{ __('Create account with a code') }}
+                                    </flux:button>
+                                @endif
+                            </div>
+                        @else
+                            @if ($chatAccessConfigured)
+                                <form wire:submit.prevent="unlockCityChat" class="mx-auto flex max-w-md flex-col gap-3 sm:flex-row sm:items-start">
+                                    <div class="min-w-0 flex-1 text-left">
+                                        <flux:input
+                                            wire:model="cityAccessCode"
+                                            type="text"
+                                            autocomplete="off"
+                                            :label="__('City access code')"
+                                            :placeholder="__('Enter code')"
+                                        />
+                                    </div>
+                                    <flux:button type="submit" variant="primary" class="sm:mt-6" wire:loading.attr="disabled">
+                                        {{ __('Unlock chat') }}
+                                    </flux:button>
+                                </form>
+                            @else
+                                <p class="text-sm font-medium text-zinc-500">
+                                    {{ __('Chat access has not been opened for this city yet.') }}
+                                </p>
+                            @endif
+                        @endguest
+                    </div>
+                </div>
+            @endif
         </div>
 
         {{-- Welcome box (right) --}}
@@ -273,8 +329,8 @@
                         {{ __('Your AI-powered local information and news portal. Ask questions, browse articles, and stay informed about what\'s happening in your community.') }}
                     </p>
                     <div class="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                        <span class="font-semibold">{{ __('Pilot Status:') }}</span>
-                        {{ __('Live with real Wichita data! Try our AI assistant to get your Wichita questions answered.') }}
+                        <span class="font-semibold">{{ __('Local coverage:') }}</span>
+                        {{ __('Viewing current news and events for :city.', ['city' => $city?->name ?? __('this city')]) }}
                     </div>
                 </div>
                 <div class="pt-2">
@@ -537,7 +593,7 @@
                 <a
                     href="{{ $adminPreview && $city
                         ? route('admin.cities.calendar', $city)
-                        : route('demo.calendar') }}"
+                        : ($city ? route('cities.calendar', $city) : route('demo.calendar')) }}"
                     class="inline-flex items-center gap-1 text-sm font-semibold uppercase tracking-wide text-zinc-700 transition hover:text-emerald-600"
                     wire:navigate
                 >

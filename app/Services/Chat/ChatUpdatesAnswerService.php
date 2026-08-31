@@ -391,7 +391,7 @@ class ChatUpdatesAnswerService
             'a', 'an', 'of', 'to', 'in', 'on', 'at', 'by', 'or', 'if', 'as',
             'city', 'local', 'summarize', 'summary', 'important', 'most', 'last', 'past', 'days', 'day',
             'week', 'weeks', 'month', 'months', 'recent', 'recently', 'new', 'updates', 'update', 'changed',
-            'right', 'now', 'wichita', 'residents', 'know',
+            'right', 'now', 'residents', 'know',
         ];
 
         return array_values(array_unique(array_filter(

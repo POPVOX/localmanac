@@ -4,7 +4,7 @@ use App\Services\Ingestion\Assistant\ScraperConfigDrafter;
 
 uses(Tests\TestCase::class);
 
-it('detects the wichita archive pdf list profile from archive html', function () {
+it('detects the civicplus archive pdf list profile from archive html', function () {
     config()->set('scraper-assistant.ai.refine_enabled', false);
 
     $html = <<<'HTML'
@@ -25,8 +25,8 @@ it('detects the wichita archive pdf list profile from archive html', function ()
         $html,
     );
 
-    expect($draft['profile'])->toBe('wichita_archive_pdf_list')
-        ->and($draft['config']['profile'])->toBe('wichita_archive_pdf_list')
+    expect($draft['profile'])->toBe('civicplus_archive_pdf_list')
+        ->and($draft['config']['profile'])->toBe('civicplus_archive_pdf_list')
         ->and($draft['config']['list']['href_contains'])->toBe('Archive.aspx?ADID=');
 });
 
@@ -49,8 +49,8 @@ it('detects the documenters profile from google docs links', function () {
         $html,
     );
 
-    expect($draft['profile'])->toBe('wichitadocumenters')
-        ->and($draft['config']['profile'])->toBe('wichitadocumenters')
+    expect($draft['profile'])->toBe('documenters')
+        ->and($draft['config']['profile'])->toBe('documenters')
         ->and($draft['config']['list']['link_selector'])->toBe('a[href*="docs.google.com"]')
         ->and($draft['config']['fetch']['renderer'])->toBe('auto')
         ->and($draft['config']['fetch']['playwright']['storage_state_path'])->toBe('storage/app/playwright/example.com.json');

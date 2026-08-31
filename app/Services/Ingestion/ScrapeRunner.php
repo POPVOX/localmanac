@@ -186,7 +186,7 @@ class ScrapeRunner
         $profile = Arr::get($scraper->config, 'profile');
 
         return match ($profile) {
-            'wichitadocumenters' => [
+            'documenters', 'wichitadocumenters' => [
                 'items' => app(\App\Services\Ingestion\Fetchers\DocumentersFetcher::class)->fetch($scraper),
                 'meta' => [],
             ],
@@ -194,9 +194,9 @@ class ScrapeRunner
                 'items' => app(\App\Services\Ingestion\Fetchers\GenericListingFetcher::class)->fetch($scraper),
                 'meta' => [],
             ],
-            'wichita_archive_pdf_list' => app(WichitaArchivePdfListFetcher::class)->fetch($scraper),
+            'civicplus_archive_pdf_list', 'wichita_archive_pdf_list' => app(WichitaArchivePdfListFetcher::class)->fetch($scraper),
             default => throw new InvalidArgumentException(
-                "No HTML fetcher for profile: {$profile}. Supported: wichitadocumenters, generic_listing, wichita_archive_pdf_list"
+                "No HTML fetcher for profile: {$profile}. Supported: documenters, generic_listing, civicplus_archive_pdf_list"
             ),
         };
     }

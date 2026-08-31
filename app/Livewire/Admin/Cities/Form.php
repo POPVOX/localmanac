@@ -6,6 +6,7 @@ use App\Models\City;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Routing\Redirector;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -20,6 +21,16 @@ class Form extends Component
 
     public string $slug = '';
 
+    public string $state = '';
+
+    public string $country = 'US';
+
+    public string $timezone = 'America/Chicago';
+
+    public string $chatAccessCode = '';
+
+    public bool $removeChatAccessCode = false;
+
     public bool $slugManuallySet = false;
 
     public function mount(?City $city = null): void
@@ -29,6 +40,9 @@ class Form extends Component
         if ($city) {
             $this->name = $city->name;
             $this->slug = $city->slug;
+            $this->state = (string) $city->state;
+            $this->country = (string) ($city->country ?: 'US');
+            $this->timezone = (string) ($city->timezone ?: config('app.timezone', 'UTC'));
             $this->slugManuallySet = true;
         }
     }
@@ -50,6 +64,18 @@ class Form extends Component
         try {
             $payload = $this->validate($this->rules());
             $payload['slug'] = Str::slug($payload['slug']);
+            $chatAccessCode = trim((string) $payload['chatAccessCode']);
+            $removeChatAccessCode = (bool) $payload['removeChatAccessCode'];
+            unset($payload['chatAccessCode'], $payload['removeChatAccessCode']);
+
+            $payload['state'] = trim((string) $payload['state']) ?: null;
+            $payload['country'] = strtoupper(trim((string) $payload['country']));
+
+            if ($removeChatAccessCode) {
+                $payload['chat_access_code_hash'] = null;
+            } elseif ($chatAccessCode !== '') {
+                $payload['chat_access_code_hash'] = Hash::make($chatAccessCode);
+            }
 
             $isUpdating = $this->city !== null;
 
@@ -94,6 +120,11 @@ class Form extends Component
                 'max:255',
                 Rule::unique('cities', 'slug')->ignore($this->city?->id),
             ],
+            'state' => ['nullable', 'string', 'max:100'],
+            'country' => ['required', 'string', 'size:2'],
+            'timezone' => ['required', 'timezone:all'],
+            'chatAccessCode' => ['nullable', 'string', 'min:8', 'max:100'],
+            'removeChatAccessCode' => ['boolean'],
         ];
     }
 
