@@ -535,7 +535,9 @@
                 @endforelse
 
                 <a
-                    href="{{ route('demo.calendar') }}"
+                    href="{{ $adminPreview && $city
+                        ? route('admin.cities.calendar', $city)
+                        : route('demo.calendar') }}"
                     class="inline-flex items-center gap-1 text-sm font-semibold uppercase tracking-wide text-zinc-700 transition hover:text-emerald-600"
                     wire:navigate
                 >

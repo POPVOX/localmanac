@@ -24,7 +24,8 @@ test('city previews are restricted to administrators and use slug urls', functio
         ->get($previewUrl)
         ->assertOk()
         ->assertSee('Ask LocAlmanac About Lawrence')
-        ->assertSee(route('admin.cities.calendar', $city), false);
+        ->assertSee(route('admin.cities.calendar', $city), false)
+        ->assertDontSee(route('demo.calendar'), false);
 });
 
 test('city calendar previews keep the admin-only city context', function () {
