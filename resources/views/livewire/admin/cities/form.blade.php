@@ -1,8 +1,9 @@
-<div class="space-y-6">
-    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+<div class="admin-page">
+    <div class="admin-page-header">
         <div>
-            <flux:heading size="xl" level="1">{{ $title }}</flux:heading>
-            <flux:subheading>{{ __('Create or update a city, its public URL, and chat access code.') }}</flux:subheading>
+            <div class="admin-kicker">{{ __('Jurisdiction settings') }}</div>
+            <flux:heading size="xl" level="1" class="mt-2 font-serif !text-4xl !font-medium tracking-[-0.03em] text-[#123e32]">{{ $title }}</flux:heading>
+            <flux:subheading class="mt-2">{{ __('Manage public URLs, location details, and member chat access.') }}</flux:subheading>
         </div>
 
         <flux:button variant="ghost" :href="route('admin.cities.index')" wire:navigate>
@@ -10,7 +11,7 @@
         </flux:button>
     </div>
 
-    <flux:card padding="xl" variant="subtle" class="space-y-6">
+    <flux:card padding="xl" class="admin-panel space-y-6">
         <form wire:submit.prevent="save" class="space-y-6">
             <flux:input
                 wire:model.live="name"

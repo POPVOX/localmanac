@@ -1,16 +1,17 @@
-<div class="space-y-6">
-    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+<div class="admin-page">
+    <div class="admin-page-header">
         <div>
-            <flux:heading size="xl" level="1">{{ __('Cities') }}</flux:heading>
-            <flux:subheading>{{ __('Manage the cities covered by Localmanac.') }}</flux:subheading>
+            <div class="admin-kicker">{{ __('Jurisdictions') }}</div>
+            <flux:heading size="xl" level="1" class="mt-2 font-serif !text-4xl !font-medium tracking-[-0.03em] text-[#123e32]">{{ __('Cities') }}</flux:heading>
+            <flux:subheading class="mt-2">{{ __('Manage public city pages and member chat access.') }}</flux:subheading>
         </div>
 
-        <flux:button variant="primary" :href="route('admin.cities.create')" wire:navigate>
+        <flux:button variant="primary" :href="route('admin.cities.create')" icon="plus" wire:navigate>
             {{ __('New City') }}
         </flux:button>
     </div>
 
-    <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
+    <flux:card padding="lg" class="admin-panel overflow-hidden">
         <flux:table :paginate="$cities">
             <flux:table.columns sticky>
                 <flux:table.column sticky>{{ __('Name') }}</flux:table.column>

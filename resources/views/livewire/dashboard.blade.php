@@ -1,19 +1,44 @@
-<div class="space-y-8">
+<div class="space-y-6 lg:space-y-8">
     {{-- ── Chat + Welcome row ────────────────────────────────────── --}}
     @php
         $hasConversation = $conversationId || count($messages) > 0;
         $upcomingEvents = $upcomingEvents ?? collect();
     @endphp
 
+    <section class="public-masthead relative">
+        <div class="pointer-events-none absolute -right-16 -top-24 size-72 rounded-full bg-[#dcebe3]/80 blur-3xl"></div>
+        <div class="relative grid gap-7 lg:grid-cols-[1fr_auto] lg:items-end">
+            <div>
+                <div class="editorial-eyebrow">{{ __('Local briefing') }}</div>
+                <h1 class="mt-3 font-serif text-4xl font-medium tracking-[-0.035em] text-[#123e32] sm:text-5xl">
+                    {{ $city?->name ?? __('Your city') }}@if ($city?->state)<span class="text-[#718078]">, {{ $city->state }}</span>@endif
+                </h1>
+                <p class="mt-3 max-w-2xl text-sm leading-6 text-[#5d7168] sm:text-base">
+                    {{ __('Reporting, public information, and upcoming events gathered for this community.') }}
+                </p>
+            </div>
+
+            <button
+                type="button"
+                x-data=""
+                x-on:click="$flux.modal('site-feedback').show()"
+                class="inline-flex w-fit cursor-pointer items-center gap-2 text-sm font-semibold text-[#1f654f] transition hover:text-[#123e32]"
+            >
+                <flux:icon icon="chat-bubble-left-ellipsis" class="size-4" />
+                {{ __('Share feedback') }}
+            </button>
+        </div>
+    </section>
+
     <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         {{-- Query box (left) --}}
         <div @class([
-            'overflow-hidden rounded-3xl border shadow-lg',
-            'border-zinc-200/60 bg-white' => $canUseChat,
-            'border-zinc-200 bg-zinc-100/80' => ! $canUseChat,
+            'public-panel overflow-hidden',
+            'bg-white' => $canUseChat,
+            'bg-[#eef0ec]' => ! $canUseChat,
         ])>
             {{-- Header --}}
-            <div class="px-6 pt-5 pb-4">
+            <div class="border-b border-[#e4e2da] px-5 py-5 sm:px-6">
                 <flux:heading size="lg" level="1">
                     {{ __('Ask LocAlmanac About :city', ['city' => $city?->name ?? __('your city')]) }}
                 </flux:heading>
@@ -270,9 +295,9 @@
                 </div>
             </div>
             @else
-                <div class="border-t border-zinc-200 bg-zinc-100/70 px-6 py-8" data-testid="chat-locked">
+                <div class="bg-[#eef0ec] px-6 py-8" data-testid="chat-locked">
                     <div class="mx-auto max-w-lg space-y-4 text-center">
-                        <div class="mx-auto grid size-12 place-items-center rounded-full bg-zinc-200 text-zinc-500">
+                        <div class="mx-auto grid size-12 place-items-center rounded-xl bg-white text-[#667970] ring-1 ring-[#d9d7ce]">
                             <flux:icon icon="lock-closed" class="size-5" />
                         </div>
                         <div>
@@ -322,74 +347,39 @@
 
         {{-- Welcome box (right) --}}
         <div class="flex flex-col gap-6">
-            <div class="flex flex-1 flex-col justify-between space-y-4 rounded-2xl border border-emerald-200/60 bg-emerald-50/30 p-5 shadow-sm">
+            <div class="public-panel-muted flex flex-1 flex-col justify-between space-y-4 p-5">
                 <div class="space-y-4">
-                    <flux:heading size="lg">{{ __('Welcome to LocAlmanac') }}</flux:heading>
+                    <div class="editorial-eyebrow">{{ __('About this briefing') }}</div>
+                    <flux:heading size="lg">{{ __('Made for :city', ['city' => $city?->name ?? __('your city')]) }}</flux:heading>
                     <p class="text-sm leading-relaxed text-zinc-600">
-                        {{ __('Your AI-powered local information and news portal. Ask questions, browse articles, and stay informed about what\'s happening in your community.') }}
+                        {{ __('Browse the public feed and calendar, then use the local assistant when you need a focused answer.') }}
                     </p>
-                    <div class="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                    <div class="border-l-2 border-[#1f654f] py-1 pl-3 text-sm text-[#1f654f]">
                         <span class="font-semibold">{{ __('Local coverage:') }}</span>
                         {{ __('Viewing current news and events for :city.', ['city' => $city?->name ?? __('this city')]) }}
                     </div>
-                </div>
-                <div class="pt-2">
-                    <button
-                        type="button"
-                        x-data=""
-                        x-on:click="$flux.modal('site-feedback').show()"
-                        class="inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-emerald-700 transition hover:text-emerald-600"
-                    >
-                        <flux:icon icon="chat-bubble-left-ellipsis" class="size-4" />
-                        {{ __('Let us know what you think') }}
-                    </button>
                 </div>
             </div>
         </div>
     </div>
 
     {{-- ── Stats strip ───────────────────────────────────────────── --}}
-    <div class="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <div class="flex items-center gap-3 rounded-2xl border border-zinc-200/60 bg-white px-5 py-4 shadow-sm">
-            <div class="grid size-10 shrink-0 place-items-center rounded-xl bg-purple-50 text-purple-600">
-                <flux:icon icon="map-pin" class="size-5" />
+    <div class="public-panel metric-strip overflow-hidden">
+        @foreach ([
+            [__('Location'), $stats['locationLabel']],
+            [__('Total articles'), $stats['totalArticles']],
+            [__('Added today'), $stats['addedToday']],
+            [__('Categories'), $stats['categoryCount']],
+        ] as $metric)
+            <div class="metric-item">
+                <div class="metric-value">{{ $metric[1] }}</div>
+                <div class="metric-label">{{ $metric[0] }}</div>
             </div>
-            <div class="min-w-0">
-                <div class="truncate text-base font-semibold text-purple-600">{{ $stats['locationLabel'] }}</div>
-                <div class="text-xs text-zinc-500">{{ __('Your Location') }}</div>
-            </div>
-        </div>
-        <div class="flex items-center gap-3 rounded-2xl border border-zinc-200/60 bg-white px-5 py-4 shadow-sm">
-            <div class="grid size-10 shrink-0 place-items-center rounded-xl bg-zinc-100 text-zinc-600">
-                <flux:icon icon="document-text" class="size-5" />
-            </div>
-            <div>
-                <div class="text-base font-semibold text-zinc-800">{{ $stats['totalArticles'] }}</div>
-                <div class="text-xs text-zinc-500">{{ __('Total Articles') }}</div>
-            </div>
-        </div>
-        <div class="flex items-center gap-3 rounded-2xl border border-zinc-200/60 bg-white px-5 py-4 shadow-sm">
-            <div class="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600">
-                <flux:icon icon="plus-circle" class="size-5" />
-            </div>
-            <div>
-                <div class="text-base font-semibold text-emerald-600">{{ $stats['addedToday'] }}</div>
-                <div class="text-xs text-zinc-500">{{ __('Added Today') }}</div>
-            </div>
-        </div>
-        <div class="flex items-center gap-3 rounded-2xl border border-zinc-200/60 bg-white px-5 py-4 shadow-sm">
-            <div class="grid size-10 shrink-0 place-items-center rounded-xl bg-sky-50 text-sky-600">
-                <flux:icon icon="tag" class="size-5" />
-            </div>
-            <div>
-                <div class="text-base font-semibold text-sky-600">{{ $stats['categoryCount'] }}</div>
-                <div class="text-xs text-zinc-500">{{ __('Categories') }}</div>
-            </div>
-        </div>
+        @endforeach
     </div>
 
     {{-- ── Article search & filters ──────────────────────────────── --}}
-    <div class="rounded-2xl border border-zinc-200/60 bg-white p-5 shadow-sm">
+    <div class="public-panel p-4 sm:p-5">
         <div class="grid gap-4">
             <div class="w-full">
                 <label for="article-search" class="sr-only">{{ __('Search articles') }}</label>
@@ -492,8 +482,8 @@
 
     {{-- ── Feed + sidebar ────────────────────────────────────────── --}}
     <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div id="dashboard-feed" class="space-y-6 rounded-2xl border border-zinc-200/60 bg-white p-6 shadow-sm">
-            <flux:heading size="lg">
+        <div id="dashboard-feed" class="public-panel space-y-6 p-5 sm:p-7">
+            <flux:heading size="lg" class="font-serif !text-2xl !font-medium tracking-[-0.02em] text-[#123e32]">
                 {{ __('Your :city Feed', ['city' => $city?->name ?? __('City')]) }}
             </flux:heading>
 
@@ -512,14 +502,14 @@
                             ->take(2);
                         $summary = $article->summary ?: __('No summary available yet.');
                     @endphp
-                    <div class="space-y-2 py-5 first:pt-0 last:pb-0">
+                    <article class="space-y-2.5 py-6 first:pt-0 last:pb-0">
                         <a
                             href="{{ route('articles.show', $article) }}"
-                            class="text-sm font-semibold text-zinc-900 transition hover:text-emerald-600"
+                            class="font-serif text-lg font-medium leading-snug tracking-[-0.015em] text-[#18342c] transition hover:text-[#1f654f]"
                         >
                             {{ $article->title ?? __('Untitled') }}
                         </a>
-                        <p class="text-sm leading-relaxed text-zinc-600">
+                        <p class="text-sm leading-6 text-[#5d7168]">
                             {{ \Illuminate\Support\Str::limit($summary, 360) }}
                         </p>
                         <div class="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
@@ -531,7 +521,7 @@
                                 <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-500">{{ $badge }}</span>
                             @endforeach
                         </div>
-                    </div>
+                    </article>
                 @empty
                     <flux:text variant="subtle">{{ __('No articles yet.') }}</flux:text>
                 @endforelse
@@ -546,7 +536,7 @@
 
         <div class="space-y-6">
             {{-- Calendar highlights --}}
-            <div class="space-y-4 rounded-2xl border border-zinc-200/60 bg-white p-5 shadow-sm">
+            <div class="public-panel space-y-4 p-5">
                 <div class="flex items-center gap-2">
                     <flux:icon icon="calendar-days" class="size-5 text-emerald-600" />
                     <flux:heading size="lg">{{ __('Events Calendar') }}</flux:heading>
@@ -602,7 +592,7 @@
             </div>
 
             {{-- Browse by Category --}}
-            <div class="space-y-4 rounded-2xl border border-zinc-200/60 bg-white p-5 shadow-sm">
+            <div class="public-panel space-y-4 p-5">
                 <flux:heading size="lg">{{ __('Browse by Category') }}</flux:heading>
                 <p class="text-sm text-zinc-500">
                     {{ __('Select a category to filter the article feed.') }}

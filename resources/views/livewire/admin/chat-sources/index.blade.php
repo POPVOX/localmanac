@@ -2,19 +2,20 @@
     $hasActiveRuns = $sources->contains(fn ($source) => $source->latestRun?->isFreshActive() ?? false);
 @endphp
 
-<div class="space-y-6" @if($hasActiveRuns) wire:poll.10s @endif>
-    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+<div class="admin-page" @if($hasActiveRuns) wire:poll.10s @endif>
+    <div class="admin-page-header">
         <div>
-            <flux:heading size="xl" level="1">{{ __('Chat Sources') }}</flux:heading>
-            <flux:subheading>{{ __('Curated sources used for answering questions.') }}</flux:subheading>
+            <div class="admin-kicker">{{ __('Answer library') }}</div>
+            <flux:heading size="xl" level="1" class="mt-2 font-serif !text-4xl !font-medium tracking-[-0.03em] text-[#123e32]">{{ __('Chat Sources') }}</flux:heading>
+            <flux:subheading class="mt-2">{{ __('Manage the trusted sources used for local answers.') }}</flux:subheading>
         </div>
 
-        <flux:button variant="primary" :href="route('admin.chat-sources.create')" wire:navigate>
+        <flux:button variant="primary" :href="route('admin.chat-sources.create')" icon="plus" wire:navigate>
             {{ __('New Source') }}
         </flux:button>
     </div>
 
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-5 items-end">
+    <div class="admin-filter-panel grid items-end gap-4 md:grid-cols-2 xl:grid-cols-5">
         <flux:input
             wire:model.live.debounce.300ms="search"
             :label="__('Search')"
@@ -28,10 +29,10 @@
             @endforeach
         </flux:select>
 
-        <flux:field class="self-end md:col-start-2 md:justify-self-end xl:col-start-5 xl:justify-self-end xl:pl-10">
+        <flux:field class="self-end md:col-start-2 md:justify-self-end xl:col-start-5 xl:justify-self-end">
             <flux:label class="sr-only">{{ __('Active only') }}</flux:label>
 
-            <div class="h-11 flex items-center gap-3 justify-end pr-4">
+            <div class="flex h-11 items-center gap-3 rounded-xl border border-[#d9d7ce] bg-white px-3">
                 <flux:text class="text-sm font-medium leading-tight text-zinc-800 dark:text-zinc-100">
                     {{ __('Active only') }}
                 </flux:text>
@@ -41,7 +42,7 @@
         </flux:field>
     </div>
 
-    <flux:card padding="lg" variant="subtle" class="space-y-4 bg-white dark:bg-zinc-800/35">
+    <flux:card padding="lg" class="admin-panel space-y-4">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <flux:heading size="lg">{{ __('Ingestion Summary') }}</flux:heading>
             <flux:text variant="subtle">{{ __('Last 24 hours') }}</flux:text>

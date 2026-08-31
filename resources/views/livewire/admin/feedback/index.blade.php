@@ -1,10 +1,13 @@
-<div class="space-y-6">
-    <div>
-        <flux:heading size="xl" level="1">{{ __('Feedback') }}</flux:heading>
-        <flux:subheading>{{ __('Review trial feedback submitted by users across the site.') }}</flux:subheading>
+<div class="admin-page">
+    <div class="admin-page-header">
+        <div>
+            <div class="admin-kicker">{{ __('Community signals') }}</div>
+            <flux:heading size="xl" level="1" class="mt-2 font-serif !text-4xl !font-medium tracking-[-0.03em] text-[#123e32]">{{ __('Feedback') }}</flux:heading>
+            <flux:subheading class="mt-2">{{ __('Review feedback submitted by members across the site.') }}</flux:subheading>
+        </div>
     </div>
 
-    <div class="grid gap-4 md:grid-cols-3">
+    <div class="admin-filter-panel grid gap-4 md:grid-cols-3">
         <flux:select wire:model.live="type" :label="__('Filter by type')" placeholder="{{ __('All types') }}">
             <option value="">{{ __('All types') }}</option>
             @foreach ($feedbackTypes as $feedbackType)
@@ -13,7 +16,7 @@
         </flux:select>
     </div>
 
-    <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
+    <flux:card padding="lg" class="admin-panel overflow-hidden">
         <flux:table :paginate="$feedbackEntries">
             <flux:table.columns sticky>
                 <flux:table.column sticky>{{ __('Submitted') }}</flux:table.column>

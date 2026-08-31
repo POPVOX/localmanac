@@ -10,28 +10,29 @@
         ->toString();
 @endphp
 
-<div class="space-y-6">
+<div class="space-y-6 lg:space-y-8">
     {{-- Page header --}}
-    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div class="space-y-0.5">
-            <flux:heading size="lg" level="1">{{ __('Calendar') }}</flux:heading>
-            <flux:subheading>
-                {{ $city ? __('Events for :city', ['city' => $city->name]) : __('Events') }}
-            </flux:subheading>
+    <div class="public-masthead flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+            <div class="editorial-eyebrow">{{ __('Community calendar') }}</div>
+            <h1 class="mt-3 font-serif text-4xl font-medium tracking-[-0.035em] text-[#123e32] sm:text-5xl">{{ __('Calendar') }}</h1>
+            <p class="mt-3 text-sm text-[#5d7168] sm:text-base">
+                {{ $city ? __('Meetings and events for :city', ['city' => $city->name]) : __('Local meetings and events') }}
+            </p>
         </div>
 
-        <div class="flex items-center gap-1.5 text-xs font-medium text-zinc-500">
-            <flux:icon icon="globe-alt" class="size-3.5 text-zinc-400" />
+        <div class="flex items-center gap-1.5 text-xs font-semibold text-[#667970]">
+            <flux:icon icon="globe-alt" class="size-3.5" />
             {{ $timezone }}
         </div>
     </div>
 
     <div class="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_auto]">
         {{-- Left column: date nav + events --}}
-        <div class="overflow-hidden rounded-2xl border border-zinc-200/60 bg-white shadow-sm">
+        <div class="public-panel overflow-hidden">
             {{-- Date navigation bar --}}
-            <div class="flex items-center justify-between border-b border-zinc-100 bg-zinc-50/50 px-6 py-4">
-                <flux:heading size="md" level="2">{{ $selectedDateLabel }}</flux:heading>
+            <div class="flex items-center justify-between border-b border-[#e4e2da] bg-[#faf9f5] px-5 py-4 sm:px-6">
+                <flux:heading size="md" level="2" class="font-serif !text-xl !font-medium text-[#18342c]">{{ $selectedDateLabel }}</flux:heading>
 
                 <div class="flex items-center gap-1">
                     <a
@@ -82,7 +83,7 @@
                                         $titleText = $normalizeText($event->title);
                                         $descriptionText = $normalizeText($event->description ? strip_tags($event->description) : null);
                                     @endphp
-                                    <div wire:key="all-day-event-{{ $event->id }}" class="group rounded-xl border-l-4 border-l-emerald-400 bg-emerald-50/50 px-5 py-4 transition hover:bg-emerald-50">
+                                    <div wire:key="all-day-event-{{ $event->id }}" class="group border-l-2 border-l-[#1f654f] bg-[#f5f8f6] px-5 py-4 transition hover:bg-[#eef4f0]">
                                         <div class="space-y-2">
                                             <h3 class="text-sm font-semibold text-zinc-900">
                                                 @if ($event->event_url)
@@ -134,16 +135,8 @@
                                         $titleText = $normalizeText($event->title);
                                         $descriptionText = $normalizeText($event->description ? strip_tags($event->description) : null);
 
-                                        $palettes = [
-                                            ['border-l-sky-400', 'bg-sky-50/50', 'hover:bg-sky-50', 'text-sky-700'],
-                                            ['border-l-violet-400', 'bg-violet-50/50', 'hover:bg-violet-50', 'text-violet-700'],
-                                            ['border-l-amber-400', 'bg-amber-50/50', 'hover:bg-amber-50', 'text-amber-700'],
-                                            ['border-l-rose-400', 'bg-rose-50/50', 'hover:bg-rose-50', 'text-rose-700'],
-                                            ['border-l-teal-400', 'bg-teal-50/50', 'hover:bg-teal-50', 'text-teal-700'],
-                                        ];
-                                        $palette = $palettes[abs(crc32($titleText)) % count($palettes)];
                                     @endphp
-                                    <div wire:key="timed-event-{{ $event->id }}" class="group rounded-xl border-l-4 {{ $palette[0] }} {{ $palette[1] }} px-5 py-4 transition {{ $palette[2] }}">
+                                    <div wire:key="timed-event-{{ $event->id }}" class="group border-l-2 border-l-[#7da996] bg-[#fafbf9] px-5 py-4 transition hover:bg-[#f3f6f3]">
                                         <div class="flex flex-wrap items-start justify-between gap-3">
                                             <div class="min-w-0 flex-1 space-y-2">
                                                 <h3 class="text-sm font-semibold text-zinc-900">
@@ -162,7 +155,7 @@
                                                 </h3>
                                                 <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                                                     @if ($event->location_name)
-                                                        <span class="inline-flex items-center gap-1 font-medium {{ $palette[3] }}">
+                                                        <span class="inline-flex items-center gap-1 font-medium text-[#1f654f]">
                                                             <flux:icon icon="map-pin" class="size-3" />
                                                             {{ $event->location_name }}
                                                         </span>
@@ -176,7 +169,7 @@
                                                 @endif
                                             </div>
                                             @if ($timeLabel)
-                                                <span class="shrink-0 rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-zinc-600 shadow-sm ring-1 ring-zinc-200/60">
+                                                <span class="shrink-0 border-l border-[#d9d7ce] pl-3 text-xs font-semibold text-[#496159]">
                                                     {{ $timeLabel }}
                                                 </span>
                                             @endif
@@ -191,7 +184,7 @@
         </div>
 
         {{-- Right column: calendar picker --}}
-        <div class="h-fit rounded-2xl border border-zinc-200/60 bg-white p-4 shadow-sm">
+        <div class="public-panel h-fit p-4 xl:sticky xl:top-28">
             <flux:calendar wire:model.live="selectedDate" mode="single" with-today class="w-fit" />
         </div>
     </div>

@@ -8,8 +8,8 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Re-assign Flux's gray of choice... */
 @theme {
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
     --font-serif: 'Lora', ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
 
     --color-zinc-50: var(--color-stone-50);
@@ -26,20 +26,32 @@
 }
 
 @theme {
-    --color-accent: var(--color-green-700);
-    --color-accent-content: var(--color-zinc-800);
+    --color-accent: #1f654f;
+    --color-accent-content: #173b31;
     --color-accent-foreground: var(--color-white);
 }
 
 @layer theme {
     .dark {
-        --color-accent: var(--color-green-600);
+        --color-accent: #61a88c;
         --color-accent-content: var(--color-zinc-100);
-        --color-accent-foreground: var(--color-white);
+        --color-accent-foreground: #102a23;
     }
 }
 
 @layer base {
+    :root {
+        --la-ink: #18342c;
+        --la-ink-soft: #496159;
+        --la-green: #1f654f;
+        --la-green-dark: #123e32;
+        --la-green-pale: #e7f0eb;
+        --la-paper: #f5f3ed;
+        --la-paper-deep: #ece8df;
+        --la-surface: #fffefb;
+        --la-line: #d9d7ce;
+        --la-coral: #c46245;
+    }
 
     *,
     ::after,
@@ -48,19 +60,223 @@
     ::file-selector-button {
         border-color: var(--color-gray-200, currentColor);
     }
+
+    html {
+        scroll-behavior: smooth;
+    }
+
+    body {
+        font-family: var(--font-sans);
+        font-feature-settings: 'ss01' on, 'cv02' on;
+    }
+
+    ::selection {
+        background: #c9ded4;
+        color: var(--la-green-dark);
+    }
 }
 
 @layer components {
     .app-shell-bg {
-        @apply min-h-screen bg-fixed dark:bg-zinc-900;
-        background-color: #f8f4ee;
-        background-image: radial-gradient(120% 90% at 50% -10%, #fcfcfb 0%, #f8f4ee 52%, #f1ebe2 100%);
+        @apply min-h-screen bg-fixed text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100;
+        background-color: var(--la-paper);
+        background-image:
+            linear-gradient(rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.38)),
+            radial-gradient(90% 72% at 10% -10%, #ffffff 0%, transparent 58%);
         background-repeat: no-repeat;
         background-size: 100% 100vh;
     }
 
     .app-shell-header {
-        @apply border-b border-zinc-300 bg-white/95 shadow-sm backdrop-blur dark:border-zinc-700 dark:bg-zinc-900;
+        @apply border-b backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/90;
+        border-color: color-mix(in srgb, var(--la-line) 80%, transparent);
+        background: color-mix(in srgb, var(--la-surface) 92%, transparent);
+        box-shadow: 0 1px 0 rgba(24, 52, 44, 0.03);
+    }
+
+    .marketing-shell {
+        min-height: 100vh;
+        color: var(--la-ink);
+        background:
+            radial-gradient(circle at 82% 5%, rgba(202, 222, 211, 0.7), transparent 28rem),
+            linear-gradient(180deg, #fbfaf6 0%, var(--la-paper) 58%, #efede6 100%);
+    }
+
+    .marketing-container {
+        @apply mx-auto w-full max-w-[82rem] px-5 sm:px-8 lg:px-12;
+    }
+
+    .marketing-header {
+        @apply flex min-h-20 items-center justify-between gap-6 border-b py-4;
+        border-color: color-mix(in srgb, var(--la-line) 70%, transparent);
+    }
+
+    .marketing-nav-link {
+        @apply text-sm font-semibold transition-colors;
+        color: var(--la-ink-soft);
+    }
+
+    .marketing-nav-link:hover {
+        color: var(--la-green);
+    }
+
+    .marketing-button-primary,
+    .marketing-button-secondary {
+        @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold transition;
+    }
+
+    .marketing-button-primary {
+        background: var(--la-green-dark);
+        color: white;
+        box-shadow: 0 8px 24px rgba(18, 62, 50, 0.14);
+    }
+
+    .marketing-button-primary:hover {
+        background: var(--la-green);
+        transform: translateY(-1px);
+    }
+
+    .marketing-button-secondary {
+        border: 1px solid var(--la-line);
+        background: rgba(255, 254, 251, 0.68);
+        color: var(--la-ink);
+    }
+
+    .marketing-button-secondary:hover {
+        border-color: #a6b9af;
+        background: var(--la-surface);
+    }
+
+    .editorial-eyebrow {
+        @apply text-[0.7rem] font-semibold uppercase tracking-[0.22em];
+        color: var(--la-green);
+    }
+
+    .editorial-display {
+        @apply font-serif text-[clamp(2.7rem,6vw,5.8rem)] font-medium leading-[0.98] tracking-[-0.045em];
+        color: var(--la-green-dark);
+    }
+
+    .editorial-heading {
+        @apply font-serif text-3xl font-medium leading-tight tracking-[-0.025em] sm:text-4xl;
+        color: var(--la-green-dark);
+    }
+
+    .editorial-rule {
+        border-color: color-mix(in srgb, var(--la-line) 80%, transparent);
+    }
+
+    .public-main {
+        @apply mx-auto w-full max-w-[82rem] px-4 py-7 sm:px-7 sm:py-10 lg:px-10;
+    }
+
+    .public-masthead {
+        @apply overflow-hidden rounded-2xl border bg-white/70 p-6 sm:p-8;
+        border-color: var(--la-line);
+        box-shadow: 0 12px 32px rgba(38, 54, 46, 0.05);
+    }
+
+    .public-panel {
+        @apply rounded-2xl border bg-white/90;
+        border-color: color-mix(in srgb, var(--la-line) 92%, transparent);
+        box-shadow: 0 8px 24px rgba(38, 54, 46, 0.045);
+    }
+
+    .public-panel-muted {
+        @apply rounded-2xl border;
+        border-color: #d4ded8;
+        background: rgba(231, 240, 235, 0.58);
+    }
+
+    .metric-strip {
+        @apply grid divide-y sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4;
+        border-color: var(--la-line);
+    }
+
+    .metric-item {
+        @apply px-4 py-4 sm:px-5;
+    }
+
+    .metric-value {
+        @apply text-lg font-semibold tracking-tight;
+        color: var(--la-ink);
+    }
+
+    .metric-label {
+        @apply mt-1 text-xs font-medium;
+        color: var(--la-ink-soft);
+    }
+
+    .admin-shell {
+        background: #f2f1ec;
+        color: var(--la-ink);
+    }
+
+    .admin-sidebar {
+        border-color: #d6d7d0 !important;
+        background: #e9ece6 !important;
+    }
+
+    .admin-brand-block {
+        @apply mb-3 block rounded-xl border px-3 py-3;
+        border-color: rgba(24, 52, 44, 0.1);
+        background: rgba(255, 255, 255, 0.54);
+    }
+
+    .admin-main {
+        @apply mx-auto w-full max-w-[96rem] px-4 py-7 sm:px-6 lg:px-10 lg:py-10;
+    }
+
+    .admin-page {
+        @apply space-y-6 lg:space-y-8;
+    }
+
+    .admin-page-header {
+        @apply flex flex-col gap-4 border-b pb-5 md:flex-row md:items-end md:justify-between;
+        border-color: var(--la-line);
+    }
+
+    .admin-panel {
+        @apply rounded-2xl border bg-white shadow-none dark:bg-zinc-900;
+        border-color: var(--la-line);
+        box-shadow: 0 6px 20px rgba(38, 54, 46, 0.035);
+    }
+
+    .admin-filter-panel {
+        @apply rounded-2xl border bg-white/70 p-4 sm:p-5;
+        border-color: var(--la-line);
+    }
+
+    .admin-stat {
+        @apply relative overflow-hidden rounded-2xl border bg-white px-5 py-5;
+        border-color: var(--la-line);
+        box-shadow: 0 6px 20px rgba(38, 54, 46, 0.035);
+    }
+
+    .admin-stat::before {
+        content: '';
+        @apply absolute inset-x-0 top-0 h-1;
+        background: var(--la-green);
+    }
+
+    .admin-kicker {
+        @apply text-xs font-semibold uppercase tracking-[0.16em];
+        color: var(--la-ink-soft);
+    }
+
+    .admin-shell [data-flux-button],
+    .admin-shell [data-flux-control] {
+        border-radius: 0.7rem;
+    }
+
+    .admin-shell [data-flux-table] {
+        font-size: 0.875rem;
+    }
+
+    .auth-panel {
+        @apply w-full max-w-md rounded-2xl border bg-white/90 p-7 sm:p-9;
+        border-color: var(--la-line);
+        box-shadow: 0 20px 60px rgba(38, 54, 46, 0.08);
     }
 }
 

@@ -3,42 +3,51 @@
     <head>
         @include('partials.head')
     </head>
-    <body class="app-shell-bg">
-        <flux:sidebar sticky stashable class="border-e border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900">
+    <body class="admin-shell min-h-screen antialiased">
+        <flux:sidebar sticky stashable class="admin-sidebar border-e">
             <flux:sidebar.toggle class="lg:hidden" icon="x-mark" />
 
-            <a href="{{ route('admin.dashboard') }}" class="me-5 flex items-center space-x-2 rtl:space-x-reverse" wire:navigate>
+            <a href="{{ route('admin.dashboard') }}" class="admin-brand-block" wire:navigate>
                 <x-app-logo />
+                <span class="mt-2 block text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-[#667970]">
+                    {{ __('Admin workspace') }}
+                </span>
             </a>
 
-            <flux:navlist variant="outline">
-            <flux:navlist.group :heading="__('Admin')" class="grid">
-                <flux:navlist.item icon="layout-grid" :href="route('admin.dashboard')" :current="request()->routeIs('admin.dashboard')" wire:navigate>
-                    {{ __('Dashboard') }}
-                </flux:navlist.item>
-                <flux:navlist.item icon="map-pin" :href="route('admin.cities.index')" :current="request()->routeIs('admin.cities.*')" wire:navigate>
+            <flux:navlist variant="outline" class="space-y-5">
+                <flux:navlist.group :heading="__('Workspace')" class="grid">
+                    <flux:navlist.item icon="layout-grid" :href="route('admin.dashboard')" :current="request()->routeIs('admin.dashboard')" wire:navigate>
+                        {{ __('Overview') }}
+                    </flux:navlist.item>
+                    <flux:navlist.item icon="map-pin" :href="route('admin.cities.index')" :current="request()->routeIs('admin.cities.*')" wire:navigate>
                         {{ __('Cities') }}
                     </flux:navlist.item>
                     <flux:navlist.item icon="building-office-2" :href="route('admin.organizations.index')" :current="request()->routeIs('admin.organizations.*')" wire:navigate>
                         {{ __('Organizations') }}
                     </flux:navlist.item>
+                </flux:navlist.group>
+
+                <flux:navlist.group :heading="__('Ingestion')" class="grid">
                     <flux:navlist.item icon="cpu-chip" :href="route('admin.scrapers.index')" :current="request()->routeIs('admin.scrapers.*')" wire:navigate>
                         {{ __('Scrapers') }}
-                </flux:navlist.item>
-                <flux:navlist.item icon="calendar" :href="route('admin.event-sources.index')" :current="request()->routeIs('admin.event-sources.*')" wire:navigate>
-                        {{ __('Event Sources') }}
                     </flux:navlist.item>
-                    <flux:navlist.item icon="calendar-days" :href="route('admin.events.index')" :current="request()->routeIs('admin.events.*')" wire:navigate>
-                        {{ __('Events') }}
+                    <flux:navlist.item icon="calendar" :href="route('admin.event-sources.index')" :current="request()->routeIs('admin.event-sources.*')" wire:navigate>
+                        {{ __('Event Sources') }}
                     </flux:navlist.item>
                     <flux:navlist.item icon="chat-bubble-left-right" :href="route('admin.chat-sources.index')" :current="request()->routeIs('admin.chat-sources.*')" wire:navigate>
                         {{ __('Chat Sources') }}
                     </flux:navlist.item>
+                </flux:navlist.group>
+
+                <flux:navlist.group :heading="__('Content')" class="grid">
+                    <flux:navlist.item icon="calendar-days" :href="route('admin.events.index')" :current="request()->routeIs('admin.events.*')" wire:navigate>
+                        {{ __('Events') }}
+                    </flux:navlist.item>
                     <flux:navlist.item icon="chat-bubble-left-right" :href="route('admin.feedback.index')" :current="request()->routeIs('admin.feedback.*')" wire:navigate>
                         {{ __('Feedback') }}
                     </flux:navlist.item>
-            </flux:navlist.group>
-        </flux:navlist>
+                </flux:navlist.group>
+            </flux:navlist>
 
             <flux:spacer />
 
@@ -91,6 +100,8 @@
         <flux:header class="app-shell-header lg:hidden">
             <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
 
+            <span class="text-xs font-semibold uppercase tracking-[0.16em] text-[#667970]">{{ __('Admin') }}</span>
+
             <flux:spacer />
 
             <flux:dropdown position="top" align="end">
@@ -137,7 +148,7 @@
             </flux:dropdown>
         </flux:header>
 
-        <flux:main class="px-4 py-6 lg:px-8">
+        <flux:main class="admin-main">
             {{ $slot }}
         </flux:main>
 

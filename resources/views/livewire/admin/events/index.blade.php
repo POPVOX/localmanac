@@ -1,12 +1,13 @@
-<div class="space-y-6">
-    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+<div class="admin-page">
+    <div class="admin-page-header">
         <div>
-            <flux:heading size="xl" level="1">{{ __('Events') }}</flux:heading>
-            <flux:subheading>{{ __('Search, sort, and inspect ingested events by city, source, and date range.') }}</flux:subheading>
+            <div class="admin-kicker">{{ __('Published content') }}</div>
+            <flux:heading size="xl" level="1" class="mt-2 font-serif !text-4xl !font-medium tracking-[-0.03em] text-[#123e32]">{{ __('Events') }}</flux:heading>
+            <flux:subheading class="mt-2">{{ __('Search and inspect calendar items across every city and source.') }}</flux:subheading>
         </div>
     </div>
 
-    <div class="grid gap-4 items-end md:grid-cols-2 xl:grid-cols-6">
+    <div class="admin-filter-panel grid items-end gap-4 md:grid-cols-2 xl:grid-cols-6">
         <flux:input
             wire:model.live.debounce.300ms="search"
             :label="__('Search')"
@@ -41,7 +42,7 @@
         />
     </div>
 
-    <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
+    <flux:card padding="lg" class="admin-panel overflow-hidden">
         <flux:table :paginate="$events">
             <flux:table.columns sticky>
                 <flux:table.column sticky class="w-[320px]">

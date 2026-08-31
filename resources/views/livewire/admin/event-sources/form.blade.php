@@ -1,8 +1,9 @@
-<div class="space-y-6">
-    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+<div class="admin-page">
+    <div class="admin-page-header">
         <div>
-            <flux:heading size="xl" level="1">{{ $title }}</flux:heading>
-            <flux:subheading>{{ __('Configure calendar ingestion sources and JSON settings.') }}</flux:subheading>
+            <div class="admin-kicker">{{ __('Calendar ingestion') }}</div>
+            <flux:heading size="xl" level="1" class="mt-2 font-serif !text-4xl !font-medium tracking-[-0.03em] text-[#123e32]">{{ $title }}</flux:heading>
+            <flux:subheading class="mt-2">{{ __('Configure source details, extraction, and scheduling.') }}</flux:subheading>
         </div>
 
         <flux:button variant="ghost" :href="route('admin.event-sources.index')" wire:navigate>
@@ -10,7 +11,7 @@
         </flux:button>
     </div>
 
-    <flux:card padding="xl" variant="subtle" class="space-y-6">
+    <flux:card padding="xl" class="admin-panel space-y-6">
         <form wire:submit.prevent="save" class="space-y-6">
             <div class="grid gap-4 md:grid-cols-2">
                 <flux:select wire:model.live="cityId" :label="__('City')" required>

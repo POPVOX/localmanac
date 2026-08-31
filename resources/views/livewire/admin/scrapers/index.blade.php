@@ -1,16 +1,17 @@
-<div class="space-y-6" wire:poll.10s>
-    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+<div class="admin-page" wire:poll.10s>
+    <div class="admin-page-header">
         <div>
-            <flux:heading size="xl" level="1">{{ __('Scrapers') }}</flux:heading>
-            <flux:subheading>{{ __('Manage ingestion scrapers, filters, and manual runs.') }}</flux:subheading>
+            <div class="admin-kicker">{{ __('Article ingestion') }}</div>
+            <flux:heading size="xl" level="1" class="mt-2 font-serif !text-4xl !font-medium tracking-[-0.03em] text-[#123e32]">{{ __('Scrapers') }}</flux:heading>
+            <flux:subheading class="mt-2">{{ __('Manage article sources, review health, and run imports.') }}</flux:subheading>
         </div>
 
-        <flux:button variant="primary" :href="route('admin.scrapers.create')" wire:navigate>
-            {{ __('New Scraper') }}
+        <flux:button variant="primary" :href="route('admin.scrapers.create')" icon="plus" wire:navigate>
+            {{ __('Add source') }}
         </flux:button>
     </div>
 
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-5 items-end">
+    <div class="admin-filter-panel grid items-end gap-4 md:grid-cols-2 xl:grid-cols-5">
         <flux:input
             wire:model.live.debounce.300ms="search"
             :label="__('Search')"
@@ -38,10 +39,10 @@
             @endforeach
         </flux:select>
 
-        <flux:field class="self-end xl:justify-self-end xl:pl-10">
+        <flux:field class="self-end xl:justify-self-end">
             <flux:label class="sr-only">{{ __('Active only') }}</flux:label>
 
-            <div class="h-11 flex items-center gap-3 justify-end pr-4">
+            <div class="flex h-11 items-center gap-3 rounded-xl border border-[#d9d7ce] bg-white px-3">
                 <flux:text class="text-sm font-medium leading-tight text-zinc-800 dark:text-zinc-100">
                     {{ __('Active only') }}
                 </flux:text>
@@ -51,7 +52,7 @@
         </flux:field>
     </div>
 
-    <flux:card padding="lg" variant="subtle" class="bg-white dark:bg-zinc-800/35">
+    <flux:card padding="lg" class="admin-panel overflow-hidden">
         <flux:table :paginate="$scrapers">
             <flux:table.columns sticky>
                 <flux:table.column sticky class="w-[420px]">

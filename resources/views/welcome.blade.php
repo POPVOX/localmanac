@@ -3,332 +3,236 @@
     <head>
         @include('partials.head')
     </head>
-    <body class="min-h-screen bg-[radial-gradient(circle_at_20%_-10%,_#f5efe3_0%,_#f8f5ef_35%,_#f4f2ec_70%,_#eeebe4_100%)] text-zinc-900 antialiased dark:bg-zinc-900 dark:text-zinc-100">
-        <div class="relative overflow-x-clip">
-            @php
-                $heroImagePath = null;
+    <body class="marketing-shell antialiased">
+        @php
+            $heroImagePath = null;
 
-                foreach (['images/people.png', 'images/people.jpg', 'images/people.jpeg', 'images/people.webp'] as $candidatePath) {
-                    if (file_exists(public_path($candidatePath))) {
-                        $heroImagePath = $candidatePath;
-                        break;
-                    }
+            foreach (['images/people.png', 'images/people.jpg', 'images/people.jpeg', 'images/people.webp'] as $candidatePath) {
+                if (file_exists(public_path($candidatePath))) {
+                    $heroImagePath = $candidatePath;
+                    break;
                 }
-            @endphp
+            }
+        @endphp
 
-            <div class="pointer-events-none absolute -left-28 top-0 h-80 w-80 rounded-full bg-emerald-200/30 blur-3xl"></div>
-            <div class="pointer-events-none absolute -right-24 top-20 h-72 w-72 rounded-full bg-amber-200/35 blur-3xl"></div>
-
-            <header class="mx-auto flex w-full max-w-7xl items-center justify-between px-6 pt-8 sm:px-8 lg:px-12">
+        <div class="marketing-container">
+            <header class="marketing-header">
                 <a href="{{ route('home') }}" class="inline-flex items-center" wire:navigate>
-                    <x-app-logo-icon class="h-16 w-auto" />
+                    <x-app-logo-icon class="h-11 w-auto sm:h-12" />
                 </a>
 
-                <nav class="flex items-center gap-3 text-sm font-semibold text-zinc-700">
+                <nav class="flex items-center gap-4 sm:gap-6" aria-label="{{ __('Primary navigation') }}">
                     @if ($cities->isNotEmpty())
-                        <a
-                            href="#cities"
-                            class="rounded-full px-4 py-2 transition hover:bg-white/70 hover:text-zinc-900"
-                        >
-                            {{ __('Browse cities') }}
+                        <a href="#cities" class="marketing-nav-link hidden sm:inline-flex">
+                            {{ __('Cities') }}
                         </a>
                     @endif
+
                     @guest
                         @if (Route::has('login'))
-                            <a
-                                href="{{ route('login') }}"
-                                wire:navigate
-                                class="rounded-full px-4 py-2 transition hover:bg-white/70 hover:text-zinc-900"
-                            >
+                            <a href="{{ route('login') }}" wire:navigate class="marketing-nav-link">
                                 {{ __('Log in') }}
                             </a>
                         @endif
                         @if (Route::has('register'))
-                            <a
-                                href="{{ route('register') }}"
-                                wire:navigate
-                                class="rounded-full border border-emerald-200 bg-white/80 px-4 py-2 text-emerald-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow"
-                            >
+                            <a href="{{ route('register') }}" wire:navigate class="marketing-button-secondary !min-h-10 !px-4">
                                 {{ __('Create account') }}
                             </a>
                         @endif
                     @else
-                        <a
-                            href="{{ route('dashboard') }}"
-                            wire:navigate
-                            class="rounded-full border border-emerald-200 bg-white/80 px-4 py-2 text-emerald-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow"
-                        >
-                            {{ __('Dashboard') }}
+                        <a href="{{ route('dashboard') }}" wire:navigate class="marketing-button-secondary !min-h-10 !px-4">
+                            {{ __('Go to dashboard') }}
                         </a>
                     @endguest
                 </nav>
             </header>
 
-            <main class="mx-auto flex w-full max-w-7xl flex-col gap-16 px-6 pb-16 pt-10 sm:px-8 lg:px-12 lg:pt-14">
-                <section class="grid gap-8 lg:grid-cols-[1fr_0.95fr] lg:items-center">
-                    <div class="flex flex-col gap-6">
-                        <flux:text class="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-800">
-                            {{ __('Built for civic clarity') }}
-                        </flux:text>
+            <main>
+                <section class="grid min-h-[calc(100vh-5rem)] items-center gap-10 py-12 lg:grid-cols-12 lg:gap-14 lg:py-16">
+                    <div class="lg:col-span-7">
+                        <div class="editorial-eyebrow">{{ __('Your community, in context') }}</div>
+                        <h1 class="editorial-display mt-6 max-w-[11ch]">
+                            {{ __('Know what is happening where you live.') }}
+                        </h1>
+                        <p class="mt-7 max-w-2xl text-lg leading-8 text-[#496159] sm:text-xl">
+                            {{ __('LocAlmanac brings local reporting, public meetings, community events, and civic answers together in one clear daily briefing.') }}
+                        </p>
 
-                        <flux:heading size="xl" level="1" class="max-w-2xl text-balance font-serif text-4xl leading-tight text-green-900 sm:text-5xl">
-                            {{ __('LocAlmanac helps your community keep up with what matters locally.') }}
-                        </flux:heading>
-
-                        <flux:text class="max-w-xl text-base leading-relaxed text-zinc-700 sm:text-lg">
-                            {{ __('Meetings, notices, and local events with clear context on impact, timing, and where to participate.') }}
-                        </flux:text>
-
-                        <div class="grid max-w-xl gap-3 sm:grid-cols-3">
-                            <div class="rounded-xl border border-zinc-200/70 bg-zinc-50/80 px-3 py-3">
-                                <flux:text class="text-sm font-semibold text-zinc-800">{{ __('Local information') }}</flux:text>
-                                <flux:text variant="subtle" class="mt-1 text-xs">{{ __('Public resources') }}</flux:text>
-                            </div>
-                            <div class="rounded-xl border border-zinc-200/70 bg-zinc-50/80 px-3 py-3">
-                                <flux:text class="text-sm font-semibold text-zinc-800">{{ __('Local news') }}</flux:text>
-                                <flux:text variant="subtle" class="mt-1 text-xs">{{ __('Relevant updates') }}</flux:text>
-                            </div>
-                            <div class="rounded-xl border border-zinc-200/70 bg-zinc-50/80 px-3 py-3">
-                                <flux:text class="text-sm font-semibold text-zinc-800">{{ __('Local data') }}</flux:text>
-                                <flux:text variant="subtle" class="mt-1 text-xs">{{ __('Clear context') }}</flux:text>
-                            </div>
-                        </div>
-
-                        <div class="flex flex-wrap items-center gap-3 pt-1">
+                        <div class="mt-9 flex flex-wrap items-center gap-3">
                             @if ($cities->isNotEmpty())
-                                <flux:button href="{{ route('cities.show', $cities->first()) }}" variant="primary" wire:navigate>
-                                    {{ __('Explore local news') }}
-                                </flux:button>
+                                <a href="#cities" class="marketing-button-primary">
+                                    {{ __('Choose your city') }}
+                                    <flux:icon icon="arrow-down" class="size-4" />
+                                </a>
                             @endif
-                            @guest
-                                @if (Route::has('register'))
-                                    <flux:button href="{{ route('register') }}" variant="subtle" wire:navigate>
-                                        {{ __('Create account') }}
-                                    </flux:button>
-                                @endif
-                                @if (Route::has('login'))
-                                    <flux:link href="{{ route('login') }}" variant="subtle" wire:navigate>
-                                        {{ __('Log in') }}
-                                    </flux:link>
-                                @endif
-                            @else
-                                <flux:button href="{{ route('dashboard') }}" variant="primary" wire:navigate>
-                                    {{ __('Go to dashboard') }}
-                                </flux:button>
-                                @if (Route::has('profile.edit'))
-                                    <flux:link href="{{ route('profile.edit') }}" variant="subtle" wire:navigate>
-                                        {{ __('Settings') }}
-                                    </flux:link>
-                                @endif
-                            @endguest
+                            <a href="#how-it-works" class="marketing-button-secondary">
+                                {{ __('How it works') }}
+                            </a>
                         </div>
 
-                        <flux:text variant="subtle">{{ __('Coverage varies by city and source availability.') }}</flux:text>
+                        <div class="mt-10 flex flex-wrap gap-x-7 gap-y-3 border-t editorial-rule pt-5 text-sm font-medium text-[#496159]">
+                            <span class="inline-flex items-center gap-2">
+                                <span class="size-1.5 rounded-full bg-[#1f654f]"></span>
+                                {{ __('Public news feeds') }}
+                            </span>
+                            <span class="inline-flex items-center gap-2">
+                                <span class="size-1.5 rounded-full bg-[#1f654f]"></span>
+                                {{ __('Local event calendars') }}
+                            </span>
+                            <span class="inline-flex items-center gap-2">
+                                <span class="size-1.5 rounded-full bg-[#1f654f]"></span>
+                                {{ __('Source-linked answers') }}
+                            </span>
+                        </div>
                     </div>
 
-                    <div class="relative">
-                        <div class="absolute -inset-3 rounded-[2rem] bg-[linear-gradient(145deg,_rgba(16,185,129,0.20),_rgba(245,158,11,0.16)_55%,_rgba(255,255,255,0.2))] blur-sm"></div>
-                        <div class="relative overflow-hidden rounded-[1.75rem] border border-zinc-200 bg-white p-2 shadow-2xl shadow-zinc-400/10">
+                    <div class="relative lg:col-span-5">
+                        <div class="absolute -inset-5 -z-10 rounded-[2rem] bg-[#dfe9e3]"></div>
+                        <div class="overflow-hidden rounded-2xl border border-white/70 bg-white shadow-[0_28px_80px_rgba(18,62,50,0.16)]">
                             @if ($heroImagePath)
                                 <img
                                     src="{{ asset($heroImagePath) }}"
-                                    alt="{{ __('People in conversation at a community event') }}"
-                                    class="h-[440px] w-full rounded-[1.25rem] object-cover object-center sm:h-[520px]"
+                                    alt="{{ __('Neighbors gathered at a community event') }}"
+                                    class="aspect-[4/5] w-full object-cover object-center sm:aspect-[5/4] lg:aspect-[4/5]"
                                     loading="eager"
                                 />
                             @else
-                                <div class="flex h-[440px] w-full items-center justify-center rounded-[1.25rem] bg-zinc-100 text-zinc-500 sm:h-[520px]">
-                                    <flux:text variant="subtle">{{ __('Community image unavailable') }}</flux:text>
-                                </div>
+                                <div class="aspect-[4/5] w-full bg-[#e7f0eb]"></div>
                             @endif
-                            <div class="absolute bottom-6 left-6 right-6 rounded-2xl border border-white/50 bg-white/90 p-4 shadow-lg backdrop-blur">
-                                <flux:text class="text-sm font-semibold text-zinc-800">{{ __('Better Information Improves Local Life') }}</flux:text>
-                                <flux:text variant="subtle" class="mt-1 text-xs">{{ __('When residents have timely, understandable civic information, participation gets stronger.') }}</flux:text>
+
+                            <div class="grid grid-cols-[auto_1fr] items-center gap-4 border-t border-[#d9d7ce] bg-[#fffefb] p-5">
+                                <div class="grid size-11 place-items-center rounded-full bg-[#e7f0eb] text-[#1f654f]">
+                                    <flux:icon icon="map-pin" class="size-5" />
+                                </div>
+                                <div>
+                                    <div class="text-sm font-semibold text-[#18342c]">
+                                        {{ trans_choice(':count community|:count communities', $cities->count(), ['count' => $cities->count()]) }}
+                                    </div>
+                                    <div class="mt-0.5 text-xs text-[#667970]">
+                                        {{ __('Public coverage available now') }}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </section>
+            </main>
+        </div>
 
-                @if ($cities->isNotEmpty())
-                    <section id="cities" class="scroll-mt-8">
-                        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                            <div>
-                                <flux:heading size="xl" level="2" class="tracking-tight !mb-0">{{ __('Choose your city') }}</flux:heading>
-                                <flux:text class="mt-2 max-w-3xl text-zinc-700">
-                                    {{ __('News feeds and calendars are public. Chat is available after signing in with a city access code.') }}
-                                </flux:text>
+        @if ($cities->isNotEmpty())
+            <section id="cities" class="scroll-mt-4 bg-[#123e32] py-16 text-white sm:py-20">
+                <div class="marketing-container">
+                    <div class="grid gap-8 lg:grid-cols-[0.75fr_1.25fr] lg:gap-16">
+                        <div>
+                            <div class="text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-[#a9cbbb]">
+                                {{ __('Local coverage') }}
                             </div>
+                            <h2 class="mt-4 max-w-md font-serif text-4xl font-medium leading-tight tracking-[-0.03em] sm:text-5xl">
+                                {{ __('Start with your city.') }}
+                            </h2>
+                            <p class="mt-5 max-w-md text-base leading-7 text-[#c9d8d1]">
+                                {{ __('News and calendars are open to everyone. Members can unlock the local assistant with their city access code.') }}
+                            </p>
                         </div>
 
-                        <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        <div class="divide-y divide-white/15 border-y border-white/15">
                             @foreach ($cities as $city)
                                 <a
                                     href="{{ route('cities.show', $city) }}"
                                     wire:navigate
-                                    class="group rounded-2xl border border-zinc-200 bg-white/90 p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md"
+                                    class="group grid grid-cols-[1fr_auto] items-center gap-5 py-5 transition sm:grid-cols-[1fr_0.55fr_auto] sm:py-6"
                                 >
-                                    <div class="flex items-start justify-between gap-4">
-                                        <div>
-                                            <div class="text-lg font-semibold text-zinc-900 group-hover:text-emerald-700">{{ $city->name }}</div>
-                                            <div class="mt-1 text-sm text-zinc-500">
-                                                {{ collect([$city->state, $city->country])->filter()->implode(', ') }}
-                                            </div>
+                                    <div>
+                                        <div class="font-serif text-2xl font-medium tracking-[-0.02em] text-white transition group-hover:text-[#b9ddca] sm:text-3xl">
+                                            {{ $city->name }}
                                         </div>
-                                        <span class="grid size-9 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-700 transition group-hover:bg-emerald-100">
-                                            <flux:icon icon="arrow-right" class="size-4" />
-                                        </span>
+                                        <div class="mt-1 text-sm text-[#a9bdb4] sm:hidden">
+                                            {{ collect([$city->state, $city->country])->filter()->implode(', ') }}
+                                        </div>
                                     </div>
-                                    <div class="mt-5 flex items-center gap-4 text-xs font-medium text-zinc-500">
-                                        <span>{{ __('View news') }}</span>
-                                        <span>{{ __('View calendar') }}</span>
+                                    <div class="hidden text-sm text-[#a9bdb4] sm:block">
+                                        {{ collect([$city->state, $city->country])->filter()->implode(', ') }}
                                     </div>
+                                    <span class="grid size-11 place-items-center rounded-full border border-white/25 text-[#b9ddca] transition group-hover:border-[#b9ddca] group-hover:bg-white/10">
+                                        <flux:icon icon="arrow-right" class="size-4" />
+                                    </span>
                                 </a>
                             @endforeach
                         </div>
-                    </section>
-                @endif
-
-                <section>
-                    <flux:heading size="xl" level="2" class="tracking-tight !mb-0">{{ __('Features') }}</flux:heading>
-                    <flux:text class="mt-2 max-w-3xl text-zinc-700">{{ __('Everything you need to stay connected with your community.') }}</flux:text>
-
-                    <flux:card padding="lg" class="mt-6 rounded-2xl border-zinc-200 bg-white/90 shadow-sm">
-                        <flux:heading size="sm" level="3">{{ __('Core capabilities') }}</flux:heading>
-
-                        <div class="mt-4 grid gap-3">
-                            <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                                <flux:text class="font-medium text-zinc-900">{{ __('Public information resources') }}</flux:text>
-                                <flux:text variant="subtle" class="mt-1">{{ __('Routine filings, legal notices, transactions, and everyday service answers.') }}</flux:text>
-                            </div>
-                            <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                                <flux:text class="font-medium text-zinc-900">{{ __('Updates + Event Calendar') }}</flux:text>
-                                <flux:text variant="subtle" class="mt-1">{{ __('Aggregated local updates and AI-gathered events from multiple sources.') }}</flux:text>
-                            </div>
-                            <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                                <flux:text class="font-medium text-zinc-900">{{ __('On-Demand local answers') }}</flux:text>
-                                <flux:text variant="subtle" class="mt-1">{{ __('Natural-language search and chatbot answers for specific local questions.') }}</flux:text>
-                            </div>
-                        </div>
-                    </flux:card>
-
-                    <div class="mt-4 grid gap-4 md:grid-cols-2">
-                        <flux:card padding="lg" class="rounded-2xl border-zinc-200 bg-zinc-100/80 shadow-sm">
-                            <flux:heading size="sm" level="3">{{ __('Data + context') }}</flux:heading>
-                            <ul class="mt-3 space-y-2 text-sm text-zinc-700">
-                                <li class="flex items-start gap-2">
-                                    <flux:icon icon="check-circle" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
-                                    <span>{{ __('Officials, trends, and neighborhood context in one view.') }}</span>
-                                </li>
-                                <li class="flex items-start gap-2">
-                                    <flux:icon icon="check-circle" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
-                                    <span>{{ __('Cross-source summaries that reduce noise and surface relevance.') }}</span>
-                                </li>
-                                <li class="flex items-start gap-2">
-                                    <flux:icon icon="check-circle" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
-                                    <span>{{ __('Information organized around impact, timeline, and participation.') }}</span>
-                                </li>
-                            </ul>
-                        </flux:card>
-
-                        <flux:card padding="lg" class="rounded-2xl border-zinc-200 bg-zinc-100/80 shadow-sm">
-                            <flux:heading size="sm" level="3">{{ __('AI integration') }}</flux:heading>
-                            <ul class="mt-3 space-y-2 text-sm text-zinc-700">
-                                <li class="flex items-start gap-2">
-                                    <flux:icon icon="sparkles" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
-                                    <span>{{ __('AI curation and summarization to improve speed and clarity.') }}</span>
-                                </li>
-                                <li class="flex items-start gap-2">
-                                    <flux:icon icon="sparkles" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
-                                    <span>{{ __('Built to enhance local journalism and official public communication.') }}</span>
-                                </li>
-                                <li class="flex items-start gap-2">
-                                    <flux:icon icon="sparkles" class="mt-0.5 size-4 shrink-0 text-emerald-700" />
-                                    <span>{{ __('Designed for trustworthy source visibility, not black-box answers.') }}</span>
-                                </li>
-                            </ul>
-                        </flux:card>
                     </div>
-                </section>
+                </div>
+            </section>
+        @endif
 
-                <section>
-                    <flux:heading size="xl" level="2" class="tracking-tight !mb-0">{{ __('How it works') }}</flux:heading>
-                    <flux:text class="mt-2 max-w-3xl text-zinc-700">{{ __('A simple flow from public data to daily clarity.') }}</flux:text>
+        <section class="py-16 sm:py-24">
+            <div class="marketing-container">
+                <div class="max-w-2xl">
+                    <div class="editorial-eyebrow">{{ __('Features') }}</div>
+                    <h2 class="editorial-heading mt-4">{{ __('Get local info in one place.') }}</h2>
+                    <p class="mt-3 text-base text-[#5d7168]">{{ __('Less noise. More local signal.') }}</p>
+                </div>
 
-                    <flux:card padding="lg" class="mt-6 rounded-2xl border-zinc-200 bg-white/90 shadow-sm">
-                        <ol class="grid gap-3 text-sm lg:grid-cols-3">
-                            <li class="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
-                                <span class="font-semibold text-zinc-800">{{ __('1. Gather') }}</span>
-                                <div class="mt-1 text-zinc-600">{{ __('We aggregate local information from government, community, and media sources.') }}</div>
-                            </li>
-                            <li class="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
-                                <span class="font-semibold text-zinc-800">{{ __('2. Organize') }}</span>
-                                <div class="mt-1 text-zinc-600">{{ __('AI summarizes complex information and adds useful civic context.') }}</div>
-                            </li>
-                            <li class="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
-                                <span class="font-semibold text-zinc-800">{{ __('3. Deliver') }}</span>
-                                <div class="mt-1 text-zinc-600">{{ __('You get clear answers, timely updates, and practical participation pathways.') }}</div>
-                            </li>
-                        </ol>
-                    </flux:card>
-                </section>
+                <div class="mt-10 grid border-y editorial-rule md:grid-cols-3 md:divide-x md:divide-[#d9d7ce]">
+                    @foreach ([
+                        ['icon' => 'newspaper', 'title' => __('A readable local feed'), 'body' => __('Reporting and public notices are organized by city, source, and civic topic.')],
+                        ['icon' => 'calendar-days', 'title' => __('Events in one calendar'), 'body' => __('Public meetings and community events are gathered from calendars across the city.')],
+                        ['icon' => 'chat-bubble-left-right', 'title' => __('Answers with receipts'), 'body' => __('Members can ask local questions and follow the sources behind every useful answer.')],
+                    ] as $feature)
+                        <article class="border-b editorial-rule py-8 last:border-b-0 md:border-b-0 md:px-8 md:first:pl-0 md:last:pr-0">
+                            <div class="grid size-11 place-items-center rounded-xl bg-[#e7f0eb] text-[#1f654f]">
+                                <flux:icon :icon="$feature['icon']" class="size-5" />
+                            </div>
+                            <h3 class="mt-6 text-lg font-semibold tracking-[-0.015em] text-[#18342c]">{{ $feature['title'] }}</h3>
+                            <p class="mt-3 text-sm leading-6 text-[#5d7168]">{{ $feature['body'] }}</p>
+                        </article>
+                    @endforeach
+                </div>
+            </div>
+        </section>
 
-                <section class="rounded-3xl border border-emerald-200/60 bg-[linear-gradient(120deg,_rgba(255,255,255,0.95),_rgba(222,245,233,0.88))] p-6 shadow-sm lg:p-8">
-                    <div class="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-                        <div class="space-y-2">
-                            <flux:heading size="md" level="2">{{ __('Get local info in one place.') }}</flux:heading>
-                            <flux:text class="text-zinc-700">{{ __('Choose a city to browse its public news feed and event calendar.') }}</flux:text>
-                        </div>
-
-                        <div class="flex flex-wrap items-center gap-3">
-                            @guest
-                                @if (Route::has('register'))
-                                    <flux:button href="{{ route('register') }}" variant="primary" wire:navigate>
-                                        {{ __('Create account') }}
-                                    </flux:button>
-                                @endif
-                                @if (Route::has('login'))
-                                    <flux:link href="{{ route('login') }}" variant="subtle" wire:navigate>
-                                        {{ __('Log in') }}
-                                    </flux:link>
-                                @endif
-                            @else
-                                <flux:button href="{{ route('dashboard') }}" variant="primary" wire:navigate>
-                                    {{ __('Go to dashboard') }}
-                                </flux:button>
-                                @if (Route::has('profile.edit'))
-                                    <flux:link href="{{ route('profile.edit') }}" variant="subtle" wire:navigate>
-                                        {{ __('Settings') }}
-                                    </flux:link>
-                                @endif
-                            @endguest
-                        </div>
+        <section id="how-it-works" class="bg-[#e7e9e3] py-16 sm:py-20">
+            <div class="marketing-container">
+                <div class="grid gap-10 lg:grid-cols-[0.7fr_1.3fr] lg:gap-16">
+                    <div>
+                        <div class="editorial-eyebrow">{{ __('How it works') }}</div>
+                        <h2 class="editorial-heading mt-4">{{ __('A clearer path from source to resident.') }}</h2>
                     </div>
-                </section>
 
-                <footer class="flex flex-col gap-4 border-t border-zinc-200/80 pt-8 text-sm">
-                    <flux:text variant="subtle">{{ __('Coverage varies by city and source availability.') }}</flux:text>
-                    <div class="flex flex-wrap items-center gap-3">
-                        <flux:text variant="subtle">{{ __('© :year LocAlmanac.', ['year' => date('Y')]) }}</flux:text>
-                        @guest
-                            @if (Route::has('login'))
-                                <flux:link href="{{ route('login') }}" variant="subtle" wire:navigate>
-                                    {{ __('Log in') }}
-                                </flux:link>
-                            @endif
-                            @if (Route::has('register'))
-                                <flux:link href="{{ route('register') }}" variant="subtle" wire:navigate>
-                                    {{ __('Create account') }}
-                                </flux:link>
-                            @endif
-                        @else
-                            <flux:link href="{{ route('dashboard') }}" variant="subtle" wire:navigate>
-                                {{ __('Dashboard') }}
-                            </flux:link>
-                        @endguest
-                    </div>
-                </footer>
-            </main>
-        </div>
+                    <ol class="divide-y divide-[#cdd1ca] border-y border-[#cdd1ca]">
+                        @foreach ([
+                            [__('01'), __('Gather'), __('LocAlmanac monitors reporting, public records, meetings, and community calendars.')],
+                            [__('02'), __('Organize'), __('Information is cleaned, grouped by jurisdiction, and linked back to its original source.')],
+                            [__('03'), __('Understand'), __('Residents browse the briefing or ask focused questions about what matters locally.')],
+                        ] as $step)
+                            <li class="grid gap-3 py-6 sm:grid-cols-[4rem_8rem_1fr] sm:items-baseline">
+                                <span class="text-xs font-semibold tracking-[0.16em] text-[#6b7d74]">{{ $step[0] }}</span>
+                                <span class="font-semibold text-[#18342c]">{{ $step[1] }}</span>
+                                <span class="text-sm leading-6 text-[#5d7168]">{{ $step[2] }}</span>
+                            </li>
+                        @endforeach
+                    </ol>
+                </div>
+            </div>
+        </section>
+
+        <footer class="bg-[#f5f3ed] py-10">
+            <div class="marketing-container flex flex-col gap-6 border-t editorial-rule pt-8 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <x-app-logo-icon class="h-9 w-auto" />
+                    <p class="mt-3 text-xs text-[#6b7d74]">{{ __('Coverage varies by city and source availability.') }}</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-5 text-sm font-medium text-[#496159]">
+                    <span>{{ __('© :year LocAlmanac', ['year' => date('Y')]) }}</span>
+                    @guest
+                        @if (Route::has('login'))
+                            <a href="{{ route('login') }}" wire:navigate class="hover:text-[#1f654f]">{{ __('Log in') }}</a>
+                        @endif
+                    @else
+                        <a href="{{ route('dashboard') }}" wire:navigate class="hover:text-[#1f654f]">{{ __('Go to dashboard') }}</a>
+                    @endguest
+                </div>
+            </div>
+        </footer>
 
         @auth
             <livewire:feedback.widget />
