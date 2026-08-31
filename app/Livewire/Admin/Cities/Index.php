@@ -2,7 +2,7 @@
 
 namespace App\Livewire\Admin\Cities;
 
-use App\Models\City;
+use App\Services\Admin\CityOverviewQuery;
 use Illuminate\Contracts\View\View;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -13,9 +13,9 @@ class Index extends Component
 
     public function render(): View
     {
-        $cities = City::query()
-            ->orderBy('name')
-            ->paginate(15);
+        $cities = app(CityOverviewQuery::class)
+            ->build()
+            ->paginate(12);
 
         return view('livewire.admin.cities.index', [
             'cities' => $cities,

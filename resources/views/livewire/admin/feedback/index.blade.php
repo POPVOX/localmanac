@@ -8,6 +8,13 @@
     </div>
 
     <div class="admin-filter-panel grid gap-4 md:grid-cols-3">
+        <flux:select wire:model.live="cityId" :label="__('Location')">
+            <option value="">{{ __('All locations') }}</option>
+            @foreach ($cities as $city)
+                <option value="{{ $city->id }}">{{ $city->name }}</option>
+            @endforeach
+        </flux:select>
+
         <flux:select wire:model.live="type" :label="__('Filter by type')" placeholder="{{ __('All types') }}">
             <option value="">{{ __('All types') }}</option>
             @foreach ($feedbackTypes as $feedbackType)
@@ -24,7 +31,7 @@
                 <flux:table.column>{{ __('Type') }}</flux:table.column>
                 <flux:table.column>{{ __('Message') }}</flux:table.column>
                 <flux:table.column>{{ __('Page') }}</flux:table.column>
-                <flux:table.column>{{ __('City') }}</flux:table.column>
+                <flux:table.column>{{ __('Location · preview') }}</flux:table.column>
             </flux:table.columns>
 
             <flux:table.rows>
@@ -72,7 +79,7 @@
                             </div>
                         </flux:table.cell>
                         <flux:table.cell>
-                            {{ $entry->city?->name ?? '—' }}
+                            <x-admin.city-preview-link :city="$entry->city" compact />
                         </flux:table.cell>
                     </flux:table.row>
                 @empty

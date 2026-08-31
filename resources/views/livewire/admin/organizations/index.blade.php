@@ -12,8 +12,8 @@
     </div>
 
     <div class="admin-filter-panel grid gap-4 md:grid-cols-3">
-        <flux:select wire:model.live="cityId" :label="__('Filter by city')" placeholder="{{ __('All cities') }}">
-            <option value="">{{ __('All cities') }}</option>
+        <flux:select wire:model.live="cityId" :label="__('Filter by location')" placeholder="{{ __('All locations') }}">
+            <option value="">{{ __('All locations') }}</option>
             @foreach ($cities as $city)
                 <option value="{{ $city->id }}">{{ $city->name }}</option>
             @endforeach
@@ -26,7 +26,7 @@
                 <flux:table.column sticky>{{ __('Name') }}</flux:table.column>
                 <flux:table.column>{{ __('Type') }}</flux:table.column>
                 <flux:table.column>{{ __('Website') }}</flux:table.column>
-                <flux:table.column>{{ __('City') }}</flux:table.column>
+                <flux:table.column>{{ __('Location · preview') }}</flux:table.column>
                 <flux:table.column align="end">{{ __('Actions') }}</flux:table.column>
             </flux:table.columns>
 
@@ -48,7 +48,7 @@
                                 <flux:text variant="subtle">{{ __('—') }}</flux:text>
                             @endif
                         </flux:table.cell>
-                        <flux:table.cell>{{ $organization->city?->name }}</flux:table.cell>
+                        <flux:table.cell><x-admin.city-preview-link :city="$organization->city" compact /></flux:table.cell>
                         <flux:table.cell align="end">
                             <flux:button size="sm" variant="ghost" :href="route('admin.organizations.edit', $organization)" wire:navigate>
                                 {{ __('Edit') }}

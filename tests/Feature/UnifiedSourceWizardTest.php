@@ -3,6 +3,7 @@
 use App\Livewire\Admin\Dashboard as AdminDashboard;
 use App\Livewire\Admin\EventSources\Index as EventSourcesIndex;
 use App\Livewire\Admin\Scrapers\Index as ScrapersIndex;
+use App\Livewire\Admin\Sources\Index as SourcesIndex;
 use App\Livewire\Admin\Sources\Wizard;
 use App\Models\City;
 use App\Models\EventSource;
@@ -64,7 +65,7 @@ it('discovers previews and creates an article source from one url', function () 
 it('links every primary add source action to the unified wizard', function () {
     $user = User::factory()->create(['is_super_admin' => true]);
 
-    foreach ([AdminDashboard::class, ScrapersIndex::class, EventSourcesIndex::class] as $component) {
+    foreach ([AdminDashboard::class, SourcesIndex::class, ScrapersIndex::class, EventSourcesIndex::class] as $component) {
         Livewire::actingAs($user)
             ->test($component)
             ->assertSee(route('admin.sources.create'), false);

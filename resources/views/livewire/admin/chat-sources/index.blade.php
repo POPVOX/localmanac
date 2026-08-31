@@ -22,8 +22,8 @@
             placeholder="{{ __('Name, URL, description') }}"
             class="md:col-span-2 xl:col-span-2"
         />
-        <flux:select wire:model.live="cityId" :label="__('City')">
-            <option value="">{{ __('All cities') }}</option>
+        <flux:select wire:model.live="cityId" :label="__('Location')">
+            <option value="">{{ __('All locations') }}</option>
             @foreach ($cities as $city)
                 <option value="{{ $city->id }}">{{ $city->name }}</option>
             @endforeach
@@ -135,7 +135,7 @@
                         <div>{{ __('Name') }}</div>
                     </flux:table.sortable>
                 </flux:table.column>
-                <flux:table.column class="w-[140px] min-w-[140px]">{{ __('City') }}</flux:table.column>
+                <flux:table.column class="w-[160px] min-w-[160px]">{{ __('Location · preview') }}</flux:table.column>
                 <flux:table.column align="center" class="w-[96px] min-w-[96px]">
                     <flux:table.sortable
                         :sorted="$sortField === 'chat_sources.priority'"
@@ -169,7 +169,7 @@
                                 </flux:link>
                             </div>
                         </flux:table.cell>
-                        <flux:table.cell>{{ $source->city?->name ?? '—' }}</flux:table.cell>
+                        <flux:table.cell><x-admin.city-preview-link :city="$source->city" compact /></flux:table.cell>
                         <flux:table.cell align="center">{{ $source->priority }}</flux:table.cell>
                         <flux:table.cell class="w-[112px]">
                             <flux:switch

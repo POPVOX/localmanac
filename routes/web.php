@@ -20,6 +20,7 @@ use App\Livewire\Admin\Organizations\Index as OrganizationsIndex;
 use App\Livewire\Admin\Scrapers\Form as ScrapersForm;
 use App\Livewire\Admin\Scrapers\Index as ScrapersIndex;
 use App\Livewire\Admin\Scrapers\Show as ScrapersShow;
+use App\Livewire\Admin\Sources\Index as SourcesIndex;
 use App\Livewire\Admin\Sources\Wizard as SourcesWizard;
 use App\Livewire\Dashboard as UserDashboard;
 use App\Livewire\Demo\ArticleExplainer;
@@ -72,6 +73,7 @@ Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
         Route::get('organizations/create', OrganizationsForm::class)->name('organizations.create');
         Route::get('organizations/{organization}/edit', OrganizationsForm::class)->name('organizations.edit');
 
+        Route::get('sources', SourcesIndex::class)->name('sources.index');
         Route::get('sources/create', SourcesWizard::class)->name('sources.create');
 
         Route::get('scrapers', ScrapersIndex::class)->name('scrapers.index');

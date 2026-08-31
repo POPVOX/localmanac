@@ -15,8 +15,8 @@
             class="md:col-span-2 xl:col-span-2"
         />
 
-        <flux:select wire:model.live="cityId" :label="__('City')">
-            <option value="">{{ __('All cities') }}</option>
+        <flux:select wire:model.live="cityId" :label="__('Location')">
+            <option value="">{{ __('All locations') }}</option>
             @foreach ($cities as $city)
                 <option value="{{ $city->id }}">{{ $city->name }}</option>
             @endforeach
@@ -54,7 +54,7 @@
                         <div>{{ __('Title') }}</div>
                     </flux:table.sortable>
                 </flux:table.column>
-                <flux:table.column class="w-[120px]">{{ __('City') }}</flux:table.column>
+                <flux:table.column class="w-[150px]">{{ __('Location · preview') }}</flux:table.column>
                 <flux:table.column class="w-[200px]">
                     <flux:table.sortable
                         :sorted="$sortField === 'events.starts_at'"
@@ -90,7 +90,7 @@
                                 </flux:link>
                             </div>
                         </flux:table.cell>
-                        <flux:table.cell>{{ $event->city?->name ?? __('Unknown') }}</flux:table.cell>
+                        <flux:table.cell><x-admin.city-preview-link :city="$event->city" compact /></flux:table.cell>
                         <flux:table.cell>
                             {{ $startLabel ?? __('—') }}
                         </flux:table.cell>

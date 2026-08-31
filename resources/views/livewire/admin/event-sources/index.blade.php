@@ -19,8 +19,8 @@
             class="md:col-span-2 xl:col-span-2"
         />
 
-        <flux:select wire:model.live="cityId" :label="__('City')">
-            <option value="">{{ __('All cities') }}</option>
+        <flux:select wire:model.live="cityId" :label="__('Location')">
+            <option value="">{{ __('All locations') }}</option>
             @foreach ($cities as $city)
                 <option value="{{ $city->id }}">{{ $city->name }}</option>
             @endforeach
@@ -53,7 +53,7 @@
         <flux:table :paginate="$sources">
             <flux:table.columns sticky>
                 <flux:table.column sticky class="w-[380px]">{{ __('Name') }}</flux:table.column>
-                <flux:table.column>{{ __('City') }}</flux:table.column>
+                <flux:table.column>{{ __('Location · preview') }}</flux:table.column>
                 <flux:table.column class="w-[112px]">{{ __('Active') }}</flux:table.column>
                 <flux:table.column>{{ __('Last run') }}</flux:table.column>
                 <flux:table.column align="end" class="w-[84px] min-w-[84px]">{{ __('Actions') }}</flux:table.column>
@@ -102,7 +102,7 @@
                                 @endif
                             </div>
                         </flux:table.cell>
-                        <flux:table.cell>{{ $source->city?->name ?? __('Unknown') }}</flux:table.cell>
+                        <flux:table.cell><x-admin.city-preview-link :city="$source->city" compact /></flux:table.cell>
                         <flux:table.cell class="w-[112px]">
                             <flux:switch
                                 :checked="$source->is_active"

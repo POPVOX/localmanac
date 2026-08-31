@@ -18,8 +18,8 @@
             placeholder="{{ __('Name, slug, source, organization') }}"
             class="md:col-span-2 xl:col-span-2"
         />
-        <flux:select wire:model.live="cityId" :label="__('City')">
-            <option value="">{{ __('All cities') }}</option>
+        <flux:select wire:model.live="cityId" :label="__('Location')">
+            <option value="">{{ __('All locations') }}</option>
             @foreach ($cities as $city)
                 <option value="{{ $city->id }}">{{ $city->name }}</option>
             @endforeach
@@ -85,9 +85,7 @@
                                 <div>{{ $scraper->name ?: __('Scraper :id', ['id' => $scraper->id]) }}</div>
                                 <div class="flex items-center gap-2 overflow-hidden">
                                     <flux:text variant="subtle" class="shrink-0">#{{ $scraper->id }}</flux:text>
-                                    <flux:badge color="indigo" variant="subtle" class="shrink-0 uppercase tracking-wide">
-                                        {{ $scraper->type }}
-                                    </flux:badge>
+                                    <x-admin.city-preview-link :city="$scraper->city" compact class="shrink-0" />
                                     <flux:text variant="subtle" class="truncate">
                                         {{ $scraper->organization?->name ?? __('Unassigned') }}
                                     </flux:text>

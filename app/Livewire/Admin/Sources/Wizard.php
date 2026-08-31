@@ -69,7 +69,10 @@ class Wizard extends Component
 
     public function mount(): void
     {
-        $this->cityId = City::query()->orderBy('name')->value('id');
+        $requestedCityId = request()->integer('cityId');
+        $this->cityId = $requestedCityId && City::query()->whereKey($requestedCityId)->exists()
+            ? $requestedCityId
+            : City::query()->orderBy('name')->value('id');
     }
 
     public function analyze(

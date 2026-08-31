@@ -41,10 +41,6 @@ class Index extends Component
 
     public function mount(): void
     {
-        if ($this->cityId === null) {
-            $this->cityId = City::query()->orderBy('name')->value('id');
-        }
-
         $timezone = $this->resolveTimezone($this->resolveCity());
 
         if ($this->startDate === null || trim($this->startDate) === '') {
@@ -160,7 +156,7 @@ class Index extends Component
             return City::query()->find($this->cityId);
         }
 
-        return City::query()->orderBy('name')->first();
+        return null;
     }
 
     private function resolveTimezone(?City $city): string
