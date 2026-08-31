@@ -21,21 +21,21 @@ class ArticleChunkEmbedder
         $content = trim((string) ($article->body?->cleaned_text ?? ''));
 
         if ($content === '') {
-            ArticleChunk::query()->where('article_id', $article->id)->delete();
+            DB::transaction(
+                fn () => ArticleChunk::query()->where('article_id', $article->id)->delete()
+            );
 
             return 0;
         }
 
         $chunks = $this->chunker->chunk($content);
 
-        ArticleChunk::query()->where('article_id', $article->id)->delete();
-
         if ($chunks === []) {
             return 0;
         }
 
         $vectors = config('chat.vector_enabled', true)
-            ? $this->embeddingClient->embed($chunks)
+            ? $this->embeddingClient->embedOrFail($chunks)
             : [];
 
         $dimensions = (int) config('chat.embedding_dimensions', 1536);
@@ -48,7 +48,10 @@ class ArticleChunkEmbedder
             $embeddingValue = null;
 
             if (is_array($embedding) && count($embedding) === $dimensions) {
-                $embeddingValue = DB::raw("'".$this->vectorFormatter->toSql($embedding)."'::vector");
+                $formatted = $this->vectorFormatter->toSql($embedding);
+                $embeddingValue = DB::connection()->getDriverName() === 'pgsql'
+                    ? DB::raw("'".$formatted."'::vector")
+                    : $formatted;
             }
 
             $records[] = [
@@ -64,7 +67,10 @@ class ArticleChunkEmbedder
             ];
         }
 
-        DB::table('article_chunks')->insert($records);
+        DB::transaction(function () use ($article, $records): void {
+            ArticleChunk::query()->where('article_id', $article->id)->delete();
+            DB::table('article_chunks')->insert($records);
+        });
 
         return count($records);
     }

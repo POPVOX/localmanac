@@ -662,3 +662,59 @@ it('prioritizes recent updates over generic pages for aggregation queries', func
 
     CarbonImmutable::setTestNow();
 });
+
+it('uses retrieval v2 fusion and source diversity as one integrated pipeline', function () {
+    config()->set('scout.driver', 'collection');
+    config()->set('chat.vector_enabled', false);
+    config()->set('chat.fts_enabled', true);
+    config()->set('chat.reranking_enabled', false);
+    config()->set('chat.retrieval_v2_enabled', true);
+    config()->set('chat.retrieval_chunk_limit', 8);
+    config()->set('chat.retrieval_neighbor_window', 0);
+    config()->set('chat.retrieval_max_evidence', 3);
+    config()->set('chat.retrieval_max_evidence_per_source', 1);
+    config()->set('chat.retrieval_context_token_budget', 1000);
+
+    $city = City::factory()->create();
+    $parks = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Parks Department',
+        'is_active' => true,
+    ]);
+    $services = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'City Services',
+        'is_active' => true,
+    ]);
+
+    foreach ([
+        ['source' => $parks, 'url' => 'https://parks.test/one', 'content' => 'Park services include shelter reservations.'],
+        ['source' => $parks, 'url' => 'https://parks.test/two', 'content' => 'Park services include recreation programs.'],
+        ['source' => $services, 'url' => 'https://city.test/services', 'content' => 'City park services are available online.'],
+    ] as $index => $data) {
+        $page = ChatSourcePage::factory()->create([
+            'chat_source_id' => $data['source']->id,
+            'url' => $data['url'],
+            'canonical_url' => $data['url'],
+            'content_text' => $data['content'],
+        ]);
+
+        ChatSourceChunk::factory()->create([
+            'chat_source_page_id' => $page->id,
+            'chunk_index' => $index,
+            'content' => $data['content'],
+            'content_length' => strlen($data['content']),
+        ]);
+    }
+
+    $result = app(ChatSourceRetriever::class)->retrieve(
+        collect([$parks, $services]),
+        'park services',
+        $city->id,
+    );
+
+    expect($result['evidence'])->toHaveCount(3)
+        ->and($result['evidence'][0]['source_url'])->toBe('https://parks.test/one')
+        ->and($result['evidence'][1]['source_url'])->toBe('https://city.test/services')
+        ->and($result['evidence'][2]['source_url'])->toBe('https://parks.test/two');
+});

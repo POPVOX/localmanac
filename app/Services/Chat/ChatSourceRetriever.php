@@ -17,6 +17,8 @@ class ChatSourceRetriever
     public function __construct(
         private readonly ChatSourceGuard $chatSourceGuard,
         private readonly EventIntentDetector $eventIntentDetector,
+        private readonly ReciprocalRankFusion $reciprocalRankFusion,
+        private readonly EvidenceSelector $evidenceSelector,
     ) {}
 
     /**
@@ -51,23 +53,36 @@ class ChatSourceRetriever
         $ftsLimit = max($limit, (int) config('chat.retrieval_fts_limit', $limit));
         $ftsRows = $this->ftsSearch($sourceIds, $question, $ftsLimit);
 
-        $rows = collect($focusedRows);
+        if (config('chat.retrieval_v2_enabled', false)) {
+            $rows = collect($this->reciprocalRankFusion->fuse([
+                'procedural' => $focusedRows,
+                'dense' => $vectorRows,
+                'lexical' => $ftsRows,
+            ], 'chunk_id'));
+        } else {
+            $rows = collect($focusedRows);
 
-        foreach ($vectorRows as $row) {
-            if (! $rows->contains('chunk_id', $row['chunk_id'])) {
-                $rows->push($row);
+            foreach ($vectorRows as $row) {
+                if (! $rows->contains('chunk_id', $row['chunk_id'])) {
+                    $rows->push($row);
+                }
             }
+
+            foreach ($ftsRows as $row) {
+                if (! $rows->contains('chunk_id', $row['chunk_id'])) {
+                    $rows->push($row);
+                }
+            }
+
+            $rows = $this->sdkRerank($rows, $question)->take($limit);
         }
 
-        foreach ($ftsRows as $row) {
-            if (! $rows->contains('chunk_id', $row['chunk_id'])) {
-                $rows->push($row);
-            }
-        }
-
-        $rows = $this->sdkRerank($rows, $question)->take($limit);
         $rows = $this->expandNeighborChunks($rows);
-        $rows = $this->sdkRerank($rows, $question);
+
+        if (! config('chat.retrieval_v2_enabled', false)) {
+            $rows = $this->sdkRerank($rows, $question);
+        }
+
         $rows = $this->deduplicateRows($rows)
             ->filter(fn (array $row): bool => ! $this->isBlockedRow($row))
             ->take((int) config('chat.retrieval_max_evidence', 24));
@@ -93,15 +108,28 @@ class ChatSourceRetriever
 
         $maxEvidence = (int) config('chat.retrieval_max_evidence', 24);
 
-        $evidence = $chunkEvidence
-            ->concat($articleVectorEvidence)
-            ->concat($articleFtsEvidence)
-            ->unique('id')
-            ->pipe(fn (Collection $items): Collection => $this->deduplicateEvidence($items))
-            ->sortByDesc('score')
-            ->take($maxEvidence)
-            ->values()
-            ->all();
+        if (config('chat.retrieval_v2_enabled', false)) {
+            $evidence = collect($this->reciprocalRankFusion->fuse([
+                'chat_sources' => $chunkEvidence->all(),
+                'article_dense' => $articleVectorEvidence->all(),
+                'article_lexical' => $articleFtsEvidence->all(),
+            ], 'id'))
+                ->unique('id')
+                ->pipe(fn (Collection $items): Collection => $this->deduplicateEvidence($items))
+                ->pipe(fn (Collection $items): Collection => $this->sdkRerankEvidence($items, $question))
+                ->pipe(fn (Collection $items): Collection => $this->evidenceSelector->select($items, $maxEvidence))
+                ->all();
+        } else {
+            $evidence = $chunkEvidence
+                ->concat($articleVectorEvidence)
+                ->concat($articleFtsEvidence)
+                ->unique('id')
+                ->pipe(fn (Collection $items): Collection => $this->deduplicateEvidence($items))
+                ->sortByDesc('score')
+                ->take($maxEvidence)
+                ->values()
+                ->all();
+        }
 
         $pagesUsed = collect($evidence)
             ->pluck('source_url')
@@ -294,6 +322,53 @@ class ChatSourceRetriever
                 ->values();
         } catch (Throwable) {
             return $rows->sortByDesc('score')->values();
+        }
+    }
+
+    /**
+     * Rerank the final cross-index evidence set. Invalid or incomplete provider
+     * responses fall back atomically to the RRF order.
+     *
+     * @param  Collection<int, array<string, mixed>>  $evidence
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function sdkRerankEvidence(Collection $evidence, string $question): Collection
+    {
+        $evidence = $evidence->values();
+
+        if ($evidence->isEmpty() || ! config('chat.reranking_enabled', true)) {
+            return $evidence;
+        }
+
+        try {
+            $response = Reranking::of($evidence->pluck('snippet')->all())
+                ->limit($evidence->count())
+                ->rerank($question);
+            $results = collect($response->results);
+
+            if ($results->count() !== $evidence->count()) {
+                return $evidence;
+            }
+
+            $seen = [];
+            $reranked = collect();
+
+            foreach ($results as $result) {
+                $index = (int) $result->index;
+
+                if (isset($seen[$index]) || $index < 0 || $index >= $evidence->count() || ! is_finite((float) $result->score)) {
+                    return $evidence;
+                }
+
+                $seen[$index] = true;
+                $item = $evidence->get($index);
+                $item['score'] = max(1, (int) ceil((float) $result->score * 10));
+                $reranked->push($item);
+            }
+
+            return $reranked->sortByDesc('score')->values();
+        } catch (Throwable) {
+            return $evidence;
         }
     }
 

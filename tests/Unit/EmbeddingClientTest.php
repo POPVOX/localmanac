@@ -54,6 +54,42 @@ it('returns an empty list when embeddings generation fails', function () {
     expect($client->embed(['first']))->toBe([]);
 });
 
+it('throws when strict embedding generation returns an incomplete batch', function () {
+    config()->set('chat.vector_enabled', true);
+    config()->set('chat.embedding_dimensions', 2);
+    config()->set('chat.embedding_provider_chain', ['openai']);
+    config()->set('chat.embedding_cache', false);
+
+    Embeddings::fake([
+        [
+            [0.1, 0.2],
+        ],
+    ]);
+
+    $client = new EmbeddingClient;
+
+    expect(fn () => $client->embedOrFail(['first', 'second']))
+        ->toThrow(RuntimeException::class, 'returned 1 vector(s) for 2 input(s)');
+});
+
+it('throws when strict embedding generation returns the wrong dimensions', function () {
+    config()->set('chat.vector_enabled', true);
+    config()->set('chat.embedding_dimensions', 2);
+    config()->set('chat.embedding_provider_chain', ['openai']);
+    config()->set('chat.embedding_cache', false);
+
+    Embeddings::fake([
+        [
+            [0.1, 0.2, 0.3],
+        ],
+    ]);
+
+    $client = new EmbeddingClient;
+
+    expect(fn () => $client->embedOrFail(['first']))
+        ->toThrow(RuntimeException::class, 'has 3 dimensions; expected 2');
+});
+
 it('returns the first embedding for query embedding', function () {
     config()->set('chat.vector_enabled', true);
     config()->set('chat.embedding_dimensions', 2);

@@ -1,6 +1,6 @@
 # Chat and Q&A (Current)
 
-Updated: March 2026
+Updated: August 2026
 
 ## Surfaces
 
@@ -77,6 +77,17 @@ All questions flow through a single retrieval-and-synthesis path via `AnswerSynt
 - Deduplicated by source URL and content hash (SHA-1 of normalized snippet)
 - Combined result set respects `chat.retrieval_max_evidence` limit
 
+### Retrieval V2 (Staged)
+
+`CHAT_RETRIEVAL_V2_ENABLED=true` enables the staged hybrid pipeline:
+
+1. Fuse dense, lexical, and procedural candidate lists using reciprocal rank fusion (RRF). Raw cosine and full-text scores are never compared directly.
+2. Expand neighboring chunks and collapse duplicate evidence.
+3. Run one cross-index SDK reranking pass. Incomplete, duplicate, non-finite, or failed reranker responses fall back atomically to RRF order.
+4. Apply a context-token budget and domain diversity before synthesis.
+
+The flag defaults to `false` so legacy and v2 profiles can be evaluated against the same labeled question set before production rollout.
+
 ## Article Chunk Embeddings
 
 Articles are now searchable via vector similarity in addition to full-text search:
@@ -85,6 +96,8 @@ Articles are now searchable via vector similarity in addition to full-text searc
 - `ArticleChunkEmbedder` service chunks article bodies using the existing `Chunker` and generates embeddings via `EmbeddingClient`
 - Chunks are generated automatically during article enrichment (`EnrichArticle` job)
 - Backfill command: `php artisan chat:backfill-article-chunks` with `--force` and `--batch-size` options
+- Re-embedding is atomic: the provider must return one correctly sized vector per chunk before existing chunks are replaced
+- Query-time embedding failures still fall back to lexical retrieval, while ingestion failures fail the job and preserve the previous index
 
 ## Navigation Page Filtering
 
@@ -186,9 +199,18 @@ Key chat config entries in `config/chat.php`:
 - `query_expansion_provider` — provider for query expansion
 - `retrieval_max_evidence` — max evidence items across all sources
 - `retrieval_chunk_limit` — max chunks per retrieval pass
+- `retrieval_v2_enabled` — enable staged RRF/global-rerank/budget pipeline
+- `retrieval_rrf_k` — RRF smoothing constant
+- `retrieval_candidate_limit` — hard cap before final reranking
+- `retrieval_context_token_budget` — approximate synthesis evidence budget
+- `retrieval_max_evidence_per_source` — preferred per-domain evidence cap before deferred candidates are used
 
 ## Operational Commands
 
 - `php artisan chat:ingest-sources` — crawl and embed chat source pages
 - `php artisan chat:backfill-article-chunks` — backfill article chunk embeddings (`--force`, `--batch-size`)
+- `php artisan chat:audit-embeddings` — report missing vectors, stale model metadata, and documents without chunks; add `--repair` to queue targeted safe rebuilds or `--repair --sync` to run them immediately
+- `php artisan chat:evaluate-retrieval path/to/dataset.json --profile=legacy` — evaluate a labeled city-scoped question set; use `--profile=v2` for a comparable staged-pipeline run and `--json` for machine-readable output
 - `php artisan chat:purge-navigation-pages` — remove navigation pages from chunk index (`--dry-run`)
+
+Start a real evaluation file from `docs/chat-retrieval-evaluation.example.json`. Cases support `required_source_urls`, `any_of_source_urls`, `excluded_source_urls`, `expect_no_source`, and arbitrary organizational `tags`. The report includes Recall@K, Precision@K, MRR, nDCG@K, pass rate, source count, and latency.

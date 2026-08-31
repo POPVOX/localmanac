@@ -27,6 +27,11 @@ class Chunker
 
         foreach ($paragraphs as $paragraph) {
             if (mb_strlen($paragraph) > $maxChars) {
+                if ($current !== '') {
+                    $chunks[] = $current;
+                    $current = '';
+                }
+
                 $chunks = array_merge($chunks, $this->splitLongParagraph($paragraph, $maxChars));
                 $current = '';
 
@@ -48,6 +53,12 @@ class Chunker
             $chunks[] = $current;
             $current = $this->overlapTail($current, $overlap);
 
+            $availableOverlap = max(0, $maxChars - mb_strlen($paragraph) - 2);
+
+            if (mb_strlen($current) > $availableOverlap) {
+                $current = $this->overlapTail($current, $availableOverlap);
+            }
+
             if ($current !== '') {
                 $current .= "\n\n".$paragraph;
             } else {
@@ -59,7 +70,7 @@ class Chunker
             $chunks[] = $current;
         }
 
-        $chunks = array_values(array_filter($chunks, fn (string $chunk) => mb_strlen($chunk) >= $minChars));
+        $chunks = $this->mergeShortChunks($chunks, $maxChars, $minChars);
 
         return $chunks;
     }
@@ -69,45 +80,78 @@ class Chunker
      */
     private function splitLongParagraph(string $paragraph, int $maxChars): array
     {
-        $sentences = preg_split('/(?<=[.!?])\s+/', $paragraph) ?: [];
         $chunks = [];
-        $current = '';
+        $remaining = trim($paragraph);
 
-        foreach ($sentences as $sentence) {
-            $sentence = trim($sentence);
+        while ($remaining !== '') {
+            if (mb_strlen($remaining) <= $maxChars) {
+                $chunks[] = $remaining;
 
-            if ($sentence === '') {
-                continue;
+                break;
             }
 
-            if (mb_strlen($sentence) > $maxChars) {
-                $chunks[] = mb_substr($sentence, 0, $maxChars);
-                $current = '';
+            $window = mb_substr($remaining, 0, $maxChars);
+            $breakPosition = $this->findNaturalBreak($window);
+            $segmentLength = $breakPosition ?? $maxChars;
+            $segment = trim(mb_substr($remaining, 0, $segmentLength));
 
-                continue;
+            if ($segment !== '') {
+                $chunks[] = $segment;
             }
 
-            if ($current === '') {
-                $current = $sentence;
-
-                continue;
-            }
-
-            if (mb_strlen($current) + 1 + mb_strlen($sentence) <= $maxChars) {
-                $current .= ' '.$sentence;
-
-                continue;
-            }
-
-            $chunks[] = $current;
-            $current = $sentence;
-        }
-
-        if ($current !== '') {
-            $chunks[] = $current;
+            $remaining = ltrim(mb_substr($remaining, max(1, $segmentLength)));
         }
 
         return $chunks;
+    }
+
+    private function findNaturalBreak(string $window): ?int
+    {
+        $minimumPosition = (int) floor(mb_strlen($window) * 0.6);
+
+        foreach (["\n", '. ', '; ', ', ', ' '] as $delimiter) {
+            $position = mb_strrpos($window, $delimiter);
+
+            if ($position !== false && $position >= $minimumPosition) {
+                return $position + mb_strlen($delimiter);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Keep short tail chunks instead of silently discarding source text. Merge a
+     * short chunk into its predecessor when the configured maximum allows it.
+     *
+     * @param  array<int, string>  $chunks
+     * @return array<int, string>
+     */
+    private function mergeShortChunks(array $chunks, int $maxChars, int $minChars): array
+    {
+        $merged = [];
+
+        foreach ($chunks as $chunk) {
+            $chunk = trim($chunk);
+
+            if ($chunk === '') {
+                continue;
+            }
+
+            $previousIndex = array_key_last($merged);
+
+            if ($previousIndex !== null
+                && mb_strlen($chunk) < $minChars
+                && mb_strlen($merged[$previousIndex]) + 2 + mb_strlen($chunk) <= $maxChars) {
+                $merged[$previousIndex] .= "\n\n".$chunk;
+
+                continue;
+            }
+
+            $merged[] = $chunk;
+        }
+
+        return array_values($merged);
     }
 
     private function overlapTail(string $chunk, int $overlap): string

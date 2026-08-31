@@ -1,0 +1,20 @@
+{
+    "name": "LocAlmanac civic retrieval baseline",
+    "cases": [
+        {
+            "id": "wichita-garage-sale-permit-fee",
+            "city": "wichita",
+            "question": "How much does a garage sale permit cost?",
+            "required_source_urls": [
+                "https://www.wichita.gov/example-permit-page"
+            ],
+            "any_of_source_urls": [],
+            "excluded_source_urls": [],
+            "expect_no_source": false,
+            "tags": [
+                "procedural",
+                "permit"
+            ]
+        }
+    ]
+}

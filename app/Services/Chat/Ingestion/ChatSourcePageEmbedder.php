@@ -21,21 +21,21 @@ class ChatSourcePageEmbedder
         $content = trim((string) ($page->content_text ?? ''));
 
         if ($content === '') {
-            ChatSourceChunk::query()->where('chat_source_page_id', $page->id)->delete();
+            DB::transaction(
+                fn () => ChatSourceChunk::query()->where('chat_source_page_id', $page->id)->delete()
+            );
 
             return 0;
         }
 
         $chunks = $this->chunker->chunk($content);
 
-        ChatSourceChunk::query()->where('chat_source_page_id', $page->id)->delete();
-
         if ($chunks === []) {
             return 0;
         }
 
         $vectors = config('chat.vector_enabled', true)
-            ? $this->embeddingClient->embed($chunks)
+            ? $this->embeddingClient->embedOrFail($chunks)
             : [];
 
         $dimensions = (int) config('chat.embedding_dimensions', 1536);
@@ -48,7 +48,10 @@ class ChatSourcePageEmbedder
             $embeddingValue = null;
 
             if (is_array($embedding) && count($embedding) === $dimensions) {
-                $embeddingValue = DB::raw("'".$this->vectorFormatter->toSql($embedding)."'::vector");
+                $formatted = $this->vectorFormatter->toSql($embedding);
+                $embeddingValue = DB::connection()->getDriverName() === 'pgsql'
+                    ? DB::raw("'".$formatted."'::vector")
+                    : $formatted;
             }
 
             $records[] = [
@@ -64,7 +67,10 @@ class ChatSourcePageEmbedder
             ];
         }
 
-        DB::table('chat_source_chunks')->insert($records);
+        DB::transaction(function () use ($page, $records): void {
+            ChatSourceChunk::query()->where('chat_source_page_id', $page->id)->delete();
+            DB::table('chat_source_chunks')->insert($records);
+        });
 
         return count($records);
     }
