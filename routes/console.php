@@ -19,3 +19,8 @@ Schedule::command('calendar:schedule')
 Schedule::command('chat:schedule')
     ->everyMinute()
     ->withoutOverlapping();
+
+Schedule::command('sources:check-health --limit=20')
+    ->cron('17 */6 * * *')
+    ->withoutOverlapping()
+    ->runInBackground();

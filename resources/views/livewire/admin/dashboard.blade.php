@@ -8,7 +8,7 @@
             <flux:subheading class="mt-2">{{ __('Coverage, publishing activity, and ingestion health at a glance.') }}</flux:subheading>
         </div>
 
-        <flux:button variant="primary" :href="route('admin.scrapers.create')" icon="plus" wire:navigate>
+        <flux:button variant="primary" :href="route('admin.sources.create')" icon="plus" wire:navigate>
             {{ __('Add source') }}
         </flux:button>
     </div>
@@ -88,15 +88,26 @@
 
         <div class="admin-panel flex flex-col justify-between p-5 sm:p-6">
             <div>
-                <div class="admin-kicker">{{ __('Source coverage') }}</div>
-                <flux:heading size="lg" class="mt-2">{{ __('Scraper summary') }}</flux:heading>
-                <p class="mt-4 text-sm leading-6 text-[#5d7168]">
-                    {{ trans_choice(':count active source is publishing.|:count active sources are publishing.', $activeScrapers, ['count' => $activeScrapers]) }}
-                </p>
+                <div class="admin-kicker">{{ __('Source health') }}</div>
+                <flux:heading size="lg" class="mt-2">{{ __('Automatic monitoring') }}</flux:heading>
+                @php($unhealthySources = $unhealthyScrapers + $unhealthyEventSources)
+                @if ($unhealthySources > 0)
+                    <div class="mt-4 flex items-center gap-2 text-sm font-semibold text-amber-800">
+                        <flux:icon icon="exclamation-triangle" class="size-4" />
+                        {{ trans_choice(':count source needs attention.|:count sources need attention.', $unhealthySources, ['count' => $unhealthySources]) }}
+                    </div>
+                @else
+                    <div class="mt-4 flex items-center gap-2 text-sm font-semibold text-[#1f654f]">
+                        <flux:icon icon="check-circle" class="size-4" />
+                        {{ __('No source problems detected.') }}
+                    </div>
+                @endif
+                <p class="mt-3 text-sm leading-6 text-[#5d7168]">{{ __('Sources are retested every six hours. Verified repair proposals appear in their source list.') }}</p>
             </div>
-            <flux:link :href="route('admin.scrapers.index')" class="mt-6 inline-flex font-semibold" wire:navigate>
-                {{ __('Review all scrapers') }} →
-            </flux:link>
+            <div class="mt-6 flex flex-wrap gap-4 text-sm font-semibold">
+                <flux:link :href="route('admin.scrapers.index')" wire:navigate>{{ __('Article sources') }} →</flux:link>
+                <flux:link :href="route('admin.event-sources.index')" wire:navigate>{{ __('Event sources') }} →</flux:link>
+            </div>
         </div>
     </section>
 

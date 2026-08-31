@@ -20,6 +20,7 @@ use App\Livewire\Admin\Organizations\Index as OrganizationsIndex;
 use App\Livewire\Admin\Scrapers\Form as ScrapersForm;
 use App\Livewire\Admin\Scrapers\Index as ScrapersIndex;
 use App\Livewire\Admin\Scrapers\Show as ScrapersShow;
+use App\Livewire\Admin\Sources\Wizard as SourcesWizard;
 use App\Livewire\Dashboard as UserDashboard;
 use App\Livewire\Demo\ArticleExplainer;
 use App\Livewire\Demo\Calendar as DemoCalendar;
@@ -71,13 +72,15 @@ Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
         Route::get('organizations/create', OrganizationsForm::class)->name('organizations.create');
         Route::get('organizations/{organization}/edit', OrganizationsForm::class)->name('organizations.edit');
 
+        Route::get('sources/create', SourcesWizard::class)->name('sources.create');
+
         Route::get('scrapers', ScrapersIndex::class)->name('scrapers.index');
-        Route::get('scrapers/create', ScrapersForm::class)->name('scrapers.create');
+        Route::get('scrapers/create', SourcesWizard::class)->name('scrapers.create');
         Route::get('scrapers/{scraper}/edit', ScrapersForm::class)->name('scrapers.edit');
         Route::get('scrapers/{scraper}', ScrapersShow::class)->name('scrapers.show');
 
         Route::get('event-sources', EventSourcesIndex::class)->name('event-sources.index');
-        Route::get('event-sources/create', EventSourcesForm::class)->name('event-sources.create');
+        Route::get('event-sources/create', SourcesWizard::class)->name('event-sources.create');
         Route::get('event-sources/{source}/edit', EventSourcesForm::class)->name('event-sources.edit');
         Route::get('event-sources/{source}', EventSourcesShow::class)->name('event-sources.show');
 

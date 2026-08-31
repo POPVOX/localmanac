@@ -137,6 +137,44 @@ class Index extends Component
         }
     }
 
+    public function applyRepair(int $sourceId): void
+    {
+        try {
+            $source = EventSource::findOrFail($sourceId);
+            $proposal = $source->repair_proposal;
+
+            if (
+                ! is_array($proposal)
+                || ($proposal['kind'] ?? null) !== 'event'
+                || ! in_array($proposal['type'] ?? null, ['ics', 'rss', 'json', 'json_api', 'html'], true)
+                || ! filter_var($proposal['source_url'] ?? null, FILTER_VALIDATE_URL)
+                || ! is_array($proposal['config'] ?? null)
+            ) {
+                $this->dispatchToast(__('Repair unavailable'), __('Run a new source health check to generate a verified repair.'), 'warning');
+
+                return;
+            }
+
+            $source->update([
+                'source_type' => $proposal['type'],
+                'source_url' => $proposal['source_url'],
+                'config' => $proposal['config'],
+                'health_status' => 'unknown',
+                'health_checked_at' => null,
+                'health_error' => null,
+                'repair_proposal' => null,
+            ]);
+
+            $this->dispatchToast(__('Verified repair applied'), __('The source will be checked again in the background.'));
+        } catch (ModelNotFoundException $exception) {
+            $this->dispatchToast(__('Source not found'), __('Refresh the page and try again.'), 'danger');
+            report($exception);
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->dispatchToast(__('Repair failed'), __('We could not apply the suggested repair.'), 'danger');
+        }
+    }
+
     public function render(): View
     {
         $search = trim($this->search);

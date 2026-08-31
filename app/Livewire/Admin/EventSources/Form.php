@@ -4,6 +4,7 @@ namespace App\Livewire\Admin\EventSources;
 
 use App\Models\City;
 use App\Models\EventSource;
+use App\Services\Ingestion\Assistant\EventSourcePreviewer;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Validation\Rule;
@@ -33,6 +34,16 @@ class Form extends Component
     public bool $isActive = true;
 
     public string $config = '';
+
+    /** @var array<int, array<string, mixed>> */
+    public array $previewItems = [];
+
+    /** @var array<int, string> */
+    public array $previewWarnings = [];
+
+    public bool $previewValid = false;
+
+    public ?string $previewError = null;
 
     public function mount(?EventSource $source = null): void
     {
@@ -95,6 +106,63 @@ class Form extends Component
         };
 
         $this->config = $this->prettyPrintConfig($config);
+        $this->invalidatePreview();
+    }
+
+    public function previewSource(EventSourcePreviewer $previewer): void
+    {
+        $this->validate([
+            'cityId' => ['required', 'integer', 'exists:cities,id'],
+            'sourceType' => ['required', Rule::in(self::TYPES)],
+            'sourceUrl' => ['required', 'url:http,https', 'max:2000'],
+        ]);
+
+        $this->previewItems = [];
+        $this->previewWarnings = [];
+        $this->previewValid = false;
+        $this->previewError = null;
+
+        try {
+            $config = $this->decodeConfig();
+            $this->validateSourceConfiguration($config, true);
+            $preview = $previewer->preview(
+                cityId: (int) $this->cityId,
+                type: $this->sourceType,
+                sourceUrl: $this->sourceUrl,
+                config: $config,
+                sourceId: $this->source?->id,
+            );
+            $this->previewItems = $preview['items'];
+            $this->previewWarnings = $preview['warnings'];
+            $this->previewValid = $preview['valid'];
+
+            $this->dispatchToast(
+                $this->previewValid ? __('Preview complete') : __('Preview needs attention'),
+                $this->previewValid ? __('Sample events were extracted successfully.') : __('No dated events were found.'),
+                $this->previewValid ? 'success' : 'warning',
+            );
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->previewError = trim($exception->getMessage()) ?: __('The event preview could not be completed.');
+            $this->dispatchToast(__('Preview failed'), $this->previewError, 'danger');
+        }
+    }
+
+    public function updatedSourceType(): void
+    {
+        $this->invalidatePreview();
+    }
+
+    public function updatedSourceUrl(): void
+    {
+        $this->invalidatePreview();
+    }
+
+    public function updatedConfig(): void
+    {
+        $this->invalidatePreview();
     }
 
     public function save(): RedirectResponse|Redirector|null
@@ -109,6 +177,10 @@ class Form extends Component
             $payload['source_url'] = $payload['sourceUrl'];
             $payload['is_active'] = (bool) $payload['isActive'];
             $payload['config'] = $config;
+            $payload['health_status'] = 'unknown';
+            $payload['health_checked_at'] = null;
+            $payload['health_error'] = null;
+            $payload['repair_proposal'] = null;
 
             unset($payload['cityId'], $payload['sourceType'], $payload['sourceUrl'], $payload['isActive']);
 
@@ -300,6 +372,14 @@ class Form extends Component
     private function dispatchToast(string $heading, string $message, string $variant = 'success'): void
     {
         $this->dispatch('toast', heading: $heading, message: $message, variant: $variant);
+    }
+
+    private function invalidatePreview(): void
+    {
+        $this->previewItems = [];
+        $this->previewWarnings = [];
+        $this->previewValid = false;
+        $this->previewError = null;
     }
 
     public function resetConfigField(): void

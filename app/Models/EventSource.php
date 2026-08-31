@@ -24,6 +24,10 @@ class EventSource extends Model
         'config',
         'frequency',
         'is_active',
+        'health_status',
+        'health_checked_at',
+        'health_error',
+        'repair_proposal',
         'last_run_at',
     ];
 
@@ -34,6 +38,8 @@ class EventSource extends Model
         'config' => 'array',
         'frequency' => 'string',
         'is_active' => 'boolean',
+        'health_checked_at' => 'datetime',
+        'repair_proposal' => 'array',
         'last_run_at' => 'datetime',
     ];
 

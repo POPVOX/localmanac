@@ -5,6 +5,7 @@ namespace App\Livewire\Admin;
 use App\Models\Article;
 use App\Models\City;
 use App\Models\EventIngestionRun;
+use App\Models\EventSource;
 use App\Models\Organization;
 use App\Models\Scraper;
 use App\Models\ScraperRun;
@@ -22,6 +23,10 @@ class Dashboard extends Component
     public int $totalScrapers = 0;
 
     public int $activeScrapers = 0;
+
+    public int $unhealthyScrapers = 0;
+
+    public int $unhealthyEventSources = 0;
 
     public int $articlesLast24h = 0;
 
@@ -45,6 +50,8 @@ class Dashboard extends Component
         $this->totalOrganizations = Organization::count();
         $this->totalScrapers = Scraper::count();
         $this->activeScrapers = Scraper::where('is_enabled', true)->count();
+        $this->unhealthyScrapers = Scraper::where('health_status', 'unhealthy')->count();
+        $this->unhealthyEventSources = EventSource::where('health_status', 'unhealthy')->count();
         $this->recentRuns = ScraperRun::with(['scraper.city', 'scraper.organization'])
             ->orderByDesc('finished_at')
             ->orderByDesc('started_at')

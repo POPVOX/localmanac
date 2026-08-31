@@ -6,7 +6,7 @@
             <flux:subheading class="mt-2">{{ __('Manage article sources, review health, and run imports.') }}</flux:subheading>
         </div>
 
-        <flux:button variant="primary" :href="route('admin.scrapers.create')" icon="plus" wire:navigate>
+        <flux:button variant="primary" :href="route('admin.sources.create')" icon="plus" wire:navigate>
             {{ __('Add source') }}
         </flux:button>
     </div>
@@ -76,7 +76,8 @@
                         $lastScraped = $lastRun?->finished_at ?? $lastRun?->started_at;
                         $latestStatus = $lastRun?->status;
                         $isActiveRun = $lastRun?->isFreshActive() ?? false;
-                        $sourceNeedsUpdate = $lastRun?->sourceNeedsUpdate() ?? false;
+                        $sourceNeedsUpdate = $scraper->health_status === 'unhealthy' || ($lastRun?->sourceNeedsUpdate() ?? false);
+                        $repairProposal = is_array($scraper->repair_proposal) ? $scraper->repair_proposal : null;
                     @endphp
                     <flux:table.row :key="$scraper->id">
                         <flux:table.cell variant="strong" sticky class="w-[420px]">
@@ -104,6 +105,13 @@
                                             {{ __('Update scraper') }}
                                         </flux:link>
                                     </div>
+                                    @if ($repairProposal)
+                                        <div class="text-xs leading-5 text-[#5d7168]">
+                                            {{ $repairProposal['summary'] ?? __('A verified repair is ready to apply.') }}
+                                        </div>
+                                    @elseif ($scraper->health_error)
+                                        <div class="line-clamp-2 text-xs leading-5 text-[#7c5c25]">{{ $scraper->health_error }}</div>
+                                    @endif
                                 @endif
                             </div>
                         </flux:table.cell>
@@ -146,6 +154,11 @@
                                         <flux:menu.item :href="route('admin.scrapers.edit', $scraper)" icon="pencil-square" wire:navigate>
                                             {{ $sourceNeedsUpdate ? __('Update scraper') : __('Edit') }}
                                         </flux:menu.item>
+                                        @if ($repairProposal)
+                                            <flux:menu.item wire:click="applyRepair({{ $scraper->id }})" icon="wrench-screwdriver">
+                                                {{ __('Apply verified repair') }}
+                                            </flux:menu.item>
+                                        @endif
                                         <flux:menu.separator />
                                         @if ($isActiveRun)
                                             <flux:menu.item icon="arrow-path" class="pointer-events-none opacity-60">

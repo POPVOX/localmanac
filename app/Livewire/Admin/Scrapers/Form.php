@@ -379,11 +379,16 @@ class Form extends Component
             $payload['organization_id'] = $payload['organizationId'] ?: null;
             $payload['slug'] = Str::slug($payload['slug']);
             $payload['source_url'] = $payload['sourceUrl'];
+            $payload['is_enabled'] = (bool) $payload['isActive'];
             $payload['run_at'] = $this->formatRunAt($payload['runAt']);
             $payload['run_day_of_week'] = $payload['runDayOfWeek'] !== null ? (int) $payload['runDayOfWeek'] : null;
             $payload['config'] = $this->prepareConfig($config);
+            $payload['health_status'] = 'unknown';
+            $payload['health_checked_at'] = null;
+            $payload['health_error'] = null;
+            $payload['repair_proposal'] = null;
             $payload = $this->normalizeSchedulePayload($payload);
-            unset($payload['cityId'], $payload['organizationId'], $payload['sourceUrl']);
+            unset($payload['cityId'], $payload['organizationId'], $payload['sourceUrl'], $payload['isActive']);
             unset($payload['runAt'], $payload['runDayOfWeek']);
 
             $isUpdating = $this->scraper?->exists === true;

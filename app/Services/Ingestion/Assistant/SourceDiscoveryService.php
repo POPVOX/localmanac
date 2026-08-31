@@ -1,0 +1,535 @@
+<?php
+
+namespace App\Services\Ingestion\Assistant;
+
+use App\Services\Chat\Ingestion\HttpPageFetcher;
+use Illuminate\Support\Str;
+use InvalidArgumentException;
+use Symfony\Component\DomCrawler\Crawler;
+
+class SourceDiscoveryService
+{
+    public function __construct(
+        private readonly HttpPageFetcher $httpFetcher,
+        private readonly ScraperAssistantSourceFetcher $renderedFetcher,
+        private readonly ScraperConfigDrafter $scraperDrafter,
+        private readonly EventSourceConfigDrafter $eventDrafter,
+    ) {}
+
+    /**
+     * @return array{
+     *     kind: 'article'|'event',
+     *     type: string,
+     *     source_url: string,
+     *     name: string,
+     *     config: array<string, mixed>,
+     *     confidence: float,
+     *     reasons: array<int, string>,
+     *     warnings: array<int, string>,
+     *     endpoints: array<int, array{url: string, type: string, label: string}>,
+     *     renderer: string
+     * }
+     */
+    public function discover(string $url): array
+    {
+        $url = trim($url);
+
+        if (! filter_var($url, FILTER_VALIDATE_URL) || ! in_array(parse_url($url, PHP_URL_SCHEME), ['http', 'https'], true)) {
+            throw new InvalidArgumentException('Enter a valid http or https source URL.');
+        }
+
+        $probe = $this->httpFetcher->fetch($url);
+
+        if ($probe === null) {
+            throw new InvalidArgumentException('The source URL could not be reached.');
+        }
+
+        $body = trim((string) ($probe['body'] ?? ''));
+        $contentType = mb_strtolower((string) ($probe['content_type'] ?? ''));
+        $sourceUrl = (string) ($probe['url'] ?? $url);
+        $renderer = (string) ($probe['renderer'] ?? 'http');
+        $warnings = [];
+
+        if ($this->looksLikeIcs($body, $contentType, $sourceUrl)) {
+            $draft = $this->eventDrafter->draft('ics', $sourceUrl, $body);
+
+            return $this->result(
+                kind: 'event',
+                type: 'ics',
+                sourceUrl: $sourceUrl,
+                name: $this->calendarName($body, $sourceUrl),
+                draft: $draft,
+                reasons: ['The URL returns an iCalendar feed with dated events.'],
+                endpoints: [['url' => $sourceUrl, 'type' => 'ics', 'label' => 'Calendar feed']],
+                renderer: $renderer,
+            );
+        }
+
+        if ($this->looksLikeJson($body, $contentType)) {
+            if ($this->looksLikeEventJson($body, $sourceUrl)) {
+                $draft = $this->eventDrafter->draft('json_api', $sourceUrl, $body);
+
+                return $this->result(
+                    kind: 'event',
+                    type: 'json_api',
+                    sourceUrl: $sourceUrl,
+                    name: $this->fallbackName($sourceUrl),
+                    draft: $draft,
+                    reasons: ['The endpoint returns structured records with event dates.'],
+                    endpoints: [['url' => $sourceUrl, 'type' => 'json_api', 'label' => 'Events API']],
+                    renderer: $renderer,
+                );
+            }
+
+            $warnings[] = 'The URL returns JSON, but it does not expose recognizable event fields. It will be treated as an article listing.';
+        }
+
+        if ($this->looksLikeFeed($body, $contentType)) {
+            $isEventFeed = $this->feedLooksEventFocused($body, $sourceUrl);
+            $kind = $isEventFeed ? 'event' : 'article';
+            $draft = $isEventFeed
+                ? $this->eventDrafter->draft('rss', $sourceUrl, $body)
+                : $this->scraperDrafter->draft('rss', $sourceUrl, $body);
+
+            return $this->result(
+                kind: $kind,
+                type: 'rss',
+                sourceUrl: $sourceUrl,
+                name: $this->feedName($body, $sourceUrl),
+                draft: $draft,
+                reasons: [$isEventFeed
+                    ? 'The feed is labeled as a calendar or events feed.'
+                    : 'The URL returns a syndication feed with article entries.'],
+                endpoints: [['url' => $sourceUrl, 'type' => 'rss', 'label' => $isEventFeed ? 'Event feed' : 'Article feed']],
+                renderer: $renderer,
+                extraWarnings: $warnings,
+            );
+        }
+
+        if ($this->looksLikeJavascriptShell($body)) {
+            try {
+                $rendered = $this->renderedFetcher->fetch($sourceUrl);
+                $body = (string) $rendered['html'];
+                $sourceUrl = (string) $rendered['final_url'];
+                $renderer = (string) $rendered['renderer'];
+                $warnings = array_merge($warnings, $rendered['warnings']);
+            } catch (\Throwable $exception) {
+                $warnings[] = 'The page appears to rely on JavaScript and could not be fully rendered during discovery.';
+            }
+        }
+
+        $endpoints = $this->discoverHtmlEndpoints($body, $sourceUrl);
+        $eventScore = $this->eventPageScore($body, $sourceUrl);
+        $eventEndpoint = collect($endpoints)->first(fn (array $endpoint): bool => in_array($endpoint['type'], ['ics', 'json_api'], true));
+        $feedEndpoint = collect($endpoints)->firstWhere('type', 'rss');
+
+        if (is_array($eventEndpoint)) {
+            $endpointProbe = $this->probeEndpoint($eventEndpoint['url']);
+            $endpointBody = $endpointProbe['body'] ?? $body;
+            $draft = $this->eventDrafter->draft($eventEndpoint['type'], $eventEndpoint['url'], $endpointBody);
+
+            if ($endpointProbe === null) {
+                $warnings[] = 'The discovered calendar endpoint could not be inspected directly. The live preview will verify it.';
+            }
+
+            return $this->result(
+                kind: 'event',
+                type: $eventEndpoint['type'],
+                sourceUrl: $eventEndpoint['url'],
+                name: $eventEndpoint['type'] === 'ics' && $endpointProbe !== null
+                    ? $this->calendarName($endpointBody, $eventEndpoint['url'])
+                    : $this->htmlName($body, $sourceUrl),
+                draft: $draft,
+                reasons: ['A dedicated calendar endpoint was discovered on the page.'],
+                endpoints: $endpoints,
+                renderer: $renderer,
+                extraWarnings: $warnings,
+            );
+        }
+
+        if (is_array($feedEndpoint)) {
+            $endpointProbe = $this->probeEndpoint($feedEndpoint['url']);
+            $feedBody = $endpointProbe['body'] ?? $body;
+            $feedIsEventFocused = $eventScore >= 3
+                || $this->endpointLooksEventFocused($feedEndpoint)
+                || ($endpointProbe !== null && $this->feedLooksEventFocused($feedBody, $feedEndpoint['url']));
+            $kind = $feedIsEventFocused ? 'event' : 'article';
+            $draft = $feedIsEventFocused
+                ? $this->eventDrafter->draft('rss', $feedEndpoint['url'], $feedBody)
+                : $this->scraperDrafter->draft('rss', $feedEndpoint['url'], $feedBody);
+
+            if ($endpointProbe === null) {
+                $warnings[] = 'The discovered feed could not be inspected directly. The live preview will verify it.';
+            }
+
+            return $this->result(
+                kind: $kind,
+                type: 'rss',
+                sourceUrl: $feedEndpoint['url'],
+                name: $endpointProbe !== null && $this->looksLikeFeed($feedBody, (string) ($endpointProbe['content_type'] ?? ''))
+                    ? $this->feedName($feedBody, $feedEndpoint['url'])
+                    : $this->htmlName($body, $sourceUrl),
+                draft: $draft,
+                reasons: [$feedIsEventFocused
+                    ? 'The page is event-focused and publishes a dedicated feed.'
+                    : 'A dedicated article feed was discovered on the page.'],
+                endpoints: $endpoints,
+                renderer: $renderer,
+                extraWarnings: $warnings,
+            );
+        }
+
+        if ($eventScore >= 4) {
+            $draft = $this->eventDrafter->draft('html', $sourceUrl, $body);
+
+            return $this->result(
+                kind: 'event',
+                type: 'html',
+                sourceUrl: $sourceUrl,
+                name: $this->htmlName($body, $sourceUrl),
+                draft: $draft,
+                reasons: ['The page contains repeated event, date, and calendar signals.'],
+                endpoints: $endpoints,
+                renderer: $renderer,
+                extraWarnings: $warnings,
+            );
+        }
+
+        $draft = $this->scraperDrafter->draft('html', $sourceUrl, $body);
+
+        return $this->result(
+            kind: 'article',
+            type: 'html',
+            sourceUrl: $sourceUrl,
+            name: $this->htmlName($body, $sourceUrl),
+            draft: $draft,
+            reasons: ['The page is structured as a news or document listing.'],
+            endpoints: $endpoints,
+            renderer: $renderer,
+            extraWarnings: $warnings,
+        );
+    }
+
+    /**
+     * @return array{url: string, status_code: int, content_type: string|null, body: string, renderer: string}|null
+     */
+    private function probeEndpoint(string $url): ?array
+    {
+        $probe = $this->httpFetcher->fetch($url);
+
+        if ($probe === null || trim((string) ($probe['body'] ?? '')) === '') {
+            return null;
+        }
+
+        return $probe;
+    }
+
+    /**
+     * @param  array{config: array<string, mixed>, confidence: float, warnings: array<int, string>, profile?: string, mode?: string}  $draft
+     * @param  array<int, string>  $reasons
+     * @param  array<int, array{url: string, type: string, label: string}>  $endpoints
+     * @param  array<int, string>  $extraWarnings
+     * @return array<string, mixed>
+     */
+    private function result(
+        string $kind,
+        string $type,
+        string $sourceUrl,
+        string $name,
+        array $draft,
+        array $reasons,
+        array $endpoints,
+        string $renderer,
+        array $extraWarnings = [],
+    ): array {
+        return [
+            'kind' => $kind,
+            'type' => $type,
+            'source_url' => $sourceUrl,
+            'name' => $name,
+            'config' => $draft['config'],
+            'confidence' => max(0, min(1, (float) $draft['confidence'])),
+            'reasons' => $reasons,
+            'warnings' => array_values(array_unique(array_merge($extraWarnings, $draft['warnings']))),
+            'endpoints' => $endpoints,
+            'renderer' => $renderer,
+        ];
+    }
+
+    private function looksLikeIcs(string $body, string $contentType, string $url): bool
+    {
+        return str_contains(mb_strtoupper(mb_substr($body, 0, 500)), 'BEGIN:VCALENDAR')
+            || str_contains($contentType, 'text/calendar')
+            || preg_match('/\.(ics|ical)(?:$|[?#])/i', $url) === 1;
+    }
+
+    private function looksLikeJson(string $body, string $contentType): bool
+    {
+        if (str_contains($contentType, 'json')) {
+            return true;
+        }
+
+        $first = mb_substr(ltrim($body), 0, 1);
+
+        if (! in_array($first, ['{', '['], true)) {
+            return false;
+        }
+
+        json_decode($body, true);
+
+        return json_last_error() === JSON_ERROR_NONE;
+    }
+
+    private function looksLikeEventJson(string $body, string $url): bool
+    {
+        $payload = json_decode($body, true);
+
+        if (! is_array($payload)) {
+            return false;
+        }
+
+        $encodedKeys = mb_strtolower(json_encode(array_keys($this->firstJsonRecord($payload))) ?: '');
+        $hasTitle = Str::contains($encodedKeys, ['title', 'name', 'summary']);
+        $hasStart = Str::contains($encodedKeys, ['start', 'date', 'dtstart']);
+
+        return ($hasTitle && $hasStart) || preg_match('/(?:events?|calendar)/i', $url) === 1;
+    }
+
+    /**
+     * @param  array<string|int, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function firstJsonRecord(array $payload): array
+    {
+        if (array_is_list($payload)) {
+            return is_array($payload[0] ?? null) ? $payload[0] : [];
+        }
+
+        foreach ($payload as $value) {
+            if (is_array($value) && array_is_list($value) && is_array($value[0] ?? null)) {
+                return $value[0];
+            }
+
+            if (is_array($value)) {
+                $record = $this->firstJsonRecord($value);
+
+                if ($record !== []) {
+                    return $record;
+                }
+            }
+        }
+
+        return $payload;
+    }
+
+    private function looksLikeFeed(string $body, string $contentType): bool
+    {
+        $prefix = mb_strtolower(mb_substr(ltrim($body), 0, 1000));
+
+        return str_contains($contentType, 'rss')
+            || str_contains($contentType, 'atom')
+            || str_contains($prefix, '<rss')
+            || str_contains($prefix, '<feed');
+    }
+
+    private function feedLooksEventFocused(string $body, string $url): bool
+    {
+        $sample = mb_strtolower(mb_substr(strip_tags($body), 0, 8000));
+
+        return preg_match('/(?:events?|calendar)/i', $url) === 1
+            || Str::contains($sample, ['events calendar', 'upcoming events', 'event date', 'event time']);
+    }
+
+    /**
+     * @return array<int, array{url: string, type: string, label: string}>
+     */
+    private function discoverHtmlEndpoints(string $body, string $baseUrl): array
+    {
+        try {
+            $crawler = new Crawler($body, $baseUrl);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $endpoints = [];
+
+        foreach ($crawler->filter('link[href], a[href]') as $node) {
+            $href = trim((string) $node->getAttribute('href'));
+
+            if ($href === '' || str_starts_with($href, '#') || str_starts_with($href, 'mailto:')) {
+                continue;
+            }
+
+            $type = mb_strtolower((string) $node->getAttribute('type'));
+            $rel = mb_strtolower((string) $node->getAttribute('rel'));
+            $text = trim((string) $node->textContent);
+            $haystack = mb_strtolower("{$href} {$type} {$rel} {$text}");
+            $endpointType = null;
+            $label = '';
+
+            if (str_contains($type, 'text/calendar') || preg_match('/\.(ics|ical)(?:$|[?#])/i', $href) === 1 || str_contains($haystack, 'ical feed')) {
+                $endpointType = 'ics';
+                $label = 'Calendar feed';
+            } elseif (str_contains($type, 'rss') || str_contains($type, 'atom') || preg_match('/(?:\/feed\/?$|\.rss(?:$|[?#])|\.xml(?:$|[?#]))/i', $href) === 1) {
+                $endpointType = 'rss';
+                $label = Str::contains($haystack, ['event', 'calendar']) ? 'Event feed' : 'Article feed';
+            } elseif ((str_contains($type, 'json') || preg_match('/\.json(?:$|[?#])/i', $href) === 1) && Str::contains($haystack, ['event', 'calendar'])) {
+                $endpointType = 'json_api';
+                $label = 'Events API';
+            }
+
+            if ($endpointType === null) {
+                continue;
+            }
+
+            $resolved = $this->resolveUrl($href, $baseUrl);
+
+            if ($resolved === null) {
+                continue;
+            }
+
+            $endpoints[$endpointType.'|'.$resolved] = [
+                'url' => $resolved,
+                'type' => $endpointType,
+                'label' => $label,
+            ];
+        }
+
+        return array_values($endpoints);
+    }
+
+    private function eventPageScore(string $body, string $url): int
+    {
+        $lower = mb_strtolower($body);
+        $score = preg_match('/(?:events?|calendar)/i', $url) === 1 ? 2 : 0;
+
+        if (
+            preg_match('/["\']@type["\']\s*:\s*["\']event["\']/i', $body) === 1
+            || Str::contains($lower, ['itemtype="https://schema.org/event"', 'itemtype="http://schema.org/event"'])
+        ) {
+            $score += 4;
+        }
+
+        if (Str::contains($lower, ['upcoming events', 'events calendar', 'calendar of events'])) {
+            $score += 2;
+        }
+
+        if (preg_match_all('/class=["\'][^"\']*(?:event|calendar)[^"\']*["\']/i', $body) >= 2) {
+            $score += 2;
+        }
+
+        if (preg_match_all('/<time\b[^>]*(?:datetime|itemprop=["\']startDate)/i', $body) >= 2) {
+            $score += 2;
+        }
+
+        return $score;
+    }
+
+    /**
+     * @param  array{url: string, type: string, label: string}  $endpoint
+     */
+    private function endpointLooksEventFocused(array $endpoint): bool
+    {
+        return Str::contains(mb_strtolower($endpoint['url'].' '.$endpoint['label']), ['event', 'calendar']);
+    }
+
+    private function looksLikeJavascriptShell(string $body): bool
+    {
+        $textLength = mb_strlen(trim(strip_tags($body)));
+        $lower = mb_strtolower($body);
+
+        return $textLength < 500 && Str::contains($lower, ['id="__next"', 'id="app"', 'enable javascript', 'data-reactroot']);
+    }
+
+    private function htmlName(string $body, string $url): string
+    {
+        try {
+            $crawler = new Crawler($body, $url);
+
+            foreach (['meta[property="og:site_name"]', 'title', 'h1'] as $selector) {
+                $nodes = $crawler->filter($selector);
+
+                if ($nodes->count() === 0) {
+                    continue;
+                }
+
+                $value = $selector[0] === 'm'
+                    ? trim((string) $nodes->first()->attr('content'))
+                    : trim($nodes->first()->text(''));
+
+                if ($value !== '') {
+                    return Str::limit(preg_replace('/\s+[|–—-]\s+.+$/u', '', $value) ?: $value, 120, '');
+                }
+            }
+        } catch (\Throwable) {
+            // Fall through to the host name.
+        }
+
+        return $this->fallbackName($url);
+    }
+
+    private function feedName(string $body, string $url): string
+    {
+        $previous = libxml_use_internal_errors(true);
+        $xml = simplexml_load_string($body, 'SimpleXMLElement', LIBXML_NOCDATA);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+        $title = $xml ? trim((string) ($xml->channel->title ?? $xml->title ?? '')) : '';
+
+        return $title !== '' ? Str::limit($title, 120, '') : $this->fallbackName($url);
+    }
+
+    private function calendarName(string $body, string $url): string
+    {
+        if (preg_match('/^X-WR-CALNAME:(.+)$/mi', $body, $matches) === 1) {
+            return Str::limit(trim($matches[1]), 120, '');
+        }
+
+        return $this->fallbackName($url).' events';
+    }
+
+    private function fallbackName(string $url): string
+    {
+        $host = preg_replace('/^www\./i', '', (string) parse_url($url, PHP_URL_HOST));
+        $name = Str::headline((string) Str::before($host, '.'));
+
+        return $name !== '' ? $name : 'New source';
+    }
+
+    private function resolveUrl(string $href, string $baseUrl): ?string
+    {
+        if (str_starts_with($href, 'webcal://')) {
+            $href = 'https://'.substr($href, 9);
+        }
+
+        if (filter_var($href, FILTER_VALIDATE_URL)) {
+            return $href;
+        }
+
+        if (str_starts_with($href, '//')) {
+            $scheme = parse_url($baseUrl, PHP_URL_SCHEME) ?: 'https';
+
+            return $scheme.':'.$href;
+        }
+
+        $scheme = parse_url($baseUrl, PHP_URL_SCHEME);
+        $host = parse_url($baseUrl, PHP_URL_HOST);
+
+        if (! is_string($scheme) || ! is_string($host)) {
+            return null;
+        }
+
+        $port = parse_url($baseUrl, PHP_URL_PORT);
+        $origin = $scheme.'://'.$host.($port ? ':'.$port : '');
+
+        if (str_starts_with($href, '/')) {
+            return $origin.$href;
+        }
+
+        $path = (string) parse_url($baseUrl, PHP_URL_PATH);
+        $directoryPath = str_ends_with($path, '/') ? $path : dirname($path);
+        $directory = rtrim(str_replace('\\', '/', $directoryPath), '/.');
+
+        return $origin.($directory !== '' ? '/'.ltrim($directory, '/') : '').'/'.ltrim($href, '/');
+    }
+}

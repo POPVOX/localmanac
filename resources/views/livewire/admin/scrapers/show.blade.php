@@ -3,8 +3,8 @@
     $latestStatus = $latestRun?->status;
     $lastScraped = $latestRun?->finished_at ?? $latestRun?->started_at;
     $isActiveRun = $latestRun?->isFreshActive() ?? false;
-    $sourceNeedsUpdate = $latestRun?->sourceNeedsUpdate() ?? false;
-    $sourceIssueSummary = $latestRun?->sourceIssueSummary();
+    $sourceNeedsUpdate = $scraper->health_status === 'unhealthy' || ($latestRun?->sourceNeedsUpdate() ?? false);
+    $sourceIssueSummary = $scraper->health_error ?: $latestRun?->sourceIssueSummary();
     $tz = $scraper->city?->timezone ?? config('app.timezone', 'UTC');
     $statusColor = match ($latestStatus) {
         'success' => 'green',
@@ -67,7 +67,12 @@
     @if ($sourceNeedsUpdate)
         <flux:callout variant="warning" icon="exclamation-triangle" :heading="__('Source may no longer be valid')">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <flux:text>{{ $sourceIssueSummary }}</flux:text>
+                <div>
+                    <flux:text>{{ $sourceIssueSummary }}</flux:text>
+                    @if ($scraper->repair_proposal)
+                        <flux:text variant="subtle" class="mt-1">{{ $scraper->repair_proposal['summary'] ?? __('A verified repair is ready on the scraper list.') }}</flux:text>
+                    @endif
+                </div>
                 <flux:button
                     size="sm"
                     variant="primary"
@@ -80,18 +85,12 @@
         </flux:callout>
     @endif
 
-    <div class="grid gap-4 lg:grid-cols-3">
-        <flux:card padding="xl" variant="subtle" class="lg:col-span-2 space-y-4">
+    <div class="grid gap-4">
+        <flux:card padding="xl" variant="subtle" class="space-y-4">
             <div class="grid gap-6 sm:grid-cols-2">
                 <div class="space-y-1">
                     <flux:text variant="subtle">{{ __('Scraper ID') }}</flux:text>
                     <div class="text-lg font-semibold text-zinc-900 dark:text-white">#{{ $scraper->id }}</div>
-                </div>
-                <div class="space-y-1">
-                    <flux:text variant="subtle">{{ __('Type') }}</flux:text>
-                    <flux:badge color="indigo" variant="subtle" class="uppercase">
-                        {{ $scraper->type }}
-                    </flux:badge>
                 </div>
                 <div class="space-y-1">
                     <flux:text variant="subtle">{{ __('City') }}</flux:text>
@@ -160,13 +159,24 @@
             </div>
         </flux:card>
 
-        <flux:card padding="xl" variant="subtle">
-            <flux:heading size="lg">{{ __('Config') }}</flux:heading>
-            <flux:text variant="subtle" class="mb-3">{{ __('Current JSON config (read only).') }}</flux:text>
-            <div class="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs font-mono leading-relaxed dark:border-zinc-700 dark:bg-zinc-800">
-                <pre class="whitespace-pre-wrap break-words">{{ $configPreview }}</pre>
+        <details class="admin-panel group p-5">
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 font-semibold text-[#18342c]">
+                <span>{{ __('Advanced source details') }}</span>
+                <flux:icon icon="chevron-down" class="size-4 transition group-open:rotate-180" />
+            </summary>
+            <div class="mt-5 grid gap-5 border-t border-[#e1dfd7] pt-5 lg:grid-cols-[180px_minmax(0,1fr)]">
+                <div>
+                    <flux:text variant="subtle">{{ __('Source type') }}</flux:text>
+                    <div class="mt-2"><flux:badge color="indigo" variant="subtle" class="uppercase">{{ $scraper->type }}</flux:badge></div>
+                </div>
+                <div>
+                    <flux:text variant="subtle" class="mb-3">{{ __('Current JSON config (read only).') }}</flux:text>
+                    <div class="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs font-mono leading-relaxed dark:border-zinc-700 dark:bg-zinc-800">
+                        <pre class="whitespace-pre-wrap break-words">{{ $configPreview }}</pre>
+                    </div>
+                </div>
             </div>
-        </flux:card>
+        </details>
     </div>
 
     <flux:card padding="xl" variant="subtle" class="space-y-4">

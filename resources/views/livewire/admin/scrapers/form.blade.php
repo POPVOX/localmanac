@@ -47,21 +47,12 @@
                 />
             </div>
 
-            <div class="grid gap-4 md:grid-cols-3">
-                <flux:select wire:model.live="type" :label="__('Type')" required>
-                    @foreach ($types as $typeOption)
-                        <option value="{{ $typeOption }}">{{ strtoupper($typeOption) }}</option>
-                    @endforeach
-                </flux:select>
-
-                <flux:input
-                    wire:model.live="sourceUrl"
-                    :label="__('Source URL')"
-                    type="url"
-                    required
-                    class="md:col-span-2"
-                />
-            </div>
+            <flux:input
+                wire:model.live="sourceUrl"
+                :label="__('Source URL')"
+                type="url"
+                required
+            />
 
             <div class="grid gap-4 md:grid-cols-3">
                 <flux:select wire:model.live="frequency" :label="__('Frequency')" required>
@@ -237,7 +228,20 @@
                 @endif
             </flux:field>
 
-            @if ($isSuperAdmin)
+            <details class="group rounded-xl border border-[#d9d7ce] bg-white p-5">
+                <summary class="flex cursor-pointer list-none items-center justify-between gap-3 font-semibold text-[#18342c]">
+                    <span>{{ __('Advanced') }}</span>
+                    <flux:icon icon="chevron-down" class="size-4 transition group-open:rotate-180" />
+                </summary>
+
+                <div class="mt-5 space-y-5 border-t border-[#e1dfd7] pt-5">
+                    <flux:select wire:model.live="type" :label="__('Source type')" required>
+                        @foreach ($types as $typeOption)
+                            <option value="{{ $typeOption }}">{{ strtoupper($typeOption) }}</option>
+                        @endforeach
+                    </flux:select>
+
+                @if ($isSuperAdmin)
                 <flux:field class="space-y-2">
                     <div class="flex flex-wrap items-end justify-between gap-3">
                         <div>
@@ -274,11 +278,11 @@
                         />
                     @endif
                 </flux:field>
-            @else
-                <flux:text variant="subtle">
-                    {{ __('Raw JSON editing is restricted. Use the assistant draft and preview workflow.') }}
-                </flux:text>
-            @endif
+                @else
+                    <flux:text variant="subtle">{{ __('Raw JSON editing is restricted. Use the assistant draft and preview workflow.') }}</flux:text>
+                @endif
+                </div>
+            </details>
 
             <div class="flex items-center justify-end">
                 <flux:button type="submit" variant="primary" wire:loading.attr="disabled">

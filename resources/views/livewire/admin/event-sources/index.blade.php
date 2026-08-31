@@ -6,7 +6,7 @@
             <flux:subheading class="mt-2">{{ __('Manage calendar sources, review health, and run imports.') }}</flux:subheading>
         </div>
 
-        <flux:button variant="primary" :href="route('admin.event-sources.create')" icon="plus" wire:navigate>
+        <flux:button variant="primary" :href="route('admin.sources.create')" icon="plus" wire:navigate>
             {{ __('Add source') }}
         </flux:button>
     </div>
@@ -66,6 +66,8 @@
                         $latestStatus = $latestRun?->status;
                         $lastRunAt = $latestRun?->finished_at ?? $latestRun?->started_at;
                         $isActiveRun = in_array($latestStatus, ['queued', 'running'], true);
+                        $sourceNeedsUpdate = $source->health_status === 'unhealthy';
+                        $repairProposal = is_array($source->repair_proposal) ? $source->repair_proposal : null;
                         $tz = $source->city?->timezone ?? config('app.timezone', 'UTC');
                         $statusColor = match ($latestStatus) {
                             'success' => 'green',
@@ -88,6 +90,16 @@
                                         </flux:link>
                                     @endif
                                 </div>
+                                @if ($sourceNeedsUpdate)
+                                    <div class="flex flex-wrap items-center gap-2 pt-1">
+                                        <flux:badge color="amber" variant="subtle" icon="exclamation-triangle">{{ __('Source needs update') }}</flux:badge>
+                                        @if ($repairProposal)
+                                            <span class="text-xs text-[#5d7168]">{{ $repairProposal['summary'] ?? __('A verified repair is ready.') }}</span>
+                                        @elseif ($source->health_error)
+                                            <span class="line-clamp-2 text-xs text-[#7c5c25]">{{ $source->health_error }}</span>
+                                        @endif
+                                    </div>
+                                @endif
                             </div>
                         </flux:table.cell>
                         <flux:table.cell>{{ $source->city?->name ?? __('Unknown') }}</flux:table.cell>
@@ -104,6 +116,8 @@
                                     <flux:text variant="subtle">
                                         {{ $latestStatus === 'queued' ? __('Queued') : __('Running') }}
                                     </flux:text>
+                                @elseif ($sourceNeedsUpdate)
+                                    <flux:badge color="amber" variant="subtle">{{ __('Source invalid') }}</flux:badge>
                                 @elseif ($latestStatus === 'failed')
                                     <flux:badge color="red" variant="subtle">{{ __('Failed') }}</flux:badge>
                                 @elseif ($lastRunAt)
@@ -125,6 +139,11 @@
                                         <flux:menu.item :href="route('admin.event-sources.edit', $source)" icon="pencil-square" wire:navigate>
                                             {{ __('Edit') }}
                                         </flux:menu.item>
+                                        @if ($repairProposal)
+                                            <flux:menu.item wire:click="applyRepair({{ $source->id }})" icon="wrench-screwdriver">
+                                                {{ __('Apply verified repair') }}
+                                            </flux:menu.item>
+                                        @endif
                                         <flux:menu.separator />
                                         @if ($isActiveRun)
                                             <flux:menu.item icon="arrow-path" class="pointer-events-none opacity-60">

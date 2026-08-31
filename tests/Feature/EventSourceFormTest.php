@@ -5,6 +5,7 @@ use App\Models\City;
 use App\Models\EventSource;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 
 it('initializes with an empty config string when creating an event source', function () {
@@ -234,4 +235,49 @@ it('template buttons set the expected config', function () {
         ->assertSet('config', $visitWichita)
         ->call('applyTemplate', 'libcal')
         ->assertSet('config', $libcal);
+});
+
+it('previews event extraction before saving', function () {
+    $user = User::factory()->create();
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:form-preview\r\nSUMMARY:City Council\r\nDTSTART:20260910T180000\r\nLOCATION:City Hall\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    Http::fake([
+        'https://example.gov/calendar.ics' => Http::response($ics, 200),
+    ]);
+
+    Livewire::actingAs($user)->test(EventSourceForm::class)
+        ->set('cityId', $city->id)
+        ->set('name', 'City Calendar')
+        ->set('sourceType', 'ics')
+        ->set('sourceUrl', 'https://example.gov/calendar.ics')
+        ->set('config', '{"timezone":"America/Chicago"}')
+        ->call('previewSource')
+        ->assertSet('previewValid', true)
+        ->assertSee('City Council');
+});
+
+it('clears stale health repair state when an event source is edited', function () {
+    $user = User::factory()->create();
+    $source = EventSource::factory()->create([
+        'source_type' => 'ics',
+        'source_url' => 'https://example.gov/calendar.ics',
+        'config' => ['timezone' => null],
+        'health_status' => 'unhealthy',
+        'health_checked_at' => now(),
+        'health_error' => 'Old extraction failed.',
+        'repair_proposal' => ['kind' => 'event', 'type' => 'ics'],
+    ]);
+
+    Livewire::actingAs($user)->test(EventSourceForm::class, ['source' => $source])
+        ->set('name', 'Updated calendar')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $source->refresh();
+
+    expect($source->health_status)->toBe('unknown')
+        ->and($source->health_checked_at)->toBeNull()
+        ->and($source->health_error)->toBeNull()
+        ->and($source->repair_proposal)->toBeNull();
 });

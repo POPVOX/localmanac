@@ -184,6 +184,38 @@ it('stores super admin raw JSON config as array', function () {
         ]);
 });
 
+it('persists active state and clears stale health repair state when edited', function () {
+    $user = User::factory()->superAdmin()->create();
+    $city = City::factory()->create();
+    $scraper = Scraper::create([
+        'city_id' => $city->id,
+        'name' => 'Health check source',
+        'slug' => 'health-check-source',
+        'type' => 'rss',
+        'source_url' => 'https://example.gov/news.rss',
+        'config' => ['feed_url' => 'https://example.gov/news.rss'],
+        'frequency' => 'daily',
+        'is_enabled' => true,
+        'health_status' => 'unhealthy',
+        'health_checked_at' => now(),
+        'health_error' => 'Old selector failed.',
+        'repair_proposal' => ['kind' => 'article', 'type' => 'rss'],
+    ]);
+
+    Livewire::actingAs($user)->test(ScraperForm::class, ['scraper' => $scraper])
+        ->set('isActive', false)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $scraper->refresh();
+
+    expect($scraper->is_enabled)->toBeFalse()
+        ->and($scraper->health_status)->toBe('unknown')
+        ->and($scraper->health_checked_at)->toBeNull()
+        ->and($scraper->health_error)->toBeNull()
+        ->and($scraper->repair_proposal)->toBeNull();
+});
+
 it('defaults run at time when left blank', function () {
     $user = User::factory()->superAdmin()->create();
     $city = City::create(['name' => 'Default City', 'slug' => 'default-city']);
