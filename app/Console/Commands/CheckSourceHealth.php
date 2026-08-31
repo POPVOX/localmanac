@@ -12,6 +12,7 @@ class CheckSourceHealth extends Command
     protected $signature = 'sources:check-health
                             {--stale-hours=24 : Recheck sources not checked within this many hours}
                             {--limit=25 : Maximum article and event sources to check per run}
+                            {--include-inactive : Include paused sources so legacy failures can receive repair proposals}
                             {--all : Ignore the health check age}';
 
     protected $description = 'Preview ingestion sources and generate verified repair proposals for failures.';
@@ -21,12 +22,13 @@ class CheckSourceHealth extends Command
         $limit = max(1, (int) $this->option('limit'));
         $cutoff = now()->subHours(max(1, (int) $this->option('stale-hours')));
         $all = (bool) $this->option('all');
+        $includeInactive = (bool) $this->option('include-inactive');
         $checked = 0;
         $unhealthy = 0;
         $proposals = 0;
 
         $scrapers = Scraper::query()
-            ->where('is_enabled', true)
+            ->when(! $includeInactive, fn ($query) => $query->where('is_enabled', true))
             ->when(! $all, fn ($query) => $query->where(fn ($nested) => $nested
                 ->whereNull('health_checked_at')
                 ->orWhere('health_checked_at', '<', $cutoff)))
@@ -42,7 +44,7 @@ class CheckSourceHealth extends Command
         }
 
         $eventSources = EventSource::query()
-            ->where('is_active', true)
+            ->when(! $includeInactive, fn ($query) => $query->where('is_active', true))
             ->when(! $all, fn ($query) => $query->where(fn ($nested) => $nested
                 ->whereNull('health_checked_at')
                 ->orWhere('health_checked_at', '<', $cutoff)))

@@ -7,7 +7,9 @@ use App\Models\ChatSource;
 use App\Models\ChatSourceIngestionRun;
 use App\Services\Chat\Ingestion\ChatSourceIngestionRunner;
 use Illuminate\Contracts\View\View;
+use Illuminate\Http\RedirectResponse;
 use Livewire\Component;
+use Livewire\Features\SupportRedirects\Redirector;
 use Throwable;
 
 class Show extends Component
@@ -83,6 +85,25 @@ class Show extends Component
             report($exception);
 
             $this->dispatchToast(__('Queue failed'), __('We could not queue this run.'), 'danger');
+        }
+    }
+
+    public function deleteSource(): RedirectResponse|Redirector|null
+    {
+        try {
+            $sourceName = $this->source->name;
+            $this->source->delete();
+
+            return redirect()->route('admin.sources.index')->with('toast', [
+                'heading' => __('Source deleted'),
+                'message' => __(':name, its run history, and its indexed answer pages were removed.', ['name' => $sourceName]),
+                'variant' => 'success',
+            ]);
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->dispatchToast(__('Delete failed'), __('We could not delete this source.'), 'danger');
+
+            return null;
         }
     }
 

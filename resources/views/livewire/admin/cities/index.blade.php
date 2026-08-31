@@ -18,6 +18,7 @@
                 $sourceCount = $city->article_sources_count + $city->event_sources_count + $city->chat_sources_count;
                 $activeSourceCount = $city->active_article_sources_count + $city->active_event_sources_count + $city->active_chat_sources_count;
                 $healthIssues = $city->unhealthy_article_sources_count + $city->unhealthy_event_sources_count;
+                $accessCodeCount = $city->active_access_codes_count + ($city->hasLegacyChatAccessCode() ? 1 : 0);
             @endphp
             <article class="admin-location-card flex flex-col" wire:key="city-{{ $city->id }}">
                 <div class="flex items-start justify-between gap-4">
@@ -41,13 +42,14 @@
 
                 <div class="mt-4 flex items-center justify-between gap-3 text-xs text-[#718078]">
                     <span>{{ trans_choice(':count organization|:count organizations', $city->organizations_count, ['count' => $city->organizations_count]) }}</span>
-                    <span class="inline-flex items-center gap-1.5"><span class="size-2 rounded-full {{ $city->hasChatAccessCode() ? 'bg-emerald-500' : 'bg-zinc-300' }}"></span>{{ $city->hasChatAccessCode() ? __('Chat enabled') : __('No chat code') }}</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="size-2 rounded-full {{ $accessCodeCount > 0 ? 'bg-emerald-500' : 'bg-zinc-300' }}"></span>{{ $accessCodeCount > 0 ? trans_choice(':count active code|:count active codes', $accessCodeCount, ['count' => $accessCodeCount]) : __('No access codes') }}</span>
                 </div>
 
                 <div class="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-[#e1dfd7] pt-4">
                     <flux:button size="sm" variant="subtle" :href="route('admin.dashboard', ['cityId' => $city->id])" wire:navigate>{{ __('Open dashboard') }}</flux:button>
                     <div class="flex gap-1">
                         <flux:button size="sm" variant="ghost" :href="route('admin.cities.preview', $city)" icon="arrow-top-right-on-square" target="_blank" rel="noopener noreferrer">{{ __('Preview') }}</flux:button>
+                        <flux:button size="sm" variant="ghost" :href="route('admin.cities.access-codes', $city)" wire:navigate>{{ __('Codes') }}</flux:button>
                         <flux:button size="sm" variant="ghost" :href="route('admin.cities.edit', $city)" wire:navigate>{{ __('Settings') }}</flux:button>
                     </div>
                 </div>

@@ -96,6 +96,11 @@
                                 'unhealthy' => 'amber',
                                 default => 'zinc',
                             };
+                            $deleteConfirmation = match ($source['kind']) {
+                                'article' => __('Delete this article source? Its setup and run history will be removed. Published articles will remain.'),
+                                'event' => __('Delete this event source? Its setup and run history will be removed. Published events will remain.'),
+                                default => __('Delete this answer source? Its setup, run history, and indexed answer pages will be permanently removed.'),
+                            };
                         @endphp
                         <flux:table.row :key="$source['key']">
                             <flux:table.cell variant="strong" sticky>
@@ -119,8 +124,28 @@
                             </flux:table.cell>
                             <flux:table.cell align="end">
                                 <div class="flex justify-end gap-1">
-                                    <flux:button size="sm" variant="ghost" :href="$source['show_route']" wire:navigate>{{ __('Open') }}</flux:button>
                                     <flux:button size="sm" variant="ghost" :href="$source['edit_route']" wire:navigate>{{ __('Edit') }}</flux:button>
+                                    <flux:button
+                                        size="sm"
+                                        variant="ghost"
+                                        icon="arrow-path"
+                                        wire:click="retrySource('{{ $source['kind'] }}', {{ $source['id'] }})"
+                                        wire:loading.attr="disabled"
+                                        wire:target="retrySource('{{ $source['kind'] }}', {{ $source['id'] }})"
+                                    >
+                                        <span wire:loading.remove wire:target="retrySource('{{ $source['kind'] }}', {{ $source['id'] }})">{{ __('Retry') }}</span>
+                                        <span wire:loading wire:target="retrySource('{{ $source['kind'] }}', {{ $source['id'] }})">{{ __('Queueing…') }}</span>
+                                    </flux:button>
+                                    <flux:button
+                                        size="sm"
+                                        variant="danger"
+                                        icon="trash"
+                                        aria-label="{{ __('Delete :name', ['name' => $source['name']]) }}"
+                                        wire:click="deleteSource('{{ $source['kind'] }}', {{ $source['id'] }})"
+                                        wire:confirm="{{ $deleteConfirmation }}"
+                                        wire:loading.attr="disabled"
+                                        wire:target="deleteSource('{{ $source['kind'] }}', {{ $source['id'] }})"
+                                    />
                                 </div>
                             </flux:table.cell>
                         </flux:table.row>

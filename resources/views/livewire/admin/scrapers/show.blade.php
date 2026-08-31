@@ -29,6 +29,16 @@
                 {{ __('Edit') }}
             </flux:button>
             <flux:button
+                variant="danger"
+                icon="trash"
+                wire:click="deleteSource"
+                wire:confirm="{{ __('Delete this article source? Its setup and run history will be removed. Published articles will remain.') }}"
+                wire:loading.attr="disabled"
+                wire:target="deleteSource"
+            >
+                {{ __('Delete') }}
+            </flux:button>
+            <flux:button
                 variant="{{ $scraper->is_enabled ? 'ghost' : 'primary' }}"
                 wire:click="toggleActive"
                 wire:loading.attr="disabled"
@@ -52,6 +62,8 @@
                         {{ __('Queued...') }}
                     @elseif ($latestStatus === 'running')
                         {{ __('Running...') }}
+                    @elseif ($latestStatus === 'failed')
+                        {{ __('Retry now') }}
                     @else
                         {{ __('Run scraper now') }}
                     @endif

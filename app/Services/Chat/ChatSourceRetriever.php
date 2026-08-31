@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Laravel\Ai\Reranking;
 use Throwable;
 
@@ -212,13 +213,29 @@ class ChatSourceRetriever
             return [];
         }
 
-        $results = ChatSourceChunk::query()
-            ->whereHas('page.source', fn (EloquentBuilder $b) => $b->whereIn('id', $sourceIds)->where('is_active', true))
-            ->whereNotNull('embedding')
-            ->whereVectorSimilarTo('embedding', $question)
-            ->with(['page:id,chat_source_id,url,canonical_url,title,content_type', 'page.source:id,name'])
-            ->limit($limit)
-            ->get();
+        try {
+            $query = ChatSourceChunk::query()
+                ->whereHas('page.source', fn (EloquentBuilder $b) => $b->whereIn('id', $sourceIds)->where('is_active', true))
+                ->whereNotNull('embedding');
+
+            if (! (clone $query)->exists()) {
+                return [];
+            }
+
+            $results = $query
+                ->whereVectorSimilarTo('embedding', $question)
+                ->with(['page:id,chat_source_id,url,canonical_url,title,content_type', 'page.source:id,name'])
+                ->limit($limit)
+                ->get();
+        } catch (Throwable $exception) {
+            Log::warning('chat.vector_search.failed', [
+                'index' => 'chat_sources',
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [];
+        }
 
         return $results->map(fn (ChatSourceChunk $chunk) => $this->mapChunkRow($chunk))->all();
     }
@@ -257,13 +274,30 @@ class ChatSourceRetriever
             return [];
         }
 
-        $results = ArticleChunk::query()
-            ->whereHas('article', fn (EloquentBuilder $b) => $b->where('city_id', $cityId)->where('status', 'published'))
-            ->whereNotNull('embedding')
-            ->whereVectorSimilarTo('embedding', $question)
-            ->with(['article:id,title,city_id,summary', 'article.sources', 'article.explainer'])
-            ->limit($limit)
-            ->get();
+        try {
+            $query = ArticleChunk::query()
+                ->whereHas('article', fn (EloquentBuilder $b) => $b->where('city_id', $cityId)->where('status', 'published'))
+                ->whereNotNull('embedding');
+
+            if (! (clone $query)->exists()) {
+                return [];
+            }
+
+            $results = $query
+                ->whereVectorSimilarTo('embedding', $question)
+                ->with(['article:id,title,city_id,summary', 'article.sources', 'article.explainer'])
+                ->limit($limit)
+                ->get();
+        } catch (Throwable $exception) {
+            Log::warning('chat.vector_search.failed', [
+                'index' => 'articles',
+                'city_id' => $cityId,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [];
+        }
 
         return $results->map(fn (ArticleChunk $chunk) => $this->mapArticleChunkEvidence($chunk))->all();
     }

@@ -58,8 +58,15 @@ class RssEventsFetcher implements EventSourceFetcher
             $description = $this->extractDescription($item);
             $pubDate = $this->stringValue($item->pubDate ?? ($item->updated ?? ''));
             $guid = $this->stringValue($item->guid ?? '');
+            $calendarDate = $this->calendarEventField($item, 'EventDates');
+            $calendarTime = $this->calendarEventField($item, 'EventTimes');
+            $calendarLocation = $this->normalizeCalendarText($this->calendarEventField($item, 'Location'));
 
             $dateResult = $this->extractDateFromConfig($dateConfig, $title, $description, $timezone);
+
+            if (! $dateResult && $calendarDate !== '') {
+                $dateResult = $this->dateParser->parse($calendarDate, $calendarTime, $timezone);
+            }
 
             if (! $dateResult && $pubDate !== '') {
                 $dateResult = $this->fallbackPubDate($pubDate, $timezone);
@@ -79,7 +86,7 @@ class RssEventsFetcher implements EventSourceFetcher
                 startsAt: $startsAt,
                 endsAt: $endsAt,
                 allDay: $allDay,
-                locationName: null,
+                locationName: $calendarLocation !== '' ? $calendarLocation : null,
                 locationAddress: null,
                 description: $description ?: null,
                 eventUrl: $eventUrl,
@@ -91,6 +98,9 @@ class RssEventsFetcher implements EventSourceFetcher
                     'description' => $description,
                     'pub_date' => $pubDate,
                     'guid' => $guid,
+                    'event_dates' => $calendarDate,
+                    'event_times' => $calendarTime,
+                    'location' => $calendarLocation,
                 ],
             );
         }
@@ -104,11 +114,11 @@ class RssEventsFetcher implements EventSourceFetcher
     private function extractItems(SimpleXMLElement $xml): array
     {
         if (isset($xml->channel->item)) {
-            return iterator_to_array($xml->channel->item);
+            return iterator_to_array($xml->channel->item, false);
         }
 
         if (isset($xml->entry)) {
-            return iterator_to_array($xml->entry);
+            return iterator_to_array($xml->entry, false);
         }
 
         return [];
@@ -145,6 +155,37 @@ class RssEventsFetcher implements EventSourceFetcher
         $encoded = $this->stringValue($content->encoded ?? '');
 
         return $encoded;
+    }
+
+    private function calendarEventField(SimpleXMLElement $item, string $field): string
+    {
+        foreach ($item->getNamespaces(true) as $prefix => $namespace) {
+            if (! str_contains(mb_strtolower($prefix.' '.$namespace), 'calendar')) {
+                continue;
+            }
+
+            $children = $item->children($namespace);
+            $value = $this->stringValue($children->{$field} ?? '');
+
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return '';
+    }
+
+    private function normalizeCalendarText(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        $value = preg_replace('/<br\s*\/?\s*>/i', ', ', $value) ?? $value;
+        $value = html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = preg_replace('/(?<=[a-z])(?=[A-Z][a-z]+,\s*[A-Z]{2}\b)/u', ', ', $value) ?? $value;
+
+        return trim(preg_replace('/\s+/', ' ', $value) ?? '');
     }
 
     /**

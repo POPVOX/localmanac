@@ -107,14 +107,14 @@ class EventSourceConfigDrafter
     private function inferJsonMapping(array $item): array
     {
         $aliases = [
-            'title' => ['title', 'name', 'summary'],
-            'starts_at' => ['starts_at', 'start.dateTime', 'start.date', 'start_time', 'start_date', 'startDate', 'startDateTime', 'dtstart', 'start'],
-            'ends_at' => ['ends_at', 'end.dateTime', 'end.date', 'end_time', 'end_date', 'endDate', 'endDateTime', 'dtend', 'end'],
-            'location_name' => ['location_name', 'location.name', 'venue.name', 'location', 'venue'],
+            'title' => ['title', 'name', 'summary', 'Title', 'Name', 'Summary'],
+            'starts_at' => ['starts_at', 'start.dateTime', 'start.date', 'start_time', 'start_date', 'startDate', 'startDateTime', 'dtstart', 'start', 'StartDateTime', 'MeetingDateTime', 'MeetingDate'],
+            'ends_at' => ['ends_at', 'end.dateTime', 'end.date', 'end_time', 'end_date', 'endDate', 'endDateTime', 'dtend', 'end', 'EndDateTime'],
+            'location_name' => ['location_name', 'location.name', 'venue.name', 'location', 'venue', 'Location', 'MeetingLocation'],
             'location_address' => ['location_address', 'location.address', 'venue.address'],
             'description' => ['description', 'details', 'body'],
-            'event_url' => ['event_url', 'url', 'link'],
-            'external_id' => ['external_id', 'id', 'uid'],
+            'event_url' => ['event_url', 'url', 'link', 'URL', 'Link'],
+            'external_id' => ['external_id', 'id', 'uid', 'Id', 'ID', 'UID'],
             'all_day' => ['all_day', 'allDay'],
         ];
 

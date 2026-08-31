@@ -29,8 +29,13 @@ return [
     'retrieval_max_evidence_per_source' => (int) env('CHAT_RETRIEVAL_MAX_EVIDENCE_PER_SOURCE', 3),
     'vector_enabled' => (bool) env('CHAT_VECTOR_ENABLED', true),
     'fts_enabled' => (bool) env('CHAT_FTS_ENABLED', true),
-    'query_expansion_enabled' => (bool) env('CHAT_QUERY_EXPANSION_ENABLED', true),
+    // Query expansion is an optional second model call. Keep the interactive
+    // request on one model round trip unless an installation opts in.
+    'query_expansion_enabled' => (bool) env('CHAT_QUERY_EXPANSION_ENABLED', false),
     'query_expansion_provider' => env('CHAT_QUERY_EXPANSION_PROVIDER', null),
+    // Quality judging is evaluation telemetry, not part of the user answer. It
+    // must not add another synchronous provider call to every chat request.
+    'answer_quality_enabled' => (bool) env('CHAT_ANSWER_QUALITY_ENABLED', false),
     'article_chunks_enabled' => (bool) env('CHAT_ARTICLE_CHUNKS_ENABLED', true),
     'reranking_enabled' => (bool) env('CHAT_RERANKING_ENABLED', true),
     'reranking_provider' => env('CHAT_RERANKING_PROVIDER', 'cohere'),

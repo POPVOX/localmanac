@@ -5,6 +5,7 @@ use App\Http\Controllers\HomeController;
 use App\Livewire\Admin\ChatSources\Form as ChatSourcesForm;
 use App\Livewire\Admin\ChatSources\Index as ChatSourcesIndex;
 use App\Livewire\Admin\ChatSources\Show as ChatSourcesShow;
+use App\Livewire\Admin\Cities\AccessCodes as CityAccessCodes;
 use App\Livewire\Admin\Cities\Form as CitiesForm;
 use App\Livewire\Admin\Cities\Index as CitiesIndex;
 use App\Livewire\Admin\Dashboard as AdminDashboard;
@@ -67,6 +68,7 @@ Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
         Route::get('cities/create', CitiesForm::class)->name('cities.create');
         Route::get('cities/{city:slug}/preview', UserDashboard::class)->name('cities.preview');
         Route::get('cities/{city:slug}/calendar', DemoCalendar::class)->name('cities.calendar');
+        Route::get('cities/{city}/access-codes', CityAccessCodes::class)->name('cities.access-codes');
         Route::get('cities/{city}/edit', CitiesForm::class)->name('cities.edit');
 
         Route::get('organizations', OrganizationsIndex::class)->name('organizations.index');

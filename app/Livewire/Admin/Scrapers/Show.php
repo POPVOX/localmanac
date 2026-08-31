@@ -7,7 +7,9 @@ use App\Models\Scraper;
 use App\Models\ScraperRun;
 use App\Services\Ingestion\ScrapeRunner;
 use Illuminate\Contracts\View\View;
+use Illuminate\Http\RedirectResponse;
 use Livewire\Component;
+use Livewire\Features\SupportRedirects\Redirector;
 use Throwable;
 
 class Show extends Component
@@ -88,6 +90,25 @@ class Show extends Component
             report($exception);
 
             $this->dispatchToast(__('Queue failed'), __('We could not queue this run.'), 'danger');
+        }
+    }
+
+    public function deleteSource(): RedirectResponse|Redirector|null
+    {
+        try {
+            $sourceName = $this->scraper->name;
+            $this->scraper->delete();
+
+            return redirect()->route('admin.sources.index')->with('toast', [
+                'heading' => __('Source deleted'),
+                'message' => __(':name and its run history were removed. Published articles were kept.', ['name' => $sourceName]),
+                'variant' => 'success',
+            ]);
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->dispatchToast(__('Delete failed'), __('We could not delete this source.'), 'danger');
+
+            return null;
         }
     }
 

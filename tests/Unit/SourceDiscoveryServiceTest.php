@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\Ingestion\Assistant\SourceDiscoveryService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -8,6 +9,10 @@ uses(TestCase::class);
 
 beforeEach(function () {
     config()->set('scraper-assistant.ai.refine_enabled', false);
+});
+
+afterEach(function () {
+    Carbon::setTestNow();
 });
 
 it('discovers an article feed from a public news page', function () {
@@ -103,4 +108,95 @@ it('inspects a discovered json endpoint before drafting its event mapping', func
         ->and(data_get($result, 'config.json.mapping.starts_at'))->toBe('start.dateTime')
         ->and(data_get($result, 'config.json.mapping.location_name'))->toBe('venue.name')
         ->and(data_get($result, 'config.json.mapping.location_address'))->toBe('venue.address');
+});
+
+it('follows a CivicPlus calendar subscription page to its aggregate event feed', function () {
+    $calendarPage = <<<'HTML'
+        <!doctype html><html><head><title>Calendar • Madison County, TN • CivicEngage</title></head><body>
+        <main id="CalendarContent">
+            <h1>Calendar</h1>
+            <a href="/rss.aspx#calendar" aria-label="View RSS Feeds for Calendar">View RSS Feeds</a>
+            <a href="/iCalendar.aspx">Subscribe to iCalendar</a>
+        </main>
+        <footer>Government Websites by CivicPlus</footer>
+        </body></html>
+        HTML;
+    $rssChooser = <<<'HTML'
+        <!doctype html><html><body>
+        <div class="listing listingIcon calendar" name="calendar">
+            <h2>Calendar</h2>
+            <a href="/RSSFeed.aspx?ModID=58&amp;CID=All-calendar.xml">All</a>
+            <a href="/RSSFeed.aspx?ModID=58&amp;CID=County-Commission-24">County Commission</a>
+        </div>
+        </body></html>
+        HTML;
+    $feed = <<<'XML'
+        <?xml version="1.0"?><rss version="2.0" xmlns:calendarEvent="https://madison.example.gov/Calendar.aspx"><channel>
+        <title>Madison County, TN - Calendar</title><description>Get the latest events</description>
+        <item><title>Long Range Planning Committee</title>
+        <link>https://madison.example.gov/Calendar.aspx?EID=3917</link>
+        <pubDate>Wed, 26 Aug 2026 15:19:37 -0600</pubDate>
+        <description>Event date: September 1, 2026 Event Time: 02:00 PM - 03:30 PM</description>
+        <calendarEvent:EventDates>September 1, 2026</calendarEvent:EventDates>
+        <calendarEvent:EventTimes>02:00 PM - 03:30 PM</calendarEvent:EventTimes>
+        </item></channel></rss>
+        XML;
+
+    Http::fake([
+        'https://madison.example.gov/calendar.aspx*' => Http::response($calendarPage, 200, ['Content-Type' => 'text/html']),
+        'https://madison.example.gov/rss.aspx*' => Http::response($rssChooser, 200, ['Content-Type' => 'text/html']),
+        'https://madison.example.gov/RSSFeed.aspx*' => Http::response($feed, 200, ['Content-Type' => 'text/xml']),
+    ]);
+
+    $result = app(SourceDiscoveryService::class)->discover('https://madison.example.gov/calendar.aspx?');
+
+    expect($result['kind'])->toBe('event')
+        ->and($result['type'])->toBe('rss')
+        ->and($result['source_url'])->toBe('https://madison.example.gov/RSSFeed.aspx?ModID=58&CID=All-calendar.xml')
+        ->and($result['name'])->toBe('Madison County, TN - Calendar')
+        ->and($result['endpoints'][0]['label'])->toBe('Event feed');
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://madison.example.gov/rss.aspx');
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://madison.example.gov/RSSFeed.aspx?ModID=58&CID=All-calendar.xml');
+});
+
+it('discovers the CivicWeb meetings api instead of scraping its empty calendar shell', function () {
+    Carbon::setTestNow(Carbon::parse('2026-08-31 12:00:00', 'America/Chicago'));
+
+    $portal = <<<'HTML'
+        <!doctype html><html><head><title>City of Lawrence - Meeting Schedule</title></head><body>
+        <a href="/Portal/MeetingSchedule.aspx">Calendar</a>
+        <div class="upcoming-meeting-list">Loading...</div>
+        <script>Portal.MeetingCalendarPage.createInstance({});</script>
+        </body></html>
+        HTML;
+    $meetings = [[
+        'ExternalCalendar' => false,
+        'Id' => 6109,
+        'MeetingDate' => '2026-09-01',
+        'MeetingDateTime' => '2026-09-01 17:45',
+        'MeetingLocation' => 'City Commission Room',
+        'Name' => 'City Commission - Sep 01 2026',
+    ]];
+
+    Http::fake([
+        'https://lawrenceks.civicweb.net/portal/' => Http::response($portal, 200, ['Content-Type' => 'text/html']),
+        'https://lawrenceks.civicweb.net/Services/MeetingsService.svc/meetings*' => Http::response($meetings, 200, ['Content-Type' => 'application/json']),
+    ]);
+
+    $result = app(SourceDiscoveryService::class)->discover('https://lawrenceks.civicweb.net/portal/');
+
+    expect($result['kind'])->toBe('event')
+        ->and($result['type'])->toBe('json_api')
+        ->and($result['source_url'])->toBe('https://lawrenceks.civicweb.net/Services/MeetingsService.svc/meetings')
+        ->and(data_get($result, 'config.json.root_path'))->toBe('')
+        ->and(data_get($result, 'config.json.url_template'))->toBe('https://lawrenceks.civicweb.net/Services/MeetingsService.svc/meetings?month={month}&year={year}&surroundingmonths=0')
+        ->and(data_get($result, 'config.json.event_url_template'))->toBe('https://lawrenceks.civicweb.net/Portal/MeetingInformation.aspx?Org=Cal&Id={Id}')
+        ->and(data_get($result, 'config.json.months_forward'))->toBe(12)
+        ->and(data_get($result, 'config.json.mapping.title'))->toBe('Name')
+        ->and(data_get($result, 'config.json.mapping.starts_at'))->toBe('MeetingDateTime')
+        ->and(data_get($result, 'config.json.mapping.location_name'))->toBe('MeetingLocation')
+        ->and(data_get($result, 'config.json.mapping.external_id'))->toBe('Id');
+
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://lawrenceks.civicweb.net/Services/MeetingsService.svc/meetings?month=8&year=2026&surroundingmonths=0');
 });

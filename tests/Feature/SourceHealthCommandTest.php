@@ -37,3 +37,27 @@ it('checks stale active article and event sources in the background command', fu
         ->expectsOutput('Checked 2 sources; 1 unhealthy; 1 verified repair proposals.')
         ->assertSuccessful();
 });
+
+it('can include inactive legacy failures when generating repair proposals', function () {
+    $city = City::factory()->create();
+    $eventSource = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'is_active' => false,
+        'health_checked_at' => null,
+    ]);
+
+    $checker = Mockery::mock(SourceHealthChecker::class);
+    $checker->shouldReceive('checkScraper')->never();
+    $checker->shouldReceive('checkEventSource')
+        ->once()
+        ->withArgs(fn (EventSource $value) => $value->is($eventSource))
+        ->andReturn(['status' => 'unhealthy', 'proposal' => true, 'error' => 'Changed endpoint']);
+    app()->instance(SourceHealthChecker::class, $checker);
+
+    $this->artisan('sources:check-health', [
+        '--limit' => 10,
+        '--include-inactive' => true,
+    ])
+        ->expectsOutput('Checked 1 sources; 1 unhealthy; 1 verified repair proposals.')
+        ->assertSuccessful();
+});

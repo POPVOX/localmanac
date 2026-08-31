@@ -93,6 +93,59 @@ it('parses rss feeds into event dtos', function () {
         ->and($events[0]->allDay)->toBeTrue();
 });
 
+it('parses every CivicPlus RSS item using event dates times and locations', function () {
+    $rss = <<<'XML'
+        <?xml version="1.0"?><rss version="2.0" xmlns:calendarEvent="https://madisoncountytn.gov/Calendar.aspx"><channel>
+        <title>Madison County, TN - Calendar</title>
+        <item><title>Long Range Planning Committee</title>
+        <link>https://madisoncountytn.gov/Calendar.aspx?EID=3917</link>
+        <pubDate>Wed, 26 Aug 2026 15:19:37 -0600</pubDate>
+        <description>&lt;strong&gt;Event date:&lt;/strong&gt; September 1, 2026</description>
+        <calendarEvent:EventDates>September 1, 2026</calendarEvent:EventDates>
+        <calendarEvent:EventTimes>02:00 PM - 03:30 PM</calendarEvent:EventTimes>
+        <calendarEvent:Location>310 N Parkway&lt;br&gt;Board RoomJackson, TN 38305</calendarEvent:Location>
+        <guid>event-3917</guid></item>
+        <item><title>Labor Day offices closed</title>
+        <link>https://madisoncountytn.gov/Calendar.aspx?EID=3916</link>
+        <pubDate>Mon, 24 Aug 2026 14:18:29 -0600</pubDate>
+        <calendarEvent:EventDates>September 7, 2026</calendarEvent:EventDates>
+        <calendarEvent:EventTimes>12:01 AM - 11:59 PM</calendarEvent:EventTimes>
+        <calendarEvent:Location>Jackson, TN 38301</calendarEvent:Location>
+        <guid>event-3916</guid></item>
+        <item><title>Property Committee</title>
+        <link>https://madisoncountytn.gov/Calendar.aspx?EID=3918</link>
+        <pubDate>Wed, 26 Aug 2026 15:44:43 -0600</pubDate>
+        <calendarEvent:EventDates>September 8, 2026</calendarEvent:EventDates>
+        <calendarEvent:EventTimes>10:00 AM - 10:55 AM</calendarEvent:EventTimes>
+        <calendarEvent:Location>310 N Parkway&lt;br&gt;Board RoomJackson, TN 38305</calendarEvent:Location>
+        <guid>event-3918</guid></item>
+        </channel></rss>
+        XML;
+
+    Http::fake([
+        'https://www.madisoncountytn.gov/RSSFeed.aspx*' => Http::response($rss, 200, ['Content-Type' => 'text/xml']),
+    ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'rss',
+        'source_url' => 'https://www.madisoncountytn.gov/RSSFeed.aspx?ModID=58&CID=All-calendar.xml',
+        'config' => ['timezone' => 'America/Chicago'],
+    ]);
+
+    $events = (new RssEventsFetcher(new CalendarDateParser, new EventNormalizer))->fetch($source);
+
+    expect($events)->toHaveCount(3)
+        ->and($events[0]->title)->toBe('Long Range Planning Committee')
+        ->and($events[0]->startsAt->format('Y-m-d H:i'))->toBe('2026-09-01 14:00')
+        ->and($events[0]->endsAt?->format('Y-m-d H:i'))->toBe('2026-09-01 15:30')
+        ->and($events[0]->allDay)->toBeFalse()
+        ->and($events[0]->locationName)->toBe('310 N Parkway, Board Room, Jackson, TN 38305')
+        ->and($events[1]->startsAt->format('Y-m-d H:i'))->toBe('2026-09-07 00:01')
+        ->and($events[2]->startsAt->format('Y-m-d H:i'))->toBe('2026-09-08 10:00');
+});
+
 it('parses json api feeds into event dtos', function () {
     $payload = [
         'events' => [
@@ -144,6 +197,54 @@ it('parses json api feeds into event dtos', function () {
     expect($events)->toHaveCount(1)
         ->and($events[0]->title)->toBe('JSON Event')
         ->and($events[0]->locationName)->toBe('Main Library');
+});
+
+it('maps CivicWeb meeting records from its month-based json service', function () {
+    Carbon::setTestNow(Carbon::parse('2026-09-01 09:00:00', 'America/Chicago'));
+
+    Http::fake([
+        'https://lawrenceks.civicweb.net/Services/MeetingsService.svc/meetings*' => Http::response([[
+            'ExternalCalendar' => false,
+            'Id' => 6109,
+            'MeetingDate' => '2026-09-01',
+            'MeetingDateTime' => '2026-09-01 17:45',
+            'MeetingLocation' => 'City Commission Room',
+            'MeetingTime' => '05:45 PM',
+            'Name' => 'City Commission - Sep 01 2026',
+            'Published' => false,
+        ]], 200),
+    ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'json_api',
+        'source_url' => 'https://lawrenceks.civicweb.net/Services/MeetingsService.svc/meetings',
+        'config' => [
+            'json' => [
+                'root_path' => '',
+                'url_template' => 'https://lawrenceks.civicweb.net/Services/MeetingsService.svc/meetings?month={month}&year={year}&surroundingmonths=0',
+                'event_url_template' => 'https://lawrenceks.civicweb.net/Portal/MeetingInformation.aspx?Org=Cal&Id={Id}',
+                'months_forward' => 1,
+                'start_month' => 'current',
+                'mapping' => [
+                    'title' => 'Name',
+                    'starts_at' => 'MeetingDateTime',
+                    'location_name' => 'MeetingLocation',
+                    'external_id' => 'Id',
+                ],
+            ],
+        ],
+    ]);
+
+    $events = (new JsonApiFetcher(new CalendarDateParser, new EventNormalizer))->fetch($source);
+
+    expect($events)->toHaveCount(1)
+        ->and($events[0]->title)->toBe('City Commission - Sep 01 2026')
+        ->and($events[0]->startsAt->format('Y-m-d H:i'))->toBe('2026-09-01 17:45')
+        ->and($events[0]->locationName)->toBe('City Commission Room')
+        ->and($events[0]->externalId)->toBe('6109')
+        ->and($events[0]->eventUrl)->toBe('https://lawrenceks.civicweb.net/Portal/MeetingInformation.aspx?Org=Cal&Id=6109');
 });
 
 it('parses Visit Wichita simpleview json into event dtos', function () {

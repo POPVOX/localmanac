@@ -13,6 +13,7 @@ class CityOverviewQuery
         return City::query()
             ->withCount([
                 'organizations',
+                'accessCodes as active_access_codes_count' => fn (Builder $query) => $query->available(),
                 'scrapers as article_sources_count',
                 'scrapers as active_article_sources_count' => fn (Builder $query) => $query->where('is_enabled', true),
                 'scrapers as unhealthy_article_sources_count' => fn (Builder $query) => $query->where('health_status', 'unhealthy'),

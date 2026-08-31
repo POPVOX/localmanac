@@ -80,6 +80,10 @@ class EventSourcePreviewer
             data_set($config, 'detail.max_detail_fetches', min((int) data_get($config, 'detail.max_detail_fetches', 3), 3));
         }
 
+        if (in_array($type, ['json', 'json_api'], true) && (int) data_get($config, 'json.months_forward', 0) > 0) {
+            data_set($config, 'json.months_forward', min((int) data_get($config, 'json.months_forward'), 2));
+        }
+
         return $config;
     }
 }

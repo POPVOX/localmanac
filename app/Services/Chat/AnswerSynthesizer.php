@@ -66,6 +66,19 @@ class AnswerSynthesizer
     ): array {
         $originalQuestion ??= $question;
         $eventContext = $this->resolveEventContext($question, $city);
+
+        if ($this->shouldUseFilteredLocalEventsInFinalAnswer($question, $eventContext)) {
+            return $this->filteredLocalEventResponse(
+                question: $question,
+                city: $city,
+                sources: $sources,
+                eventContext: $eventContext,
+                conversationId: $conversationId,
+                onDelta: $onDelta,
+                originalQuestion: $originalQuestion,
+            );
+        }
+
         $seedEvidence = $this->seedEvidence($sources, $question, $city);
         $seedCitations = $this->citationsFromSeedEvidence($seedEvidence);
         $eventCitations = $this->citationsFromLocalEvents($eventContext['local_events'] ?? []);
@@ -853,7 +866,13 @@ class AnswerSynthesizer
     {
         try {
             $retrieved = $this->chatSourceRetriever->retrieve($sources, $question, $cityId);
-        } catch (\Throwable) {
+        } catch (\Throwable $exception) {
+            Log::warning('chat.retrieval.failed', [
+                'city_id' => $cityId,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
             return [];
         }
 
@@ -1287,6 +1306,68 @@ class AnswerSynthesizer
         }
 
         return false;
+    }
+
+    /**
+     * Meeting answers are already resolved from the city-scoped event table. Do
+     * not spend a second network round trip asking a model (and optional web
+     * search) for an answer that the finalization step would overwrite anyway.
+     *
+     * @param  Collection<int, \App\Models\ChatSource>  $sources
+     * @param  array<string, mixed>  $eventContext
+     * @return array{
+     *     answer: string,
+     *     citations: array<int, array{title: string, source_url: string, type: string}>,
+     *     confidence: float,
+     *     source_mode: string,
+     *     conversation_id: string|null
+     * }
+     */
+    private function filteredLocalEventResponse(
+        string $question,
+        City $city,
+        Collection $sources,
+        array $eventContext,
+        ?string $conversationId,
+        callable $onDelta,
+        string $originalQuestion,
+    ): array {
+        $events = is_array($eventContext['local_events'] ?? null)
+            ? $eventContext['local_events']
+            : [];
+        $hasEvents = (int) ($eventContext['local_total'] ?? 0) > 0 && $events !== [];
+        $answer = $hasEvents
+            ? $this->answerFromLocalEvents($city, $eventContext['window'] ?? null, $events)
+            : $this->noEventsFoundMessage($city, $eventContext['window'] ?? null, $question);
+        $citations = $hasEvents ? $this->citationsFromLocalEvents($events) : [];
+        $confidence = $citations !== [] ? $this->deterministicSourceConfidence() : 0.0;
+        $sourceMode = $citations !== []
+            ? $this->detectSourceModeFromCitations($citations, $sources, $city)
+            : 'none';
+
+        $onDelta($answer);
+
+        $this->logRetrievalDiagnostics(
+            question: $question,
+            originalQuestion: $originalQuestion,
+            city: $city,
+            sources: $sources,
+            seedEvidence: [],
+            alignedEvidence: [],
+            confidence: $confidence,
+            sourceMode: $sourceMode,
+            citations: $citations,
+            droppedCitations: [],
+            answer: $answer,
+        );
+
+        return [
+            'answer' => $answer,
+            'citations' => $citations,
+            'confidence' => $confidence,
+            'source_mode' => $sourceMode,
+            'conversation_id' => $conversationId,
+        ];
     }
 
     /**
@@ -2436,7 +2517,7 @@ class AnswerSynthesizer
     private function noEventsFoundMessage(City $city, ?array $window, string $question = ''): string
     {
         if ($this->isMeetingFocusedEventQuery($question)) {
-            return 'I could not find any upcoming city council or public meetings in the available sources.';
+            return "No upcoming city council or public meetings are currently listed in the available {$city->name} sources.";
         }
 
         $label = is_array($window) && is_string($window['label'] ?? null)
@@ -2444,10 +2525,10 @@ class AnswerSynthesizer
             : 'that time period';
 
         if (! (bool) config('chat.events.no_results_suggest_alternatives', true)) {
-            return "I could not find any events in {$city->name} for {$label}.";
+            return "No events are currently listed in {$city->name} for {$label}.";
         }
 
-        return "I could not find any events in {$city->name} for {$label}. Try asking about the next 7 days or next weekend.";
+        return "No events are currently listed in {$city->name} for {$label}. Try asking about the next 7 days or next weekend.";
     }
 
     private function isMeetingFocusedEventQuery(string $question): bool
@@ -2664,6 +2745,10 @@ class AnswerSynthesizer
      */
     private function judgeAnswerQuality(string $question, string $answer, array $seedEvidence): void
     {
+        if (! (bool) config('chat.answer_quality_enabled', false)) {
+            return;
+        }
+
         try {
             $snippets = collect($seedEvidence)
                 ->pluck('snippet')

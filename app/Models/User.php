@@ -82,6 +82,11 @@ class User extends Authenticatable implements MustVerifyEmail
             || $this->cities()->whereKey($city->getKey())->exists();
     }
 
+    public function cityAccessCodeRedemptions(): HasMany
+    {
+        return $this->hasMany(CityAccessCodeRedemption::class);
+    }
+
     public function siteFeedbackEntries(): HasMany
     {
         return $this->hasMany(SiteFeedback::class);

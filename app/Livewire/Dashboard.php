@@ -7,6 +7,7 @@ use App\Models\City;
 use App\Models\Event;
 use App\Models\IssueArea;
 use App\Models\User;
+use App\Services\Access\CityAccessGrantService;
 use App\Services\Chat\AskService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -180,14 +181,17 @@ class Dashboard extends Component
             return;
         }
 
-        if (! $city->matchesChatAccessCode($this->cityAccessCode)) {
+        $accessCode = $city->matchingChatAccessCode($this->cityAccessCode);
+        $matchesLegacyCode = $city->matchesLegacyChatAccessCode($this->cityAccessCode);
+
+        if (! $accessCode && ! $matchesLegacyCode) {
             RateLimiter::hit($rateLimitKey, 60);
             $this->addError('cityAccessCode', __('That access code is not valid for :city.', ['city' => $city->name]));
 
             return;
         }
 
-        $user->cities()->syncWithoutDetaching([$city->getKey()]);
+        app(CityAccessGrantService::class)->grant($user, $city, $accessCode);
         RateLimiter::clear($rateLimitKey);
         $this->reset('cityAccessCode');
         $this->resetErrorBag('cityAccessCode');

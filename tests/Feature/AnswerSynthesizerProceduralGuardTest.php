@@ -197,6 +197,47 @@ it('keeps exact meeting queries on the event path instead of the procedural fall
         ->toContain('https://www.wichita.gov/AgendaCenter/Wichita-City-Council-Meetings-34');
 });
 
+it('returns an immediate city-scoped meeting empty state without prompting the model', function () {
+    config()->set('chat.events.enabled', true);
+    config()->set('chat.events.intent_mode', 'intent');
+    config()->set('chat.answer_quality_enabled', false);
+
+    $city = City::factory()->create([
+        'name' => 'Lawrence, KS',
+        'slug' => 'lawrence-ks',
+        'timezone' => 'America/Chicago',
+    ]);
+    $user = User::factory()->create();
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Lawrence City Government',
+        'source_url' => 'https://lawrenceks.gov',
+        'is_active' => true,
+    ]);
+    $deltas = [];
+
+    StreamingChatAnswerAgent::fake(['This response must not be used.']);
+
+    $result = app(AnswerSynthesizer::class)->synthesizeStreaming(
+        question: 'What city commission meetings are coming up this week?',
+        city: $city,
+        sources: collect([$source]),
+        user: $user,
+        conversationId: null,
+        onDelta: function (string $delta) use (&$deltas): null {
+            $deltas[] = $delta;
+
+            return null;
+        },
+    );
+
+    expect($result['answer'])->toBe('No upcoming city council or public meetings are currently listed in the available Lawrence, KS sources.')
+        ->and($result['citations'])->toBe([])
+        ->and($deltas)->toBe([$result['answer']]);
+
+    StreamingChatAnswerAgent::assertNeverPrompted();
+});
+
 it('returns a clean civic meetings fallback when only unrelated library events are available', function () {
     config()->set('chat.vector_enabled', false);
     config()->set('chat.tools.web_search.enabled', false);
@@ -239,7 +280,7 @@ it('returns a clean civic meetings fallback when only unrelated library events a
         originalQuestion: $query,
     );
 
-    expect($result['answer'])->toBe('I could not find any upcoming city council or public meetings in the available sources.')
+    expect($result['answer'])->toBe('No upcoming city council or public meetings are currently listed in the available Wichita sources.')
         ->and($result['citations'])->toBe([]);
 });
 

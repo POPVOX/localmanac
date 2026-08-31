@@ -72,7 +72,14 @@ class AskService
                 onDelta: $onDelta,
                 originalQuestion: $question,
             );
-        } catch (\Throwable) {
+        } catch (\Throwable $exception) {
+            Log::warning('chat.answer.streaming_failed', [
+                'city_id' => $city->id,
+                'city_slug' => $city->slug,
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
             $fallback = $this->resolveFallbackResponse($city, $sources);
             $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, 0.0, 'fallback', false, 'streaming_synthesizer_exception');
 

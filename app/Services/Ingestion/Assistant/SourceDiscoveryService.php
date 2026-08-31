@@ -119,6 +119,50 @@ class SourceDiscoveryService
         }
 
         $endpoints = $this->discoverHtmlEndpoints($body, $sourceUrl);
+        $civicPlusEndpoint = $this->discoverCivicPlusCalendarFeed($body, $sourceUrl, $endpoints);
+
+        if ($civicPlusEndpoint !== null) {
+            array_unshift($endpoints, $civicPlusEndpoint);
+            $endpoints = collect($endpoints)
+                ->unique(fn (array $endpoint): string => $endpoint['type'].'|'.$endpoint['url'])
+                ->values()
+                ->all();
+        }
+
+        $civicWebEndpoint = $this->discoverCivicWebMeetingsApi($body, $sourceUrl);
+
+        if ($civicWebEndpoint !== null) {
+            $endpointProbe = $this->probeEndpoint($civicWebEndpoint['probe_url']);
+            $endpointBody = $endpointProbe['body'] ?? '[]';
+            $draft = $this->eventDrafter->draft('json_api', $civicWebEndpoint['url'], $endpointBody);
+            data_set($draft, 'config.json.url_template', $civicWebEndpoint['url_template']);
+            data_set($draft, 'config.json.event_url_template', $civicWebEndpoint['event_url_template']);
+            data_set($draft, 'config.json.months_forward', 12);
+            data_set($draft, 'config.json.start_month', 'current');
+
+            if ($endpointProbe === null) {
+                $warnings[] = 'The CivicWeb meetings endpoint could not be inspected directly. The live preview will verify it.';
+            }
+
+            $name = $this->htmlName($body, $sourceUrl);
+
+            return $this->result(
+                kind: 'event',
+                type: 'json_api',
+                sourceUrl: $civicWebEndpoint['url'],
+                name: Str::contains(mb_strtolower($name), ['meeting', 'calendar']) ? $name : $name.' Meetings',
+                draft: $draft,
+                reasons: ['A CivicWeb meeting calendar API was discovered on the portal.'],
+                endpoints: [[
+                    'url' => $civicWebEndpoint['url'],
+                    'type' => 'json_api',
+                    'label' => 'Meetings API',
+                ]],
+                renderer: $renderer,
+                extraWarnings: $warnings,
+            );
+        }
+
         $eventScore = $this->eventPageScore($body, $sourceUrl);
         $eventEndpoint = collect($endpoints)->first(fn (array $endpoint): bool => in_array($endpoint['type'], ['ics', 'json_api'], true));
         $feedEndpoint = collect($endpoints)->firstWhere('type', 'rss');
@@ -367,10 +411,20 @@ class SourceDiscoveryService
             $endpointType = null;
             $label = '';
 
-            if (str_contains($type, 'text/calendar') || preg_match('/\.(ics|ical)(?:$|[?#])/i', $href) === 1 || str_contains($haystack, 'ical feed')) {
+            if (
+                str_contains($type, 'text/calendar')
+                || preg_match('/\.(ics|ical)(?:$|[?#])/i', $href) === 1
+                || preg_match('~/common/modules/icalendar/icalendar\.aspx(?:$|[?#])~i', $href) === 1
+                || str_contains($haystack, 'ical feed')
+            ) {
                 $endpointType = 'ics';
                 $label = 'Calendar feed';
-            } elseif (str_contains($type, 'rss') || str_contains($type, 'atom') || preg_match('/(?:\/feed\/?$|\.rss(?:$|[?#])|\.xml(?:$|[?#]))/i', $href) === 1) {
+            } elseif (
+                str_contains($type, 'rss')
+                || str_contains($type, 'atom')
+                || preg_match('/(?:\/feed\/?$|\.rss(?:$|[?#])|\.xml(?:$|[?#]))/i', $href) === 1
+                || preg_match('~/rssfeed\.aspx(?:$|[?#])~i', $href) === 1
+            ) {
                 $endpointType = 'rss';
                 $label = Str::contains($haystack, ['event', 'calendar']) ? 'Event feed' : 'Article feed';
             } elseif ((str_contains($type, 'json') || preg_match('/\.json(?:$|[?#])/i', $href) === 1) && Str::contains($haystack, ['event', 'calendar'])) {
@@ -396,6 +450,194 @@ class SourceDiscoveryService
         }
 
         return array_values($endpoints);
+    }
+
+    /**
+     * CivicPlus calendar pages link to an RSS chooser instead of the feed itself.
+     * Follow that single chooser page and prefer its aggregate calendar feed.
+     *
+     * @param  array<int, array{url: string, type: string, label: string}>  $knownEndpoints
+     * @return array{url: string, type: string, label: string}|null
+     */
+    private function discoverCivicPlusCalendarFeed(string $body, string $baseUrl, array $knownEndpoints): ?array
+    {
+        if (
+            collect($knownEndpoints)->contains(fn (array $endpoint): bool => $endpoint['type'] === 'rss' && $this->endpointLooksEventFocused($endpoint))
+            || ! $this->looksLikeCivicPlusCalendarPage($body, $baseUrl)
+        ) {
+            return null;
+        }
+
+        try {
+            $crawler = new Crawler($body, $baseUrl);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $chooserUrl = null;
+
+        foreach ($crawler->filter('a[href]') as $node) {
+            $href = trim((string) $node->getAttribute('href'));
+            $text = mb_strtolower(trim((string) $node->textContent));
+
+            if (
+                preg_match('~(?:^|/)rss\.aspx(?:$|[?#])~i', $href) !== 1
+                || ! Str::contains(mb_strtolower($href.' '.$text), ['rss', 'calendar'])
+            ) {
+                continue;
+            }
+
+            $chooserUrl = $this->resolveUrl($href, $baseUrl);
+
+            if ($chooserUrl !== null && $this->hasSameOrigin($chooserUrl, $baseUrl)) {
+                break;
+            }
+
+            $chooserUrl = null;
+        }
+
+        if ($chooserUrl === null) {
+            return null;
+        }
+
+        $chooserUrl = $this->withoutFragment($chooserUrl);
+        $probe = $this->probeEndpoint($chooserUrl);
+
+        if ($probe === null) {
+            return null;
+        }
+
+        try {
+            $chooser = new Crawler($probe['body'], $probe['url'] ?? $chooserUrl);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $fallback = null;
+
+        foreach ($chooser->filter('a[href]') as $node) {
+            $href = trim((string) $node->getAttribute('href'));
+
+            if (preg_match('~/rssfeed\.aspx(?:$|[?#])~i', $href) !== 1) {
+                continue;
+            }
+
+            $resolved = $this->resolveUrl($href, $chooserUrl);
+
+            if ($resolved === null || ! $this->hasSameOrigin($resolved, $baseUrl)) {
+                continue;
+            }
+
+            $haystack = mb_strtolower($href.' '.trim((string) $node->textContent));
+
+            if (Str::contains($haystack, ['all-calendar.xml', 'all calendar'])) {
+                return [
+                    'url' => $resolved,
+                    'type' => 'rss',
+                    'label' => 'Event feed',
+                ];
+            }
+
+            if ($fallback === null && $this->nodeHasCalendarContext($node)) {
+                $fallback = [
+                    'url' => $resolved,
+                    'type' => 'rss',
+                    'label' => 'Event feed',
+                ];
+            }
+        }
+
+        return $fallback;
+    }
+
+    private function looksLikeCivicPlusCalendarPage(string $body, string $url): bool
+    {
+        $lower = mb_strtolower($body);
+
+        return preg_match('/\/calendar\.aspx(?:$|[?#])/i', $url) === 1
+            && Str::contains($lower, ['civicengage', 'civicplus'])
+            && str_contains($lower, 'rss.aspx');
+    }
+
+    /**
+     * CivicWeb portals render meeting calendars from a public JSON service. The
+     * landing page itself contains only empty calendar shells, so scraping its
+     * HTML can never produce meetings reliably.
+     *
+     * @return array{url: string, url_template: string, probe_url: string, event_url_template: string}|null
+     */
+    private function discoverCivicWebMeetingsApi(string $body, string $baseUrl): ?array
+    {
+        $host = mb_strtolower((string) parse_url($baseUrl, PHP_URL_HOST));
+        $lower = mb_strtolower($body);
+
+        if (
+            ($host === '' || ! str_ends_with($host, '.civicweb.net'))
+            || ! Str::contains($lower, ['/portal/meetingschedule.aspx', 'portal.meetingcalendarpage'])
+        ) {
+            return null;
+        }
+
+        $scheme = mb_strtolower((string) parse_url($baseUrl, PHP_URL_SCHEME));
+
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            return null;
+        }
+
+        $port = parse_url($baseUrl, PHP_URL_PORT);
+        $origin = $scheme.'://'.$host.($port ? ':'.$port : '');
+        $serviceUrl = $origin.'/Services/MeetingsService.svc/meetings';
+        $template = $serviceUrl.'?month={month}&year={year}&surroundingmonths=0';
+        $localNow = now();
+        $probeUrl = $serviceUrl.'?'.http_build_query([
+            'month' => $localNow->format('n'),
+            'year' => $localNow->format('Y'),
+            'surroundingmonths' => 0,
+        ]);
+
+        return [
+            'url' => $serviceUrl,
+            'url_template' => $template,
+            'probe_url' => $probeUrl,
+            'event_url_template' => $origin.'/Portal/MeetingInformation.aspx?Org=Cal&Id={Id}',
+        ];
+    }
+
+    private function nodeHasCalendarContext(\DOMNode $node): bool
+    {
+        $current = $node;
+
+        for ($depth = 0; $depth < 5 && $current !== null; $depth++) {
+            $context = mb_strtolower((string) $current->textContent);
+
+            if ($current instanceof \DOMElement) {
+                $context .= ' '.mb_strtolower(implode(' ', [
+                    $current->getAttribute('id'),
+                    $current->getAttribute('class'),
+                    $current->getAttribute('name'),
+                ]));
+            }
+
+            if (str_contains($context, 'calendar')) {
+                return true;
+            }
+
+            $current = $current->parentNode;
+        }
+
+        return false;
+    }
+
+    private function withoutFragment(string $url): string
+    {
+        return Str::before($url, '#');
+    }
+
+    private function hasSameOrigin(string $url, string $baseUrl): bool
+    {
+        return mb_strtolower((string) parse_url($url, PHP_URL_SCHEME)) === mb_strtolower((string) parse_url($baseUrl, PHP_URL_SCHEME))
+            && mb_strtolower((string) parse_url($url, PHP_URL_HOST)) === mb_strtolower((string) parse_url($baseUrl, PHP_URL_HOST))
+            && parse_url($url, PHP_URL_PORT) === parse_url($baseUrl, PHP_URL_PORT);
     }
 
     private function eventPageScore(string $body, string $url): int

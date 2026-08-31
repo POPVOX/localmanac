@@ -49,22 +49,23 @@
                 helper="{{ __('Use an IANA timezone, such as America/Chicago or America/New_York.') }}"
             />
 
-            <flux:input
-                wire:model="chatAccessCode"
-                :label="__('Chat access code')"
-                type="text"
-                autocomplete="off"
-                placeholder="{{ $city?->hasChatAccessCode() ? __('Leave blank to keep the current code') : __('Set an access code') }}"
-                helper="{{ __('At least 8 characters. The code is stored securely and cannot be displayed later.') }}"
-            />
-
-            @if ($city?->hasChatAccessCode())
-                <flux:checkbox
-                    wire:model="removeChatAccessCode"
-                    :label="__('Remove the current chat access code')"
-                    :description="__('Existing users keep their city access; no new users can unlock chat until another code is set.')"
-                />
-            @endif
+            <section class="rounded-xl border border-[#d9d7ce] bg-[#f8f7f2] p-5">
+                <div class="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                        <flux:heading size="sm">{{ __('Member access codes') }}</flux:heading>
+                        <flux:text variant="subtle" class="mt-1">
+                            {{ $city
+                                ? __('Create named codes for partners and campaigns, then track which code grants each membership.')
+                                : __('Create the location first, then add named access codes for partners and campaigns.') }}
+                        </flux:text>
+                    </div>
+                    @if ($city)
+                        <flux:button variant="subtle" :href="route('admin.cities.access-codes', $city)" wire:navigate>
+                            {{ __('Manage access codes') }}
+                        </flux:button>
+                    @endif
+                </div>
+            </section>
 
             <flux:input
                 wire:model.live="slug"

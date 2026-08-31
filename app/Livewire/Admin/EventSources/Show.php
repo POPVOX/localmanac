@@ -7,8 +7,10 @@ use App\Models\EventIngestionRun;
 use App\Models\EventSource;
 use App\Services\Ingestion\EventIngestionRunner;
 use Illuminate\Contracts\View\View;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Arr;
 use Livewire\Component;
+use Livewire\Features\SupportRedirects\Redirector;
 use Throwable;
 
 class Show extends Component
@@ -96,6 +98,25 @@ class Show extends Component
             report($exception);
 
             $this->dispatchToast(__('Queue failed'), __('We could not queue this run.'), 'danger');
+        }
+    }
+
+    public function deleteSource(): RedirectResponse|Redirector|null
+    {
+        try {
+            $sourceName = $this->source->name;
+            $this->source->delete();
+
+            return redirect()->route('admin.sources.index')->with('toast', [
+                'heading' => __('Source deleted'),
+                'message' => __(':name and its run history were removed. Published events were kept.', ['name' => $sourceName]),
+                'variant' => 'success',
+            ]);
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->dispatchToast(__('Delete failed'), __('We could not delete this source.'), 'danger');
+
+            return null;
         }
     }
 

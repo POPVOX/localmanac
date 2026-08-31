@@ -2,15 +2,27 @@
 
 namespace App\Livewire\Admin\Sources;
 
+use App\Jobs\IngestChatSource;
+use App\Jobs\RunEventSourceIngestion;
+use App\Jobs\RunScraperRun;
 use App\Models\ChatSource;
+use App\Models\ChatSourceIngestionRun;
 use App\Models\City;
+use App\Models\EventIngestionRun;
 use App\Models\EventSource;
 use App\Models\Scraper;
+use App\Models\ScraperRun;
+use App\Services\Chat\Ingestion\ChatSourceIngestionRunner;
+use App\Services\Ingestion\EventIngestionRunner;
+use App\Services\Ingestion\ScrapeRunner;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Livewire\Component;
 use Livewire\WithPagination;
+use Throwable;
 
 class Index extends Component
 {
@@ -35,6 +47,130 @@ class Index extends Component
     {
         if (in_array($property, ['search', 'cityId', 'kind', 'activeOnly'], true)) {
             $this->resetPage();
+        }
+    }
+
+    public function retrySource(string $kind, int $sourceId): void
+    {
+        $run = null;
+
+        try {
+            if ($kind === 'article') {
+                $source = Scraper::findOrFail($sourceId);
+                $this->expireStaleArticleRuns($source->id);
+
+                if (! $source->is_enabled || ! in_array($source->type, ['rss', 'html'], true)) {
+                    $this->dispatchToast(__('Source is paused'), __('Edit or enable the source before retrying.'), 'warning');
+
+                    return;
+                }
+
+                if ($source->runs()->freshActive()->exists()) {
+                    $this->dispatchToast(__('Already running'), __('A retry is already queued or in progress.'), 'warning');
+
+                    return;
+                }
+
+                $run = app(ScrapeRunner::class)->createRun($source);
+                RunScraperRun::dispatch($run->id);
+            } elseif ($kind === 'event') {
+                $source = EventSource::findOrFail($sourceId);
+                EventIngestionRun::expireStaleActive();
+
+                if (! $source->is_active) {
+                    $this->dispatchToast(__('Source is paused'), __('Edit or enable the source before retrying.'), 'warning');
+
+                    return;
+                }
+
+                if (! in_array($source->source_type, ['ics', 'rss', 'json', 'json_api', 'html'], true)) {
+                    $this->dispatchToast(__('Source needs editing'), __('Choose a supported source type before retrying.'), 'warning');
+
+                    return;
+                }
+
+                if ($source->runs()->freshActive()->exists()) {
+                    $this->dispatchToast(__('Already running'), __('A retry is already queued or in progress.'), 'warning');
+
+                    return;
+                }
+
+                $run = app(EventIngestionRunner::class)->createRun($source);
+                RunEventSourceIngestion::dispatch($source->id, $run->id);
+            } elseif ($kind === 'chat') {
+                $source = ChatSource::findOrFail($sourceId);
+                $this->expireStaleChatRuns($source->id);
+
+                if (! $source->is_active) {
+                    $this->dispatchToast(__('Source is paused'), __('Edit or enable the source before retrying.'), 'warning');
+
+                    return;
+                }
+
+                if ($source->runs()->freshActive()->exists()) {
+                    $this->dispatchToast(__('Already running'), __('A retry is already queued or in progress.'), 'warning');
+
+                    return;
+                }
+
+                $run = app(ChatSourceIngestionRunner::class)->createRun($source);
+                IngestChatSource::dispatch($source->id, false, $run->id);
+            } else {
+                $this->dispatchToast(__('Source not found'), __('Refresh the page and try again.'), 'danger');
+
+                return;
+            }
+
+            $this->dispatchToast(__('Retry queued'), __('We will test and ingest the source in the background.'));
+        } catch (ModelNotFoundException $exception) {
+            report($exception);
+            $this->dispatchToast(__('Source not found'), __('Refresh the page and try again.'), 'danger');
+        } catch (Throwable $exception) {
+            if ($run) {
+                $failure = [
+                    'status' => 'failed',
+                    'finished_at' => now(),
+                    'error_message' => __('Failed to dispatch retry job: :message', ['message' => $exception->getMessage()]),
+                ];
+
+                if ($run instanceof EventIngestionRun || $run instanceof ChatSourceIngestionRun) {
+                    $failure['error_class'] = $exception::class;
+                }
+
+                $run->update($failure);
+            }
+
+            report($exception);
+            $this->dispatchToast(__('Retry failed'), __('We could not queue this source.'), 'danger');
+        }
+    }
+
+    public function deleteSource(string $kind, int $sourceId): void
+    {
+        try {
+            $model = $this->sourceModel($kind);
+
+            if ($model === null) {
+                $this->dispatchToast(__('Source not found'), __('Refresh the page and try again.'), 'danger');
+
+                return;
+            }
+
+            $source = $model::query()->findOrFail($sourceId);
+            $sourceName = $source->name;
+            $source->delete();
+
+            $this->resetPage();
+            $this->dispatchToast(
+                __('Source deleted'),
+                __(':name and its run history were removed.', ['name' => $sourceName]),
+            );
+        } catch (ModelNotFoundException $exception) {
+            report($exception);
+            $this->dispatchToast(__('Source not found'), __('It may already have been deleted.'), 'warning');
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->dispatchToast(__('Delete failed'), __('We could not delete this source.'), 'danger');
         }
     }
 
@@ -174,5 +310,48 @@ class Index extends Component
             'edit_route' => $editRoute,
             'updated_at' => $source->updated_at,
         ];
+    }
+
+    /** @return class-string<Model>|null */
+    private function sourceModel(string $kind): ?string
+    {
+        return match ($kind) {
+            'article' => Scraper::class,
+            'event' => EventSource::class,
+            'chat' => ChatSource::class,
+            default => null,
+        };
+    }
+
+    private function expireStaleArticleRuns(int $sourceId): void
+    {
+        ScraperRun::query()
+            ->where('scraper_id', $sourceId)
+            ->staleActive()
+            ->update([
+                'status' => 'failed',
+                'finished_at' => now(),
+                'error_message' => __('Run timed out before the worker started.'),
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function expireStaleChatRuns(int $sourceId): void
+    {
+        ChatSourceIngestionRun::query()
+            ->where('chat_source_id', $sourceId)
+            ->staleActive()
+            ->update([
+                'status' => 'failed',
+                'finished_at' => now(),
+                'error_class' => null,
+                'error_message' => __('Run timed out before the worker started.'),
+                'updated_at' => now(),
+            ]);
+    }
+
+    private function dispatchToast(string $heading, string $message, string $variant = 'success'): void
+    {
+        $this->dispatch('toast', heading: $heading, message: $message, variant: $variant);
     }
 }

@@ -37,15 +37,16 @@ class GenericJsonProfile extends AbstractJsonProfile
 
         $mapping = Arr::get($config, 'mapping', []);
 
-        return $this->mapGenericItems($items, $mapping, $timezone, $requestUrl);
+        return $this->mapGenericItems($items, $mapping, $config, $timezone, $requestUrl);
     }
 
     /**
      * @param  array<int, mixed>  $items
      * @param  array<string, string>  $mapping
+     * @param  array<string, mixed>  $config
      * @return array<int, EventDTO>
      */
-    private function mapGenericItems(array $items, array $mapping, string $timezone, string $sourceUrl): array
+    private function mapGenericItems(array $items, array $mapping, array $config, string $timezone, string $sourceUrl): array
     {
         $results = [];
 
@@ -73,6 +74,14 @@ class GenericJsonProfile extends AbstractJsonProfile
             $eventUrl = $this->stringValue(
                 $this->getValue($item, $mapping, 'event_url', ['event_url', 'url', 'link'])
             );
+
+            if ($eventUrl === '') {
+                $eventUrl = $this->expandItemTemplate(
+                    $this->stringValue(Arr::get($config, 'event_url_template')),
+                    $item,
+                );
+            }
+
             $externalId = $this->stringValue(
                 $this->getValue($item, $mapping, 'external_id', ['id', 'external_id', 'uid'])
             );
@@ -113,6 +122,22 @@ class GenericJsonProfile extends AbstractJsonProfile
         }
 
         return $results;
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function expandItemTemplate(string $template, array $item): string
+    {
+        if ($template === '') {
+            return '';
+        }
+
+        return preg_replace_callback('/\{([^{}]+)\}/', function (array $matches) use ($item): string {
+            $value = data_get($item, $matches[1]);
+
+            return is_scalar($value) ? rawurlencode((string) $value) : '';
+        }, $template) ?? '';
     }
 
     /**
