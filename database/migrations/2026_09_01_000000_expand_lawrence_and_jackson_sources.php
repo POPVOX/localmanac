@@ -9,7 +9,9 @@ return new class extends Migration
 
     private const LAWRENCE_EVENTS_URL = 'https://downtownlawrence.com/calendar/?ical=1';
 
-    private const JACKSON_NEWS_URL = 'https://www.jacksontn.gov/syndication/rss.aspx?serverid=16361603&userid=5&feed=datasummary&key=yYMwiqADjV7%2fxC%2f1BoRFUoLqeAojaDFMbAfMsgj%2b5IOFvO0Iw906344cQC3C7HY2QgPPJyWNfuKiLWfM50o2MELGLQw%3d&target_object_id=16361698&portal_id=16361687&v=2.0&item_name=portlet_xml_title&item_description=portlet_xml_summary&item_pubdate=portlet_publish_date&max_items=16';
+    private const JACKSON_NEWS_PAGE_URL = 'https://www.jacksontn.gov/government/communications/public_notices___press_releases/';
+
+    private const JACKSON_NEWS_FEED_URL = 'https://www.jacksontn.gov/syndication/rss.aspx?serverid=16361603&userid=5&feed=datasummary&key=yYMwiqADjV7%2fxC%2f1BoRFUoLqeAojaDFMbAfMsgj%2b5IOFvO0Iw906344cQC3C7HY2QgPPJyWNfuKiLWfM50o2MELGLQw%3d&target_object_id=16361698&portal_id=16361687&v=2.0&item_name=portlet_xml_title&item_description=portlet_xml_summary&item_pubdate=portlet_publish_date&max_items=16';
 
     private const JACKSON_EVENTS_URL = 'https://jacksontn.com/calendar/?ical=1';
 
@@ -30,7 +32,8 @@ return new class extends Migration
             citySlug: 'jackson-tn',
             slug: 'city-of-jackson-public-notices',
             name: 'City of Jackson Public Notices & Press Releases',
-            sourceUrl: self::JACKSON_NEWS_URL,
+            sourceUrl: self::JACKSON_NEWS_PAGE_URL,
+            feedUrl: self::JACKSON_NEWS_FEED_URL,
         );
         $this->upsertEventSource(
             citySlug: 'jackson-tn',
@@ -47,8 +50,13 @@ return new class extends Migration
         $this->deleteEventSource('jackson-tn', self::JACKSON_EVENTS_URL);
     }
 
-    private function upsertArticleSource(string $citySlug, string $slug, string $name, string $sourceUrl): void
-    {
+    private function upsertArticleSource(
+        string $citySlug,
+        string $slug,
+        string $name,
+        string $sourceUrl,
+        ?string $feedUrl = null,
+    ): void {
         $cityId = DB::table('cities')->where('slug', $citySlug)->value('id');
 
         if (! $cityId) {
@@ -70,7 +78,7 @@ return new class extends Migration
             'type' => 'rss',
             'source_url' => $sourceUrl,
             'config' => json_encode([
-                'feed_url' => $sourceUrl,
+                'feed_url' => $feedUrl ?? $sourceUrl,
                 'default_content_type' => 'news',
                 'lang' => 'en',
                 'max_items' => 50,

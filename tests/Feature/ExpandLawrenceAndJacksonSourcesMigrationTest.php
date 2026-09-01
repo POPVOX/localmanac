@@ -36,6 +36,8 @@ test('the coverage migration adds healthy article and event sources for Lawrence
         ->and($lawrenceNews->is_enabled)->toBeTrue()
         ->and($lawrenceNews->health_status)->toBe('healthy')
         ->and($jacksonNews->type)->toBe('rss')
+        ->and($jacksonNews->source_url)->toBe('https://www.jacksontn.gov/government/communications/public_notices___press_releases/')
+        ->and($jacksonNews->config['feed_url'])->toContain('/syndication/rss.aspx?')
         ->and($jacksonNews->config['max_items'])->toBe(50)
         ->and($jacksonNews->is_enabled)->toBeTrue()
         ->and($lawrenceEvents->source_type)->toBe('ics')
