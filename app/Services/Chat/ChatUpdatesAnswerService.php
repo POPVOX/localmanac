@@ -28,11 +28,11 @@ class ChatUpdatesAnswerService
     {
         $window = $this->resolveUpdatesWindow($question);
         $articles = $this->candidateArticles($city, $window, $question)
-            ->sortByDesc(fn (Article $article): float => $this->articleScore($article, $question, $window['window_days']))
+            ->sortByDesc(fn (Article $article): float => $this->articleScore($article, $question, $window['window_days'], $city))
             ->values();
 
         $selected = $articles
-            ->filter(fn (Article $article): bool => $this->articleScore($article, $question, $window['window_days']) > 0)
+            ->filter(fn (Article $article): bool => $this->articleScore($article, $question, $window['window_days'], $city) > 0)
             ->take(self::SUMMARY_LIMIT)
             ->values();
 
@@ -43,7 +43,7 @@ class ChatUpdatesAnswerService
         $citations = $this->citations($selected);
 
         return [
-            'answer' => $this->buildAnswer($selected, $question, $window['label']),
+            'answer' => $this->buildAnswer($selected, $question, $window['label'], $city),
             'citations' => $citations,
             'city' => [
                 'id' => (int) $city->id,
@@ -93,8 +93,8 @@ class ChatUpdatesAnswerService
             ->orderByDesc('created_at')
             ->limit(self::CANDIDATE_LIMIT)
             ->get()
-            ->filter(function (Article $article) use ($question): bool {
-                $focusTerms = $this->focusTerms($question);
+            ->filter(function (Article $article) use ($question, $city): bool {
+                $focusTerms = $this->focusTerms($question, $city);
 
                 if ($focusTerms === []) {
                     return true;
@@ -109,9 +109,9 @@ class ChatUpdatesAnswerService
             ->values();
     }
 
-    private function articleScore(Article $article, string $question, int $windowDays): float
+    private function articleScore(Article $article, string $question, int $windowDays, City $city): float
     {
-        $focusTerms = $this->focusTerms($question);
+        $focusTerms = $this->focusTerms($question, $city);
         $haystack = $this->articleHaystack($article);
         $title = mb_strtolower((string) $article->title);
         $timestamp = $this->articleTimestamp($article);
@@ -170,23 +170,23 @@ class ChatUpdatesAnswerService
     /**
      * @param  Collection<int, Article>  $articles
      */
-    private function buildAnswer(Collection $articles, string $question, string $windowLabel): string
+    private function buildAnswer(Collection $articles, string $question, string $windowLabel, City $city): string
     {
         $intro = $this->isServiceAlertQuery($question)
             ? 'Here are the most relevant local service updates I found right now:'
             : 'Here are the most important local updates I found '.$this->updatesWindowLabelForAnswer($windowLabel).':';
 
         $lines = $articles
-            ->map(fn (Article $article): string => $this->formatUpdateLine($article))
+            ->map(fn (Article $article): string => $this->formatUpdateLine($article, $city))
             ->values()
             ->all();
 
         return implode("\n", array_merge([$intro], $lines));
     }
 
-    private function formatUpdateLine(Article $article): string
+    private function formatUpdateLine(Article $article, City $city): string
     {
-        $date = $this->formatDate($article);
+        $date = $this->formatDate($article, $city);
         $title = $this->cleanTitle((string) $article->title);
         $description = $this->bestReadableSentence([
             (string) ($article->explainer?->whats_happening ?? ''),
@@ -381,9 +381,15 @@ class ChatUpdatesAnswerService
     /**
      * @return array<int, string>
      */
-    private function focusTerms(string $question): array
+    private function focusTerms(string $question, City $city): array
     {
         $terms = preg_split('/\W+/u', mb_strtolower($question)) ?: [];
+        $cityTerms = preg_split('/\W+/u', mb_strtolower(implode(' ', array_filter([
+            $city->name,
+            $city->slug,
+            $city->state,
+            $city->country,
+        ])))) ?: [];
         $stopwords = [
             'the', 'and', 'for', 'with', 'that', 'this', 'from', 'what', 'when', 'where', 'which', 'who', 'whom',
             'does', 'do', 'did', 'are', 'is', 'was', 'were', 'can', 'could', 'should', 'would', 'will', 'have',
@@ -393,6 +399,7 @@ class ChatUpdatesAnswerService
             'week', 'weeks', 'month', 'months', 'recent', 'recently', 'new', 'updates', 'update', 'changed',
             'right', 'now', 'residents', 'know',
         ];
+        $stopwords = array_values(array_unique(array_merge($stopwords, $cityTerms)));
 
         return array_values(array_unique(array_filter(
             $terms,
@@ -525,11 +532,13 @@ class ChatUpdatesAnswerService
         return $article->published_at ?? $article->created_at;
     }
 
-    private function formatDate(Article $article): string
+    private function formatDate(Article $article, City $city): string
     {
         $timestamp = $this->articleTimestamp($article);
 
-        return $timestamp ? $timestamp->timezone(config('app.timezone'))->format('M j') : 'Recent';
+        return $timestamp
+            ? $timestamp->timezone($city->timezone ?: config('app.timezone'))->format('M j')
+            : 'Recent';
     }
 
     /**

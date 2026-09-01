@@ -28,6 +28,9 @@ return [
     'retrieval_context_token_budget' => (int) env('CHAT_RETRIEVAL_CONTEXT_TOKEN_BUDGET', 5000),
     'retrieval_max_evidence_per_source' => (int) env('CHAT_RETRIEVAL_MAX_EVIDENCE_PER_SOURCE', 3),
     'vector_enabled' => (bool) env('CHAT_VECTOR_ENABLED', true),
+    // Keep generating stored embeddings in the background, but do not make a
+    // live answer wait for query embedding unless an installation opts in.
+    'interactive_vector_enabled' => (bool) env('CHAT_INTERACTIVE_VECTOR_ENABLED', false),
     'fts_enabled' => (bool) env('CHAT_FTS_ENABLED', true),
     // Query expansion is an optional second model call. Keep the interactive
     // request on one model round trip unless an installation opts in.
@@ -36,8 +39,13 @@ return [
     // Quality judging is evaluation telemetry, not part of the user answer. It
     // must not add another synchronous provider call to every chat request.
     'answer_quality_enabled' => (bool) env('CHAT_ANSWER_QUALITY_ENABLED', false),
+    // A second synthesis attempt can push one Livewire request beyond the
+    // reverse-proxy timeout. Keep it opt-in for installations with more headroom.
+    'seed_fallback_enabled' => (bool) env('CHAT_SEED_FALLBACK_ENABLED', false),
     'article_chunks_enabled' => (bool) env('CHAT_ARTICLE_CHUNKS_ENABLED', true),
-    'reranking_enabled' => (bool) env('CHAT_RERANKING_ENABLED', true),
+    // External reranking adds another synchronous provider round trip. Lexical
+    // and stored relevance scores remain the safe default for live chat.
+    'reranking_enabled' => (bool) env('CHAT_RERANKING_ENABLED', false),
     'reranking_provider' => env('CHAT_RERANKING_PROVIDER', 'cohere'),
     'reranking_provider_chain' => array_values(array_filter(array_map(
         'trim',
@@ -125,8 +133,8 @@ return [
         ],
     ],
     'cache_ttl' => (int) env('CHAT_CACHE_TTL', 1800),
-    'http_timeout' => (int) env('CHAT_HTTP_TIMEOUT', 20),
-    'http_retries' => (int) env('CHAT_HTTP_RETRIES', 2),
+    'http_timeout' => (int) env('CHAT_HTTP_TIMEOUT', 15),
+    'http_retries' => (int) env('CHAT_HTTP_RETRIES', 0),
     'fetch_timeout' => (int) env('CHAT_FETCH_TIMEOUT', 12),
     'fetch_retries' => (int) env('CHAT_FETCH_RETRIES', 1),
     'user_agent' => env('CHAT_USER_AGENT', 'LocalmanacBot/1.0'),

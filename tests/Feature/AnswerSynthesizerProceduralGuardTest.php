@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Article;
 use App\Models\ChatSource;
 use App\Models\ChatSourceChunk;
 use App\Models\ChatSourcePage;
@@ -238,6 +239,59 @@ it('returns an immediate city-scoped meeting empty state without prompting the m
     StreamingChatAnswerAgent::assertNeverPrompted();
 });
 
+it('returns an immediate Lawrence article digest without prompting the model', function () {
+    $city = City::factory()->create([
+        'name' => 'Lawrence, KS',
+        'slug' => 'lawrence-ks',
+        'timezone' => 'America/Chicago',
+    ]);
+    $user = User::factory()->create();
+    $source = ChatSource::factory()->create([
+        'city_id' => $city->id,
+        'name' => 'Lawrence City Government',
+        'source_url' => 'https://lawrenceks.gov',
+        'is_active' => true,
+    ]);
+    $article = Article::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Water main repairs begin downtown',
+        'summary' => 'Crews will close one block while replacing a damaged water main.',
+        'published_at' => now()->startOfWeek()->addDay(),
+        'canonical_url' => 'https://lawrenceks.gov/news/water-main-repairs',
+        'status' => 'published',
+    ]);
+    $deltas = [];
+
+    StreamingChatAnswerAgent::fake(['This response must not be used.']);
+
+    $result = app(AnswerSynthesizer::class)->synthesizeStreaming(
+        question: 'What is new in Lawrence this week?',
+        city: $city,
+        sources: collect([$source]),
+        user: $user,
+        conversationId: null,
+        onDelta: function (string $delta) use (&$deltas): null {
+            $deltas[] = $delta;
+
+            return null;
+        },
+    );
+
+    expect($result['answer'])
+        ->toContain('Here are the most important local updates I found for this week:')
+        ->toContain($article->title)
+        ->and($result['citations'])->toBe([
+            [
+                'title' => $article->title,
+                'source_url' => $article->canonical_url,
+                'type' => 'html',
+            ],
+        ])
+        ->and($deltas)->toBe([$result['answer']]);
+
+    StreamingChatAnswerAgent::assertNeverPrompted();
+});
+
 it('returns a clean civic meetings fallback when only unrelated library events are available', function () {
     config()->set('chat.vector_enabled', false);
     config()->set('chat.tools.web_search.enabled', false);
@@ -404,9 +458,11 @@ it('does not use the procedural fallback for service alerts queries', function (
         originalQuestion: $query,
     );
 
-    expect($result['answer'])->toBe('I could not find the answer in the sources I checked.')
+    expect($result['answer'])->toBe('I could not find active local service alerts or disruptions in the available article sources right now.')
         ->and($result['answer'])->not->toContain('permit or formal review may be required')
         ->and($result['citations'])->toBe([]);
+
+    StreamingChatAnswerAgent::assertNeverPrompted();
 });
 
 it('does not use the procedural fallback for permits summary queries', function () {
@@ -438,7 +494,9 @@ it('does not use the procedural fallback for permits summary queries', function 
         originalQuestion: $query,
     );
 
-    expect($result['answer'])->toBe('I could not find the answer in the sources I checked.')
+    expect($result['answer'])->toBe('I could not find enough recent local updates in the available article sources recently.')
         ->and($result['answer'])->not->toContain('permit or formal review may be required')
         ->and($result['citations'])->toBe([]);
+
+    StreamingChatAnswerAgent::assertNeverPrompted();
 });

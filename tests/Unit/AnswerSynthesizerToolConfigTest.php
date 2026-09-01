@@ -35,6 +35,31 @@ it('always includes local similarity search when enabled', function () {
         ->and($tools->contains(fn ($tool): bool => $tool instanceof WebSearch))->toBeFalse();
 });
 
+it('does not add a second similarity search when local seed evidence is already available', function () {
+    config()->set('chat.tools.similarity.enabled', true);
+
+    $city = new City;
+    $city->name = 'Lawrence, KS';
+
+    $source = new ChatSource;
+    $source->id = 3;
+    $source->source_url = 'https://lawrenceks.gov';
+
+    $method = new ReflectionMethod(AnswerSynthesizer::class, 'buildTools');
+    $method->setAccessible(true);
+
+    $tools = collect($method->invoke(
+        app(AnswerSynthesizer::class),
+        $city,
+        collect([$source]),
+        'How do I get a building permit?',
+        ['intent' => false],
+        true,
+    ));
+
+    expect($tools->contains(fn ($tool): bool => $tool instanceof SimilaritySearch))->toBeFalse();
+});
+
 it('does not add web search for non-event questions', function () {
     config()->set('chat.tools.similarity.enabled', true);
     config()->set('chat.tools.web_search.enabled', true);

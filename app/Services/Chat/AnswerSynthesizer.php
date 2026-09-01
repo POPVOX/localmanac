@@ -43,6 +43,8 @@ class AnswerSynthesizer
         private readonly EventIntentDetector $eventIntentDetector,
         private readonly EventWindowResolver $eventWindowResolver,
         private readonly EventSearchService $eventSearchService,
+        private readonly ChatEvidenceModeClassifier $evidenceModeClassifier,
+        private readonly ChatUpdatesAnswerService $updatesAnswerService,
     ) {}
 
     /**
@@ -65,6 +67,18 @@ class AnswerSynthesizer
         ?string $originalQuestion = null,
     ): array {
         $originalQuestion ??= $question;
+
+        if ($this->evidenceModeClassifier->classify($question) === ChatEvidenceModeClassifier::UPDATES) {
+            return $this->updatesResponse(
+                question: $question,
+                city: $city,
+                sources: $sources,
+                conversationId: $conversationId,
+                onDelta: $onDelta,
+                originalQuestion: $originalQuestion,
+            );
+        }
+
         $eventContext = $this->resolveEventContext($question, $city);
 
         if ($this->shouldUseFilteredLocalEventsInFinalAnswer($question, $eventContext)) {
@@ -88,7 +102,7 @@ class AnswerSynthesizer
         $model = $this->chatModelForQuestion($question, $eventContext);
 
         $agent = StreamingChatAnswerAgent::make(
-            tools: $this->buildTools($city, $sources, $question, $eventContext),
+            tools: $this->buildTools($city, $sources, $question, $eventContext, $seedEvidence !== []),
         );
 
         if ($conversationId) {
@@ -160,7 +174,9 @@ class AnswerSynthesizer
             $answer = self::NO_ANSWER_MESSAGE;
         }
 
-        if (($answer === '' || $this->isNoAnswerMessage($answer)) && $seedEvidence !== []) {
+        if ((bool) config('chat.seed_fallback_enabled', false)
+            && ($answer === '' || $this->isNoAnswerMessage($answer))
+            && $seedEvidence !== []) {
             $seedAnswer = $this->answerFromSeedEvidence($question, $city, $seedEvidence);
 
             if ($seedAnswer !== ''
@@ -282,10 +298,19 @@ class AnswerSynthesizer
         $eventIntent = (bool) ($eventContext['intent'] ?? false);
         $eventWindow = $eventContext['window'] ?? null;
 
+        $retrievalInstructions = $seedEvidence === []
+            ? [
+                'Use available tools to gather evidence before answering.',
+                'You must call at least one retrieval tool before your final answer.',
+            ]
+            : [
+                'Use the provided local seed evidence first.',
+                'No additional retrieval tool call is required when that evidence supports the answer.',
+            ];
+
         $lines = [
             'You are a civic information assistant.',
-            'Use available tools to gather evidence before answering.',
-            'You must call at least one retrieval tool before your final answer.',
+            ...$retrievalInstructions,
             'Return plain text only. Do not include citation markers, IDs, JSON, or metadata.',
             'If answer support is insufficient, answer exactly: "'.self::NO_ANSWER_MESSAGE.'"',
             'Do not invent facts, URLs, dates, or numbers.',
@@ -339,12 +364,17 @@ class AnswerSynthesizer
      * @param  array<string, mixed>|null  $eventContext
      * @return array<int, \Laravel\Ai\Contracts\Tool|\Laravel\Ai\Providers\Tools\ProviderTool>
      */
-    private function buildTools(City $city, Collection $sources, string $question, ?array $eventContext = null): array
-    {
+    private function buildTools(
+        City $city,
+        Collection $sources,
+        string $question,
+        ?array $eventContext = null,
+        bool $hasSeedEvidence = false,
+    ): array {
         $eventContext = $eventContext ?? $this->resolveEventContext($question, $city);
         $tools = [];
 
-        if ((bool) config('chat.tools.similarity.enabled', true)) {
+        if (! $hasSeedEvidence && (bool) config('chat.tools.similarity.enabled', true)) {
             $tools[] = $this->localSimilaritySearch($sources);
         }
 
@@ -401,7 +431,7 @@ class AnswerSynthesizer
 
             $results = collect();
 
-            if ($this->canUseVectorSearch()) {
+            if ($this->canUseVectorSearch() && $this->similarityBaseQuery($sourceIds)->whereNotNull('embedding')->exists()) {
                 try {
                     $vectorQuery = $this->similarityBaseQuery($sourceIds)
                         ->whereNotNull('embedding')
@@ -460,7 +490,8 @@ class AnswerSynthesizer
 
     private function canUseVectorSearch(): bool
     {
-        if (! (bool) config('chat.vector_enabled', true)) {
+        if (! (bool) config('chat.vector_enabled', true)
+            || ! (bool) config('chat.interactive_vector_enabled', false)) {
             return false;
         }
 
@@ -1306,6 +1337,61 @@ class AnswerSynthesizer
         }
 
         return false;
+    }
+
+    /**
+     * Broad city-update questions can be answered directly from published,
+     * city-scoped articles. Keeping this inside the synthesizer preserves the
+     * single chat entry point while avoiding several synchronous provider calls.
+     *
+     * @param  Collection<int, \App\Models\ChatSource>  $sources
+     * @return array{
+     *     answer: string,
+     *     citations: array<int, array{title: string, source_url: string, type: string}>,
+     *     confidence: float,
+     *     source_mode: string,
+     *     conversation_id: string|null
+     * }
+     */
+    private function updatesResponse(
+        string $question,
+        City $city,
+        Collection $sources,
+        ?string $conversationId,
+        callable $onDelta,
+        string $originalQuestion,
+    ): array {
+        $response = $this->updatesAnswerService->answer($question, $city);
+        $answer = trim((string) ($response['answer'] ?? ''));
+        $citations = $this->normalizeCitations($response['citations'] ?? []);
+        $confidence = $citations !== [] ? $this->deterministicSourceConfidence() : 0.0;
+        $sourceMode = $citations !== [] ? 'local' : 'none';
+
+        if ($answer !== '') {
+            $onDelta($answer);
+        }
+
+        $this->logRetrievalDiagnostics(
+            question: $question,
+            originalQuestion: $originalQuestion,
+            city: $city,
+            sources: $sources,
+            seedEvidence: [],
+            alignedEvidence: [],
+            confidence: $confidence,
+            sourceMode: $sourceMode,
+            citations: $citations,
+            droppedCitations: [],
+            answer: $answer,
+        );
+
+        return [
+            'answer' => $answer,
+            'citations' => $citations,
+            'confidence' => $confidence,
+            'source_mode' => $sourceMode,
+            'conversation_id' => $conversationId,
+        ];
     }
 
     /**

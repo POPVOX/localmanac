@@ -75,7 +75,7 @@ class ChatSourceRetriever
                 }
             }
 
-            $rows = $this->sdkRerank($rows, $question)->take($limit);
+            $rows = $rows->sortByDesc('score')->take($limit);
         }
 
         $rows = $this->expandNeighborChunks($rows);
@@ -209,7 +209,7 @@ class ChatSourceRetriever
      */
     private function vectorSearch(array $sourceIds, string $question, int $limit): array
     {
-        if (! config('chat.vector_enabled', true)) {
+        if (! config('chat.vector_enabled', true) || ! config('chat.interactive_vector_enabled', false)) {
             return [];
         }
 
@@ -266,7 +266,7 @@ class ChatSourceRetriever
      */
     private function articleVectorSearch(int $cityId, string $question, int $limit): array
     {
-        if (! config('chat.vector_enabled', true)) {
+        if (! config('chat.vector_enabled', true) || ! config('chat.interactive_vector_enabled', false)) {
             return [];
         }
 
