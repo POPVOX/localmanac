@@ -7,6 +7,8 @@ use App\Models\ArticleBody;
 use App\Models\ArticleIssueArea;
 use App\Models\City;
 use App\Models\Event;
+use App\Models\EventSource;
+use App\Models\EventSourceItem;
 use App\Models\IssueArea;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -470,7 +472,7 @@ it('renders upcoming events on the dashboard when they exist', function () {
     $startsAt = Carbon::now('America/Chicago')->addDays(2)->setTime(18, 0);
     $endsAt = Carbon::now('America/Chicago')->addDays(2)->setTime(19, 0);
 
-    Event::factory()->create([
+    $event = Event::factory()->create([
         'city_id' => $city->id,
         'title' => 'Board Meeting',
         'starts_at' => $startsAt->utc(),
@@ -485,8 +487,69 @@ it('renders upcoming events on the dashboard when they exist', function () {
         ->assertSee($startsAt->format('M j'))
         ->assertSee('6:00 PM - 7:00 PM')
         ->assertSee('href="https://events.example.com/board-meeting"', false)
+        ->assertSee('data-testid="dashboard-event-link-'.$event->id.'"', false)
         ->assertSee('target="_blank"', false)
-        ->assertSee('rel="noopener noreferrer"', false);
+        ->assertSee('rel="noopener noreferrer"', false)
+        ->assertSee('data-testid="events-calendar-link"', false)
+        ->assertSee('href="'.route('cities.calendar', $city).'"', false);
+});
+
+it('links dashboard events to their source item when the event url is missing', function () {
+    $city = City::create([
+        'name' => 'Lawrence',
+        'slug' => 'lawrence',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $event = Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Planning Commission',
+        'starts_at' => Carbon::now('America/Chicago')->addDays(2)->setTime(18, 30)->utc(),
+        'event_url' => null,
+    ]);
+
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_url' => 'https://lawrence.example.com/calendar',
+    ]);
+
+    EventSourceItem::factory()->create([
+        'event_id' => $event->id,
+        'event_source_id' => $source->id,
+        'source_url' => 'https://lawrence.example.com/meetings/planning-commission',
+    ]);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->assertSee('data-testid="dashboard-event-link-'.$event->id.'"', false)
+        ->assertSee('href="https://lawrence.example.com/meetings/planning-commission"', false)
+        ->assertSee('target="_blank"', false);
+});
+
+it('links dashboard events without a source url to their date on the city calendar', function () {
+    $city = City::create([
+        'name' => 'Lawrence',
+        'slug' => 'lawrence',
+        'timezone' => 'America/Chicago',
+    ]);
+
+    $startsAt = Carbon::now('America/Chicago')->addDays(3)->setTime(17, 0);
+    $event = Event::factory()->create([
+        'city_id' => $city->id,
+        'title' => 'Community Workshop',
+        'starts_at' => $startsAt->utc(),
+        'event_url' => null,
+    ]);
+
+    $calendarUrl = route('cities.calendar', [
+        'city' => $city,
+        'date' => $startsAt->toDateString(),
+    ]);
+
+    Livewire::test(Dashboard::class)
+        ->set('cityId', $city->id)
+        ->assertSee('data-testid="dashboard-event-link-'.$event->id.'"', false)
+        ->assertSee('href="'.$calendarUrl.'"', false);
 });
 
 function registerFailingScoutEngine(): void

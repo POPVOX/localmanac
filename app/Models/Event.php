@@ -60,4 +60,35 @@ class Event extends Model
     {
         return $this->hasMany(EventSourceItem::class);
     }
+
+    public function publicUrl(): ?string
+    {
+        $eventUrl = trim((string) $this->event_url);
+
+        if ($eventUrl !== '') {
+            return $eventUrl;
+        }
+
+        $sourceItems = $this->sourceItems
+            ->sortByDesc(fn (EventSourceItem $item): int => (int) $item->fetched_at?->getTimestamp())
+            ->values();
+
+        foreach ($sourceItems as $sourceItem) {
+            $sourceUrl = trim((string) $sourceItem->source_url);
+
+            if ($sourceUrl !== '') {
+                return $sourceUrl;
+            }
+        }
+
+        foreach ($sourceItems as $sourceItem) {
+            $sourceUrl = trim((string) $sourceItem->eventSource?->source_url);
+
+            if ($sourceUrl !== '') {
+                return $sourceUrl;
+            }
+        }
+
+        return null;
+    }
 }

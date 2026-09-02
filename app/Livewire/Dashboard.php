@@ -746,6 +746,7 @@ class Dashboard extends Component
             ->whereNotNull('starts_at')
             ->where('starts_at', '>=', $windowStartUtc)
             ->where('starts_at', '<=', $windowEndUtc)
+            ->with('sourceItems.eventSource')
             ->orderBy('starts_at')
             ->limit(5)
             ->get();
