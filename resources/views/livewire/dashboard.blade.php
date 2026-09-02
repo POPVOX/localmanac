@@ -3,6 +3,11 @@
     @php
         $hasConversation = $conversationId || count($messages) > 0;
         $upcomingEvents = $upcomingEvents ?? collect();
+        $calendarRouteName = $adminPreview && $city
+            ? 'admin.cities.calendar'
+            : ($city ? 'cities.calendar' : 'demo.calendar');
+        $calendarRouteParameters = $city ? ['city' => $city] : [];
+        $calendarUrl = route($calendarRouteName, $calendarRouteParameters);
     @endphp
 
     <section class="public-masthead relative">
@@ -537,10 +542,16 @@
         <div class="space-y-6">
             {{-- Calendar highlights --}}
             <div class="public-panel space-y-4 p-5">
-                <div class="flex items-center gap-2">
+                <a
+                    href="{{ $calendarUrl }}"
+                    wire:navigate
+                    data-testid="events-calendar-link"
+                    class="group flex items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                >
                     <flux:icon icon="calendar-days" class="size-5 text-emerald-600" />
-                    <flux:heading size="lg">{{ __('Events Calendar') }}</flux:heading>
-                </div>
+                    <flux:heading size="lg" class="transition group-hover:text-emerald-700">{{ __('Events Calendar') }}</flux:heading>
+                    <flux:icon icon="arrow-right" class="ml-auto size-4 text-emerald-600 transition group-hover:translate-x-0.5" />
+                </a>
 
                 @forelse ($upcomingEvents as $event)
                     @php
@@ -553,21 +564,25 @@
                         } elseif (! $event->all_day && $eventStart) {
                             $eventTimeRange = $eventStart->format('g:i A');
                         }
+                        $eventSourceUrl = $event->publicUrl();
+                        $eventUrl = $eventSourceUrl ?: route($calendarRouteName, [
+                            ...$calendarRouteParameters,
+                            'date' => $eventStart?->toDateString(),
+                        ]);
                     @endphp
-                    <div class="border-l-2 border-emerald-500 py-1 pl-3">
-                        <div class="text-sm font-semibold text-emerald-700">
-                            @if ($event->event_url)
-                                <a
-                                    href="{{ $event->event_url }}"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    class="transition hover:text-emerald-600"
-                                >
-                                    {{ $event->title }}
-                                </a>
-                            @else
-                                {{ $event->title }}
-                            @endif
+                    <a
+                        href="{{ $eventUrl }}"
+                        data-testid="dashboard-event-link-{{ $event->id }}"
+                        @if ($eventSourceUrl)
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        @else
+                            wire:navigate
+                        @endif
+                        class="group block rounded-r-lg border-l-2 border-emerald-500 py-2 pl-3 pr-2 transition hover:bg-emerald-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                    >
+                        <div class="text-sm font-semibold text-emerald-700 transition group-hover:text-emerald-600">
+                            {{ $event->title }}
                         </div>
                         <div class="text-xs text-zinc-500">
                             {{ $eventDateLabel }}@if ($eventTimeRange) &middot; {{ $eventTimeRange }}@endif
@@ -575,15 +590,13 @@
                         @if ($event->location_name)
                             <div class="text-xs text-zinc-400">{{ $event->location_name }}</div>
                         @endif
-                    </div>
+                    </a>
                 @empty
                     <flux:text variant="subtle">{{ __('No upcoming events.') }}</flux:text>
                 @endforelse
 
                 <a
-                    href="{{ $adminPreview && $city
-                        ? route('admin.cities.calendar', $city)
-                        : ($city ? route('cities.calendar', $city) : route('demo.calendar')) }}"
+                    href="{{ $calendarUrl }}"
                     class="inline-flex items-center gap-1 text-sm font-semibold uppercase tracking-wide text-zinc-700 transition hover:text-emerald-600"
                     wire:navigate
                 >

@@ -14,7 +14,7 @@ class ExplainerAgent implements Agent, HasStructuredOutput
 
     public function instructions(): string
     {
-        return 'Create a concise civic explainer in structured JSON only.';
+        return 'Create a decision-useful civic explainer that prioritizes concrete actions, named subjects, and source-supported stakes over meeting logistics or generic boilerplate. Use only supplied facts and return structured JSON only.';
     }
 
     public function schema(JsonSchema $schema): array
