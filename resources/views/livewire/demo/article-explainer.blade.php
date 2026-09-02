@@ -120,51 +120,7 @@
 
                 @if ($keyDetails !== [] || $whatToWatch !== [])
                     <flux:separator />
-                    <div class="grid gap-6 md:grid-cols-2">
-                        @if ($keyDetails !== [])
-                            <div class="flex flex-col gap-3">
-                                <flux:text class="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
-                                    {{ __('Key details') }}
-                                </flux:text>
-                                <div class="flex flex-col gap-2 text-sm">
-                                    @foreach ($keyDetails as $detail)
-                                        <div class="flex flex-col gap-1">
-                                            @if ($detail['label'] && $detail['value'])
-                                                <flux:text class="text-sm text-zinc-700 dark:text-zinc-200">
-                                                    <span class="font-medium">{{ $detail['label'] }}</span>
-                                                    <span>{{ $detail['value'] }}</span>
-                                                </flux:text>
-                                            @elseif ($detail['text'])
-                                                <flux:text class="text-sm text-zinc-700 dark:text-zinc-200">{{ $detail['text'] }}</flux:text>
-                                            @endif
-                                        </div>
-                                    @endforeach
-                                </div>
-                            </div>
-                        @endif
-
-                        @if ($whatToWatch !== [])
-                            <div class="flex flex-col gap-3">
-                                <flux:text class="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">
-                                    {{ __('What to watch next') }}
-                                </flux:text>
-                                <div class="flex flex-col gap-2 text-sm">
-                                    @foreach ($whatToWatch as $detail)
-                                        <div class="flex flex-col gap-1">
-                                            @if ($detail['label'] && $detail['value'])
-                                                <flux:text class="text-sm text-zinc-700 dark:text-zinc-200">
-                                                    <span class="font-medium">{{ $detail['label'] }}</span>
-                                                    <span>{{ $detail['value'] }}</span>
-                                                </flux:text>
-                                            @elseif ($detail['text'])
-                                                <flux:text class="text-sm text-zinc-700 dark:text-zinc-200">{{ $detail['text'] }}</flux:text>
-                                            @endif
-                                        </div>
-                                    @endforeach
-                                </div>
-                            </div>
-                        @endif
-                    </div>
+                    <x-article-explainer-lists :key-details="$keyDetails" :what-to-watch="$whatToWatch" />
                 @endif
             </flux:card>
 
