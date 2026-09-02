@@ -48,3 +48,4 @@ All core data paths are city-scoped. Wichita is the current default city in acti
 Detailed technical documentation is organized in `docs/`:
 
 - [Documentation Index](docs/README.md)
+- [Product Vision](docs/PRODUCT_VISION.md)

@@ -4,6 +4,7 @@ This index tracks current documentation for the implemented Localmanac system.
 
 ## Core
 
+- [Product Vision](PRODUCT_VISION.md)
 - [Architecture](ARCHITECTURE.md)
 - [Ingestion Architecture](INGESTION_ARCHITECTURE.md)
 - [Enrichment Process](ENRICHMENT_PROCESS.md)
