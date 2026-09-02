@@ -332,7 +332,7 @@ class SourceDiscoveryService
             return false;
         }
 
-        $encodedKeys = mb_strtolower(json_encode(array_keys($this->firstJsonRecord($payload))) ?: '');
+        $encodedKeys = mb_strtolower(implode(' ', $this->jsonScalarPaths($payload)));
         $hasTitle = Str::contains($encodedKeys, ['title', 'name', 'summary']);
         $hasStart = Str::contains($encodedKeys, ['start', 'date', 'dtstart']);
 
@@ -340,30 +340,28 @@ class SourceDiscoveryService
     }
 
     /**
-     * @param  array<string|int, mixed>  $payload
-     * @return array<string, mixed>
+     * @param  array<string|int, mixed>  $value
+     * @return array<int, string>
      */
-    private function firstJsonRecord(array $payload): array
+    private function jsonScalarPaths(array $value, string $prefix = '', int $depth = 0): array
     {
-        if (array_is_list($payload)) {
-            return is_array($payload[0] ?? null) ? $payload[0] : [];
+        if ($depth > 7) {
+            return [];
         }
 
-        foreach ($payload as $value) {
-            if (is_array($value) && array_is_list($value) && is_array($value[0] ?? null)) {
-                return $value[0];
-            }
+        $paths = [];
 
-            if (is_array($value)) {
-                $record = $this->firstJsonRecord($value);
+        foreach ($value as $key => $child) {
+            $path = $prefix === '' ? (string) $key : $prefix.'.'.$key;
 
-                if ($record !== []) {
-                    return $record;
-                }
+            if (is_array($child)) {
+                $paths = array_merge($paths, $this->jsonScalarPaths($child, $path, $depth + 1));
+            } else {
+                $paths[] = $path;
             }
         }
 
-        return $payload;
+        return $paths;
     }
 
     private function looksLikeFeed(string $body, string $contentType): bool
@@ -381,7 +379,8 @@ class SourceDiscoveryService
         $sample = mb_strtolower(mb_substr(strip_tags($body), 0, 8000));
 
         return preg_match('/(?:events?|calendar)/i', $url) === 1
-            || Str::contains($sample, ['events calendar', 'upcoming events', 'event date', 'event time']);
+            || Str::contains($sample, ['events calendar', 'upcoming events', 'event date', 'event time'])
+            || preg_match('/<(?:[a-z0-9_-]+:)?(?:startdate|startdatetime|dtstart|eventdate|eventdates|when)\b/i', $body) === 1;
     }
 
     /**
@@ -397,59 +396,123 @@ class SourceDiscoveryService
 
         $endpoints = [];
 
-        foreach ($crawler->filter('link[href], a[href]') as $node) {
-            $href = trim((string) $node->getAttribute('href'));
+        $attributes = ['href', 'src', 'data-feed', 'data-feed-url', 'data-events-url', 'data-calendar-url', 'data-api-url', 'data-json-url', 'data-url'];
 
-            if ($href === '' || str_starts_with($href, '#') || str_starts_with($href, 'mailto:')) {
+        foreach ($crawler->filter('link[href], a[href], iframe[src], script[src], [data-feed], [data-feed-url], [data-events-url], [data-calendar-url], [data-api-url], [data-json-url], [data-url]') as $node) {
+            $context = implode(' ', [
+                (string) $node->textContent,
+                (string) $node->getAttribute('type'),
+                (string) $node->getAttribute('rel'),
+                (string) $node->getAttribute('id'),
+                (string) $node->getAttribute('class'),
+                $this->nodeHasCalendarContext($node) ? 'calendar event' : '',
+            ]);
+
+            foreach ($attributes as $attribute) {
+                if (! $node->hasAttribute($attribute)) {
+                    continue;
+                }
+
+                $this->addEndpointCandidate(
+                    $endpoints,
+                    (string) $node->getAttribute($attribute),
+                    $attribute.' '.$context,
+                    $baseUrl,
+                );
+            }
+        }
+
+        foreach ($crawler->filter('script:not([src])') as $node) {
+            $script = html_entity_decode((string) $node->textContent, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+            if (! Str::contains(mb_strtolower($script), ['event', 'calendar', 'rss', 'feed', '.ics', '.json', '/api/'])) {
                 continue;
             }
 
-            $type = mb_strtolower((string) $node->getAttribute('type'));
-            $rel = mb_strtolower((string) $node->getAttribute('rel'));
-            $text = trim((string) $node->textContent);
-            $haystack = mb_strtolower("{$href} {$type} {$rel} {$text}");
-            $endpointType = null;
-            $label = '';
+            $script = str_replace('\\/', '/', $script);
+            preg_match_all('/["\'](?<value>(?:https?:)?\\?\/\\?\/[^"\']+|(?:\.\.\/|\.\/|\/|(?:api|services?)\/)[^"\']+)["\']/i', $script, $matches);
 
-            if (
-                str_contains($type, 'text/calendar')
-                || preg_match('/\.(ics|ical)(?:$|[?#])/i', $href) === 1
-                || preg_match('~/common/modules/icalendar/icalendar\.aspx(?:$|[?#])~i', $href) === 1
-                || str_contains($haystack, 'ical feed')
-            ) {
-                $endpointType = 'ics';
-                $label = 'Calendar feed';
-            } elseif (
-                str_contains($type, 'rss')
-                || str_contains($type, 'atom')
-                || preg_match('/(?:\/feed\/?$|\.rss(?:$|[?#])|\.xml(?:$|[?#]))/i', $href) === 1
-                || preg_match('~/rssfeed\.aspx(?:$|[?#])~i', $href) === 1
-            ) {
-                $endpointType = 'rss';
-                $label = Str::contains($haystack, ['event', 'calendar']) ? 'Event feed' : 'Article feed';
-            } elseif ((str_contains($type, 'json') || preg_match('/\.json(?:$|[?#])/i', $href) === 1) && Str::contains($haystack, ['event', 'calendar'])) {
-                $endpointType = 'json_api';
-                $label = 'Events API';
+            foreach (array_slice($matches['value'] ?? [], 0, 50) as $value) {
+                $this->addEndpointCandidate(
+                    $endpoints,
+                    str_replace('\\/', '/', (string) $value),
+                    'embedded script '.$script,
+                    $baseUrl,
+                );
             }
-
-            if ($endpointType === null) {
-                continue;
-            }
-
-            $resolved = $this->resolveUrl($href, $baseUrl);
-
-            if ($resolved === null) {
-                continue;
-            }
-
-            $endpoints[$endpointType.'|'.$resolved] = [
-                'url' => $resolved,
-                'type' => $endpointType,
-                'label' => $label,
-            ];
         }
 
         return array_values($endpoints);
+    }
+
+    /**
+     * @param  array<string, array{url: string, type: string, label: string}>  $endpoints
+     */
+    private function addEndpointCandidate(array &$endpoints, string $value, string $context, string $baseUrl): void
+    {
+        $value = trim(html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+
+        if ($value === '' || Str::startsWith($value, ['#', 'mailto:', 'javascript:', 'data:'])) {
+            return;
+        }
+
+        $details = $this->classifyEndpoint($value, $context);
+
+        if ($details === null) {
+            return;
+        }
+
+        $resolved = $this->resolveUrl($value, $baseUrl);
+
+        if ($resolved === null) {
+            return;
+        }
+
+        $endpoints[$details['type'].'|'.$resolved] = [
+            'url' => $resolved,
+            'type' => $details['type'],
+            'label' => $details['label'],
+        ];
+    }
+
+    /**
+     * @return array{type: 'ics'|'rss'|'json_api', label: string}|null
+     */
+    private function classifyEndpoint(string $value, string $context): ?array
+    {
+        $haystack = mb_strtolower($value.' '.$context);
+        $eventFocused = Str::contains($haystack, ['event', 'calendar', 'meeting', 'agenda']);
+
+        if (
+            str_contains($haystack, 'text/calendar')
+            || preg_match('/\.(ics|ical)(?:$|[?#])/i', $value) === 1
+            || preg_match('~/common/modules/icalendar/icalendar\.aspx(?:$|[?#])~i', $value) === 1
+            || str_contains($haystack, 'ical feed')
+        ) {
+            return ['type' => 'ics', 'label' => 'Calendar feed'];
+        }
+
+        if (
+            str_contains($haystack, 'application/rss')
+            || str_contains($haystack, 'application/atom')
+            || preg_match('/(?:\/feed\/?(?:$|[?#])|\.rss(?:$|[?#])|\.xml(?:$|[?#]))/i', $value) === 1
+            || preg_match('~/rssfeed\.aspx(?:$|[?#])~i', $value) === 1
+        ) {
+            return [
+                'type' => 'rss',
+                'label' => $eventFocused ? 'Event feed' : 'Article feed',
+            ];
+        }
+
+        $looksJson = str_contains($haystack, 'application/json')
+            || preg_match('/\.json(?:$|[?#])/i', $value) === 1
+            || ($eventFocused && preg_match('~(?:/api/|/services?/|format=json|output=json)~i', $value) === 1);
+
+        if ($looksJson && $eventFocused) {
+            return ['type' => 'json_api', 'label' => 'Events API'];
+        }
+
+        return null;
     }
 
     /**

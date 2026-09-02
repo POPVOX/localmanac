@@ -37,11 +37,17 @@ class GenericJsonProfile extends AbstractJsonProfile
 
         $mapping = Arr::get($config, 'mapping', []);
 
+        if (! array_is_list($items)) {
+            $items = $items !== [] && collect($items)->every(fn (mixed $item): bool => is_array($item))
+                ? array_values($items)
+                : [$items];
+        }
+
         return $this->mapGenericItems($items, $mapping, $config, $timezone, $requestUrl);
     }
 
     /**
-     * @param  array<int, mixed>  $items
+     * @param  array<int|string, mixed>  $items
      * @param  array<string, string>  $mapping
      * @param  array<string, mixed>  $config
      * @return array<int, EventDTO>
@@ -57,10 +63,16 @@ class GenericJsonProfile extends AbstractJsonProfile
 
             $title = (string) $this->getValue($item, $mapping, 'title', ['title', 'name']);
             $startsAtValue = $this->stringValue(
-                $this->getValue($item, $mapping, 'starts_at', ['starts_at', 'start', 'start_time', 'start_date'])
+                $this->getValue($item, $mapping, 'starts_at', ['starts_at', 'start', 'start_date', 'date'])
+            );
+            $startTimeValue = $this->stringValue(
+                $this->getValue($item, $mapping, 'start_time', ['start_time', 'startTime', 'time'])
             );
             $endsAtValue = $this->stringValue(
-                $this->getValue($item, $mapping, 'ends_at', ['ends_at', 'end', 'end_time', 'end_date'])
+                $this->getValue($item, $mapping, 'ends_at', ['ends_at', 'end', 'end_date'])
+            );
+            $endTimeValue = $this->stringValue(
+                $this->getValue($item, $mapping, 'end_time', ['end_time', 'endTime'])
             );
             $locationName = $this->stringValue(
                 $this->getValue($item, $mapping, 'location_name', ['location_name', 'location', 'venue.name'])
@@ -87,15 +99,17 @@ class GenericJsonProfile extends AbstractJsonProfile
             );
             $allDayValue = $this->getValue($item, $mapping, 'all_day', ['all_day']);
 
-            $startResult = $startsAtValue !== ''
-                ? $this->dateParser->parseIso($startsAtValue, $timezone)
-                : null;
-            $endResult = $endsAtValue !== ''
-                ? $this->dateParser->parseIso($endsAtValue, $timezone)
+            $startResult = $this->parseDateAndOptionalTime($startsAtValue, $startTimeValue, $timezone);
+            $endResult = ($endsAtValue !== '' || $endTimeValue !== '')
+                ? $this->parseDateAndOptionalTime(
+                    $endsAtValue !== '' ? $endsAtValue : $startsAtValue,
+                    $endTimeValue,
+                    $timezone,
+                )
                 : null;
 
             $startsAt = $startResult['starts_at'] ?? null;
-            $endsAt = $endResult['starts_at'] ?? null;
+            $endsAt = $endResult['starts_at'] ?? ($startResult['ends_at'] ?? null);
 
             if (! $startsAt) {
                 continue;
@@ -122,6 +136,20 @@ class GenericJsonProfile extends AbstractJsonProfile
         }
 
         return $results;
+    }
+
+    /**
+     * @return array{starts_at: ?\Illuminate\Support\Carbon, ends_at: ?\Illuminate\Support\Carbon, all_day: bool}|null
+     */
+    private function parseDateAndOptionalTime(string $date, string $time, string $timezone): ?array
+    {
+        if ($date === '' && $time === '') {
+            return null;
+        }
+
+        return $time !== ''
+            ? $this->dateParser->parse($date, $time, $timezone)
+            : $this->dateParser->parseIso($date, $timezone);
     }
 
     /**

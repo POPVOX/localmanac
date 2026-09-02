@@ -110,6 +110,108 @@ it('inspects a discovered json endpoint before drafting its event mapping', func
         ->and(data_get($result, 'config.json.mapping.location_address'))->toBe('venue.address');
 });
 
+it('discovers deeply nested json event records and separate date and time fields', function () {
+    Http::fake([
+        'https://example.gov/api/v2/community-calendar' => Http::response([
+            'response' => [
+                'calendar' => [
+                    'entries' => [[
+                        'event' => [
+                            'eventTitle' => 'Parks advisory board',
+                            'eventDate' => '2026-09-15',
+                            'eventTime' => '6:30 PM',
+                            'venue' => ['name' => 'City Hall'],
+                        ],
+                    ]],
+                ],
+            ],
+        ], 200, ['Content-Type' => 'application/json']),
+    ]);
+
+    $result = app(SourceDiscoveryService::class)->discover('https://example.gov/api/v2/community-calendar');
+
+    expect($result['kind'])->toBe('event')
+        ->and($result['type'])->toBe('json_api')
+        ->and(data_get($result, 'config.json.root_path'))->toBe('response.calendar.entries')
+        ->and(data_get($result, 'config.json.mapping.title'))->toBe('event.eventTitle')
+        ->and(data_get($result, 'config.json.mapping.starts_at'))->toBe('event.eventDate')
+        ->and(data_get($result, 'config.json.mapping.start_time'))->toBe('event.eventTime')
+        ->and(data_get($result, 'config.json.mapping.location_name'))->toBe('event.venue.name');
+});
+
+it('supports a single event object at the root of a json response', function () {
+    Http::fake([
+        'https://example.gov/api/event/42' => Http::response([
+            'eventTitle' => 'Library board meeting',
+            'eventDate' => '2026-09-17',
+            'eventTime' => '5:30 PM',
+        ], 200, ['Content-Type' => 'application/json']),
+    ]);
+
+    $result = app(SourceDiscoveryService::class)->discover('https://example.gov/api/event/42');
+
+    expect($result['kind'])->toBe('event')
+        ->and(data_get($result, 'config.json.root_path'))->toBe('')
+        ->and(data_get($result, 'config.json.mapping.title'))->toBe('eventTitle')
+        ->and(data_get($result, 'config.json.mapping.starts_at'))->toBe('eventDate')
+        ->and(data_get($result, 'config.json.mapping.start_time'))->toBe('eventTime');
+});
+
+it('classifies rss feeds with structured event fields even when their url is generic', function () {
+    Http::fake([
+        'https://example.gov/feed.xml' => Http::response(<<<'XML'
+            <?xml version="1.0"?><rss version="2.0" xmlns:ev="https://example.gov/schema"><channel><title>Updates</title><item><title>Commission</title><ev:startDate>2026-09-18T18:00:00-05:00</ev:startDate></item></channel></rss>
+            XML, 200, ['Content-Type' => 'application/rss+xml']),
+    ]);
+
+    $result = app(SourceDiscoveryService::class)->discover('https://example.gov/feed.xml');
+
+    expect($result['kind'])->toBe('event')
+        ->and($result['type'])->toBe('rss');
+});
+
+it('finds event api endpoints embedded in data attributes and page scripts', function () {
+    $page = <<<'HTML'
+        <!doctype html><html><head><title>City events</title></head><body>
+        <div class="calendar-widget" data-api-url="/api/events?format=json"></div>
+        <script>window.calendarSettings = { backupUrl: "\/api\/calendar\/backup.json" };</script>
+        </body></html>
+        HTML;
+    $events = ['items' => [[
+        'title' => 'Council meeting',
+        'startDate' => '2026-09-20T18:00:00-05:00',
+    ]]];
+
+    Http::fake([
+        'https://example.gov/calendar' => Http::response($page, 200, ['Content-Type' => 'text/html']),
+        'https://example.gov/api/events?format=json' => Http::response($events, 200, ['Content-Type' => 'application/json']),
+    ]);
+
+    $result = app(SourceDiscoveryService::class)->discover('https://example.gov/calendar');
+
+    expect($result['kind'])->toBe('event')
+        ->and($result['type'])->toBe('json_api')
+        ->and($result['source_url'])->toBe('https://example.gov/api/events?format=json')
+        ->and(collect($result['endpoints'])->pluck('url')->all())->toContain('https://example.gov/api/calendar/backup.json');
+});
+
+it('selects schema org json ld as the calendar profile when it contains dated events', function () {
+    Http::fake([
+        'https://example.gov/calendar' => Http::response(<<<'HTML'
+            <!doctype html><html><head><title>City events</title>
+            <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Event","name":"Council meeting","startDate":"2026-09-20T18:00:00-05:00"}]}</script>
+            </head><body><div id="calendar"></div></body></html>
+            HTML, 200, ['Content-Type' => 'text/html']),
+    ]);
+
+    $result = app(SourceDiscoveryService::class)->discover('https://example.gov/calendar');
+
+    expect($result['kind'])->toBe('event')
+        ->and($result['type'])->toBe('html')
+        ->and($result['config']['profile'])->toBe('json_ld_events')
+        ->and($result['confidence'])->toBe(0.96);
+});
+
 it('follows a CivicPlus calendar subscription page to its aggregate event feed', function () {
     $calendarPage = <<<'HTML'
         <!doctype html><html><head><title>Calendar • Madison County, TN • CivicEngage</title></head><body>

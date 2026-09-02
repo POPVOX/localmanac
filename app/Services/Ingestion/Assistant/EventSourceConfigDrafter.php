@@ -2,7 +2,6 @@
 
 namespace App\Services\Ingestion\Assistant;
 
-use Illuminate\Support\Arr;
 use Symfony\Component\DomCrawler\Crawler;
 
 class EventSourceConfigDrafter
@@ -49,7 +48,7 @@ class EventSourceConfigDrafter
         }
 
         [$listPath, $items] = $this->findJsonItems($payload);
-        $first = is_array($items[0] ?? null) ? $items[0] : [];
+        $first = $this->representativeJsonRecord($items, $listPath);
         $mapping = $this->inferJsonMapping($first);
 
         $json = [
@@ -71,33 +70,112 @@ class EventSourceConfigDrafter
 
     /**
      * @param  array<string|int, mixed>  $payload
-     * @return array{0: string, 1: array<int, mixed>}
+     * @return array{0: string, 1: array<int|string, mixed>}
      */
     private function findJsonItems(array $payload): array
     {
-        if (array_is_list($payload)) {
-            return ['', $payload];
+        $candidates = [];
+        $this->collectJsonLists($payload, '', $candidates);
+
+        usort($candidates, function (array $left, array $right): int {
+            return [$right['score'], count($right['items']), -substr_count($right['path'], '.')]
+                <=> [$left['score'], count($left['items']), -substr_count($left['path'], '.')];
+        });
+
+        $best = $candidates[0] ?? null;
+
+        if (! is_array($best) && ! array_is_list($payload) && $this->jsonRecordScore($payload, '') > 0) {
+            return ['', [$payload]];
         }
 
-        foreach (['events', 'items', 'results', 'data', 'docs'] as $key) {
-            $value = $payload[$key] ?? null;
+        return is_array($best)
+            ? [$best['path'], $best['items']]
+            : ['', []];
+    }
 
-            if (is_array($value) && array_is_list($value)) {
-                return [$key, $value];
+    /**
+     * @param  array<int|string, mixed>  $items
+     * @return array<string, mixed>
+     */
+    private function representativeJsonRecord(array $items, string $path): array
+    {
+        $records = collect($items)
+            ->filter(fn (mixed $item): bool => is_array($item))
+            ->take(10)
+            ->values();
+
+        return $records
+            ->sortByDesc(fn (array $item): int => $this->jsonRecordScore($item, $path))
+            ->first() ?? [];
+    }
+
+    /**
+     * @param  array<string|int, mixed>  $value
+     * @param  array<int, array{path: string, items: array<int|string, mixed>, score: int}>  $candidates
+     */
+    private function collectJsonLists(array $value, string $path, array &$candidates, int $depth = 0): void
+    {
+        if ($depth > 7) {
+            return;
+        }
+
+        if ($this->looksLikeRecordCollection($value)) {
+            $first = collect($value)->first(fn (mixed $item): bool => is_array($item));
+            $score = is_array($first) ? $this->jsonRecordScore($first, $path) : 0;
+
+            if ($score > 0) {
+                $candidates[] = [
+                    'path' => $path,
+                    'items' => $value,
+                    'score' => $score,
+                ];
             }
 
-            if (is_array($value)) {
-                foreach (['events', 'items', 'results', 'docs'] as $childKey) {
-                    $children = $value[$childKey] ?? null;
-
-                    if (is_array($children) && array_is_list($children)) {
-                        return ["{$key}.{$childKey}", $children];
-                    }
-                }
+            if (array_is_list($value)) {
+                return;
             }
         }
 
-        return ['', []];
+        foreach ($value as $key => $child) {
+            if (! is_array($child)) {
+                continue;
+            }
+
+            $childPath = $path === '' ? (string) $key : $path.'.'.$key;
+            $this->collectJsonLists($child, $childPath, $candidates, $depth + 1);
+        }
+    }
+
+    /**
+     * @param  array<string|int, mixed>  $value
+     */
+    private function looksLikeRecordCollection(array $value): bool
+    {
+        if ($value === []) {
+            return false;
+        }
+
+        if (array_is_list($value)) {
+            return collect($value)->contains(fn (mixed $item): bool => is_array($item));
+        }
+
+        return collect($value)->every(fn (mixed $item): bool => is_array($item));
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    private function jsonRecordScore(array $item, string $path): int
+    {
+        $leafNames = collect(array_keys($this->scalarPaths($item)))
+            ->map(fn (string $leafPath): string => $this->normalizeJsonKey((string) str($leafPath)->afterLast('.')))
+            ->all();
+        $hasTitle = collect($leafNames)->contains(fn (string $key): bool => in_array($key, ['title', 'name', 'summary', 'subject', 'headline', 'eventtitle', 'eventname'], true));
+        $hasDate = collect($leafNames)->contains(fn (string $key): bool => str_contains($key, 'date') || str_contains($key, 'start') || $key === 'dtstart');
+        $containerName = $this->normalizeJsonKey((string) str($path)->afterLast('.'));
+        $containerBonus = in_array($containerName, ['events', 'event', 'items', 'results', 'data', 'docs', 'entries', 'nodes', 'records', 'occurrences'], true) ? 2 : 0;
+
+        return ($hasTitle ? 4 : 0) + ($hasDate ? 5 : 0) + $containerBonus;
     }
 
     /**
@@ -107,31 +185,97 @@ class EventSourceConfigDrafter
     private function inferJsonMapping(array $item): array
     {
         $aliases = [
-            'title' => ['title', 'name', 'summary', 'Title', 'Name', 'Summary'],
-            'starts_at' => ['starts_at', 'start.dateTime', 'start.date', 'start_time', 'start_date', 'startDate', 'startDateTime', 'dtstart', 'start', 'StartDateTime', 'MeetingDateTime', 'MeetingDate'],
-            'ends_at' => ['ends_at', 'end.dateTime', 'end.date', 'end_time', 'end_date', 'endDate', 'endDateTime', 'dtend', 'end', 'EndDateTime'],
-            'location_name' => ['location_name', 'location.name', 'venue.name', 'location', 'venue', 'Location', 'MeetingLocation'],
-            'location_address' => ['location_address', 'location.address', 'venue.address'],
-            'description' => ['description', 'details', 'body'],
-            'event_url' => ['event_url', 'url', 'link', 'URL', 'Link'],
-            'external_id' => ['external_id', 'id', 'uid', 'Id', 'ID', 'UID'],
-            'all_day' => ['all_day', 'allDay'],
+            'title' => ['title', 'eventTitle', 'event_name', 'name', 'summary', 'subject', 'headline'],
+            'starts_at' => ['starts_at', 'start.dateTime', 'start.date', 'startDateTime', 'startDatetime', 'startTimestamp', 'dtstart', 'start', 'StartDateTime', 'MeetingDateTime', 'startDate', 'start_date', 'eventDate', 'date', 'MeetingDate'],
+            'start_time' => ['start_time', 'startTime', 'eventTime', 'time', 'MeetingTime'],
+            'ends_at' => ['ends_at', 'end.dateTime', 'end.date', 'endDateTime', 'endDatetime', 'endTimestamp', 'dtend', 'end', 'EndDateTime', 'endDate', 'end_date'],
+            'end_time' => ['end_time', 'endTime'],
+            'location_name' => ['location_name', 'location.name', 'venue.name', 'venue.venue', 'place.name', 'location', 'venue', 'Location', 'MeetingLocation'],
+            'location_address' => ['location_address', 'location.address', 'venue.address', 'place.address', 'address'],
+            'description' => ['description', 'details', 'body', 'content', 'excerpt'],
+            'event_url' => ['event_url', 'eventUrl', 'url', 'link', 'permalink', 'href'],
+            'external_id' => ['external_id', 'externalId', 'id', 'uid', 'eventId', 'Id', 'ID', 'UID'],
+            'all_day' => ['all_day', 'allDay', 'isAllDay'],
         ];
 
+        $paths = $this->scalarPaths($item);
         $mapping = [];
 
         foreach ($aliases as $target => $candidates) {
-            foreach ($candidates as $candidate) {
-                $value = Arr::get($item, $candidate);
+            $matchedPath = $this->matchingJsonPath($paths, $candidates);
 
-                if (Arr::has($item, $candidate) && ! is_array($value) && ! is_object($value)) {
-                    $mapping[$target] = $candidate;
-                    break;
-                }
+            if ($matchedPath !== null) {
+                $mapping[$target] = $matchedPath;
             }
         }
 
         return $mapping;
+    }
+
+    /**
+     * @param  array<string, mixed>  $value
+     * @return array<string, scalar|null>
+     */
+    private function scalarPaths(array $value, string $prefix = '', int $depth = 0): array
+    {
+        if ($depth > 7) {
+            return [];
+        }
+
+        $paths = [];
+
+        foreach ($value as $key => $child) {
+            $path = $prefix === '' ? (string) $key : $prefix.'.'.$key;
+
+            if (is_array($child)) {
+                $paths += $this->scalarPaths($child, $path, $depth + 1);
+            } elseif (is_scalar($child) || $child === null) {
+                $paths[$path] = $child;
+            }
+        }
+
+        return $paths;
+    }
+
+    /**
+     * @param  array<string, scalar|null>  $paths
+     * @param  array<int, string>  $candidates
+     */
+    private function matchingJsonPath(array $paths, array $candidates): ?string
+    {
+        foreach ($candidates as $candidate) {
+            $candidateLower = mb_strtolower($candidate);
+
+            foreach (array_keys($paths) as $path) {
+                $pathLower = mb_strtolower($path);
+
+                if (
+                    $pathLower === $candidateLower
+                    || (str_contains($candidateLower, '.') && str_ends_with($pathLower, '.'.$candidateLower))
+                ) {
+                    return $path;
+                }
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            $candidateNormalized = $this->normalizeJsonKey($candidate);
+
+            foreach (array_keys($paths) as $path) {
+                $leaf = (string) str($path)->afterLast('.');
+
+                if ($this->normalizeJsonKey($leaf) === $candidateNormalized) {
+                    return $path;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeJsonKey(string $key): string
+    {
+        return mb_strtolower(preg_replace('/[^a-z0-9]+/i', '', $key) ?? '');
     }
 
     /**
@@ -140,6 +284,19 @@ class EventSourceConfigDrafter
     private function draftHtml(string $sourceUrl, string $body): array
     {
         $crawler = new Crawler($body, $sourceUrl);
+
+        if ($this->hasDatedJsonLdEvent($crawler)) {
+            return [
+                'config' => [
+                    'profile' => 'json_ld_events',
+                    'timezone' => null,
+                    'max_items' => 100,
+                ],
+                'confidence' => 0.96,
+                'warnings' => [],
+            ];
+        }
+
         $itemSelector = $this->firstSelectorWithCount($crawler, [
             '[itemtype*="schema.org/Event"]',
             '[itemtype*="Event"]',
@@ -219,6 +376,51 @@ class EventSourceConfigDrafter
                 ? []
                 : ['The calendar item wrapper was not obvious. Confirm the preview before saving.'],
         ];
+    }
+
+    private function hasDatedJsonLdEvent(Crawler $crawler): bool
+    {
+        try {
+            foreach ($crawler->filter('script[type*="ld+json"]') as $node) {
+                $payload = json_decode(trim((string) $node->textContent), true);
+
+                if (is_array($payload) && $this->jsonLdContainsDatedEvent($payload)) {
+                    return true;
+                }
+            }
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<string|int, mixed>  $value
+     */
+    private function jsonLdContainsDatedEvent(array $value, int $depth = 0): bool
+    {
+        if ($depth > 10) {
+            return false;
+        }
+
+        $type = $value['@type'] ?? null;
+        $types = is_array($type) ? $type : [$type];
+        $isEvent = collect($types)->contains(
+            fn (mixed $candidate): bool => is_string($candidate) && mb_strtolower($candidate) === 'event'
+        );
+
+        if ($isEvent && is_scalar($value['startDate'] ?? null) && trim((string) $value['startDate']) !== '') {
+            return true;
+        }
+
+        foreach ($value as $child) {
+            if (is_array($child) && $this->jsonLdContainsDatedEvent($child, $depth + 1)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function firstNode(Crawler $crawler, string $selector): Crawler

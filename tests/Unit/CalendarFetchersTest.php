@@ -146,6 +146,67 @@ it('parses every CivicPlus RSS item using event dates times and locations', func
         ->and($events[2]->startsAt->format('Y-m-d H:i'))->toBe('2026-09-08 10:00');
 });
 
+it('uses generic rss event extensions instead of the item publication date', function () {
+    $rss = <<<'XML'
+        <?xml version="1.0"?><rss version="2.0" xmlns:event="https://example.com/event-feed"><channel>
+        <item><title>Community budget workshop</title>
+        <link>https://example.com/events/budget-workshop</link>
+        <pubDate>Mon, 17 Aug 2026 09:00:00 -0500</pubDate>
+        <event:startDate>2026-09-18T18:30:00-05:00</event:startDate>
+        <event:endDate>2026-09-18T20:00:00-05:00</event:endDate>
+        <event:venue>Eastside Library</event:venue>
+        </item></channel></rss>
+        XML;
+
+    Http::fake([
+        'https://example.com/events.rss' => Http::response($rss, 200),
+    ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'rss',
+        'source_url' => 'https://example.com/events.rss',
+        'config' => ['timezone' => 'America/Chicago'],
+    ]);
+
+    $events = (new RssEventsFetcher(new CalendarDateParser, new EventNormalizer))->fetch($source);
+
+    expect($events)->toHaveCount(1)
+        ->and($events[0]->startsAt->format('Y-m-d H:i'))->toBe('2026-09-18 18:30')
+        ->and($events[0]->endsAt?->format('Y-m-d H:i'))->toBe('2026-09-18 20:00')
+        ->and($events[0]->locationName)->toBe('Eastside Library')
+        ->and($events[0]->allDay)->toBeFalse();
+});
+
+it('uses labelled event dates in rss descriptions before publication dates', function () {
+    $rss = <<<'XML'
+        <?xml version="1.0"?><rss version="2.0"><channel><item>
+        <title>Neighborhood meeting</title>
+        <description><![CDATA[<strong>When:</strong> September 22, 2026 at 6:30 PM - 8:00 PM]]></description>
+        <pubDate>Mon, 17 Aug 2026 09:00:00 -0500</pubDate>
+        </item></channel></rss>
+        XML;
+
+    Http::fake([
+        'https://example.com/community-feed.xml' => Http::response($rss, 200),
+    ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'rss',
+        'source_url' => 'https://example.com/community-feed.xml',
+        'config' => ['timezone' => 'America/Chicago'],
+    ]);
+
+    $events = (new RssEventsFetcher(new CalendarDateParser, new EventNormalizer))->fetch($source);
+
+    expect($events)->toHaveCount(1)
+        ->and($events[0]->startsAt->format('Y-m-d H:i'))->toBe('2026-09-22 18:30')
+        ->and($events[0]->endsAt?->format('Y-m-d H:i'))->toBe('2026-09-22 20:00');
+});
+
 it('parses json api feeds into event dtos', function () {
     $payload = [
         'events' => [
@@ -197,6 +258,112 @@ it('parses json api feeds into event dtos', function () {
     expect($events)->toHaveCount(1)
         ->and($events[0]->title)->toBe('JSON Event')
         ->and($events[0]->locationName)->toBe('Main Library');
+});
+
+it('combines separately mapped json event dates and times', function () {
+    Http::fake([
+        'https://example.com/api/calendar' => Http::response([
+            'calendar' => [
+                'entries' => [[
+                    'event' => [
+                        'eventTitle' => 'Planning commission',
+                        'eventDate' => '2026-09-24',
+                        'eventTime' => '6:30 PM - 8:00 PM',
+                    ],
+                ]],
+            ],
+        ], 200),
+    ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'json_api',
+        'source_url' => 'https://example.com/api/calendar',
+        'config' => [
+            'json' => [
+                'root_path' => 'calendar.entries',
+                'mapping' => [
+                    'title' => 'event.eventTitle',
+                    'starts_at' => 'event.eventDate',
+                    'start_time' => 'event.eventTime',
+                ],
+            ],
+        ],
+    ]);
+
+    $events = (new JsonApiFetcher(new CalendarDateParser, new EventNormalizer))->fetch($source);
+
+    expect($events)->toHaveCount(1)
+        ->and($events[0]->title)->toBe('Planning commission')
+        ->and($events[0]->startsAt->format('Y-m-d H:i'))->toBe('2026-09-24 18:30')
+        ->and($events[0]->endsAt?->format('Y-m-d H:i'))->toBe('2026-09-24 20:00');
+});
+
+it('maps a single json event object without a list container', function () {
+    Http::fake([
+        'https://example.com/api/event/42' => Http::response([
+            'eventTitle' => 'Library board meeting',
+            'eventDate' => '2026-09-17',
+            'eventTime' => '5:30 PM',
+        ], 200),
+    ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'json_api',
+        'source_url' => 'https://example.com/api/event/42',
+        'config' => [
+            'json' => [
+                'root_path' => '',
+                'mapping' => [
+                    'title' => 'eventTitle',
+                    'starts_at' => 'eventDate',
+                    'start_time' => 'eventTime',
+                ],
+            ],
+        ],
+    ]);
+
+    $events = (new JsonApiFetcher(new CalendarDateParser, new EventNormalizer))->fetch($source);
+
+    expect($events)->toHaveCount(1)
+        ->and($events[0]->title)->toBe('Library board meeting')
+        ->and($events[0]->startsAt->format('Y-m-d H:i'))->toBe('2026-09-17 17:30');
+});
+
+it('maps json event collections keyed by external id', function () {
+    Http::fake([
+        'https://example.com/api/events' => Http::response([
+            'events' => [
+                'event-41' => ['title' => 'First meeting', 'startDate' => '2026-09-17'],
+                'event-42' => ['title' => 'Second meeting', 'startDate' => '2026-09-18'],
+            ],
+        ], 200),
+    ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'json_api',
+        'source_url' => 'https://example.com/api/events',
+        'config' => [
+            'json' => [
+                'root_path' => 'events',
+                'mapping' => [
+                    'title' => 'title',
+                    'starts_at' => 'startDate',
+                ],
+            ],
+        ],
+    ]);
+
+    $events = (new JsonApiFetcher(new CalendarDateParser, new EventNormalizer))->fetch($source);
+
+    expect($events)->toHaveCount(2)
+        ->and($events[0]->title)->toBe('First meeting')
+        ->and($events[1]->title)->toBe('Second meeting');
 });
 
 it('maps CivicWeb meeting records from its month-based json service', function () {
@@ -747,6 +914,42 @@ it('parses html calendar listings into event dtos', function () {
     expect($events)->toHaveCount(1)
         ->and($events[0]->title)->toBe('HTML Event')
         ->and($events[0]->eventUrl)->toBe('https://example.com/event-1');
+});
+
+it('parses schema org json ld events embedded in an html page', function () {
+    $html = <<<'HTML'
+        <!doctype html><html><head><title>Community calendar</title>
+        <script type="application/ld+json">
+        {"@context":"https://schema.org","@graph":[
+            {"@type":"Event","@id":"event-42","name":"Public art opening","startDate":"2026-09-26T19:00:00-05:00","endDate":"2026-09-26T21:00:00-05:00","url":"/events/public-art","location":{"@type":"Place","name":"Arts Center","address":{"streetAddress":"100 Main St","addressLocality":"Lawrence","addressRegion":"KS","postalCode":"66044"}}}
+        ]}
+        </script></head><body><div id="calendar"></div></body></html>
+        HTML;
+
+    Http::fake([
+        'https://example.com/calendar' => Http::response($html, 200),
+    ]);
+
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create([
+        'city_id' => $city->id,
+        'source_type' => 'html',
+        'source_url' => 'https://example.com/calendar',
+        'config' => [
+            'profile' => 'json_ld_events',
+            'timezone' => 'America/Chicago',
+        ],
+    ]);
+
+    $events = (new HtmlCalendarFetcher(new CalendarDateParser, new EventNormalizer))->fetch($source);
+
+    expect($events)->toHaveCount(1)
+        ->and($events[0]->title)->toBe('Public art opening')
+        ->and($events[0]->startsAt->format('Y-m-d H:i'))->toBe('2026-09-26 19:00')
+        ->and($events[0]->endsAt?->format('Y-m-d H:i'))->toBe('2026-09-26 21:00')
+        ->and($events[0]->locationName)->toBe('Arts Center')
+        ->and($events[0]->locationAddress)->toBe('100 Main St, Lawrence, KS, 66044')
+        ->and($events[0]->eventUrl)->toBe('https://example.com/events/public-art');
 });
 
 it('parses Wichita Chamber html listings into event dtos', function () {

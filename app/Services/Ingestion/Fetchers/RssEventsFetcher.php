@@ -56,16 +56,25 @@ class RssEventsFetcher implements EventSourceFetcher
             $title = $this->stringValue($item->title ?? '');
             $link = $this->extractLink($item);
             $description = $this->extractDescription($item);
-            $pubDate = $this->stringValue($item->pubDate ?? ($item->updated ?? ''));
-            $guid = $this->stringValue($item->guid ?? '');
+            $pubDate = $this->stringValue($item->pubDate ?? ($item->updated ?? ($item->published ?? '')));
+            $guid = $this->stringValue($item->guid ?? ($item->id ?? ''));
             $calendarDate = $this->calendarEventField($item, 'EventDates');
             $calendarTime = $this->calendarEventField($item, 'EventTimes');
             $calendarLocation = $this->normalizeCalendarText($this->calendarEventField($item, 'Location'));
+            $structured = $this->structuredEventFields($item);
 
             $dateResult = $this->extractDateFromConfig($dateConfig, $title, $description, $timezone);
 
             if (! $dateResult && $calendarDate !== '') {
                 $dateResult = $this->dateParser->parse($calendarDate, $calendarTime, $timezone);
+            }
+
+            if (! $dateResult) {
+                $dateResult = $this->parseStructuredEventDate($structured, $timezone);
+            }
+
+            if (! $dateResult) {
+                $dateResult = $this->extractLabelledDate($title.' '.$description, $timezone);
             }
 
             if (! $dateResult && $pubDate !== '') {
@@ -86,7 +95,7 @@ class RssEventsFetcher implements EventSourceFetcher
                 startsAt: $startsAt,
                 endsAt: $endsAt,
                 allDay: $allDay,
-                locationName: $calendarLocation !== '' ? $calendarLocation : null,
+                locationName: $calendarLocation !== '' ? $calendarLocation : ($structured['location'] ?: null),
                 locationAddress: null,
                 description: $description ?: null,
                 eventUrl: $eventUrl,
@@ -101,6 +110,7 @@ class RssEventsFetcher implements EventSourceFetcher
                     'event_dates' => $calendarDate,
                     'event_times' => $calendarTime,
                     'location' => $calendarLocation,
+                    'structured_event_fields' => $structured,
                 ],
             );
         }
@@ -173,6 +183,137 @@ class RssEventsFetcher implements EventSourceFetcher
         }
 
         return '';
+    }
+
+    /**
+     * Read common event extensions without requiring a vendor-specific namespace.
+     * This covers feeds such as Eventbrite/WordPress calendar RSS and Google-style
+     * Atom feeds that expose gd:when and gd:where attributes.
+     *
+     * @return array{start: string, end: string, date: string, time: string, end_time: string, location: string}
+     */
+    private function structuredEventFields(SimpleXMLElement $item): array
+    {
+        $fields = [
+            'start' => '',
+            'end' => '',
+            'date' => '',
+            'time' => '',
+            'end_time' => '',
+            'location' => '',
+        ];
+
+        foreach ($item->xpath('./*') ?: [] as $node) {
+            if (! $node instanceof SimpleXMLElement) {
+                continue;
+            }
+
+            $name = mb_strtolower($node->getName());
+            $value = $this->normalizeCalendarText($this->stringValue($node));
+            $attributes = $node->attributes();
+
+            if ($name === 'when' && $attributes) {
+                $fields['start'] = $fields['start'] ?: $this->stringValue($attributes['startTime'] ?? '');
+                $fields['end'] = $fields['end'] ?: $this->stringValue($attributes['endTime'] ?? '');
+            }
+
+            if ($name === 'where' && $attributes) {
+                $fields['location'] = $fields['location'] ?: $this->normalizeCalendarText(
+                    $this->stringValue($attributes['valueString'] ?? '')
+                );
+            }
+
+            if (in_array($name, ['startdate', 'startdatetime', 'dtstart', 'start'], true)) {
+                $fields['start'] = $fields['start'] ?: $value;
+            } elseif (in_array($name, ['enddate', 'enddatetime', 'dtend', 'end'], true)) {
+                $fields['end'] = $fields['end'] ?: $value;
+            } elseif (in_array($name, ['eventdate', 'meetingdate'], true)) {
+                $fields['date'] = $fields['date'] ?: $value;
+            } elseif (in_array($name, ['eventtime', 'eventtimes', 'meetingtime'], true)) {
+                $fields['time'] = $fields['time'] ?: $value;
+            } elseif ($name === 'starttime') {
+                if ($this->containsDate($value)) {
+                    $fields['start'] = $fields['start'] ?: $value;
+                } else {
+                    $fields['time'] = $fields['time'] ?: $value;
+                }
+            } elseif ($name === 'endtime') {
+                if ($this->containsDate($value)) {
+                    $fields['end'] = $fields['end'] ?: $value;
+                } else {
+                    $fields['end_time'] = $fields['end_time'] ?: $value;
+                }
+            } elseif (in_array($name, ['location', 'venue', 'where'], true)) {
+                $fields['location'] = $fields['location'] ?: $value;
+            }
+        }
+
+        return $fields;
+    }
+
+    /**
+     * @param  array{start: string, end: string, date: string, time: string, end_time: string, location: string}  $fields
+     * @return array{starts_at: ?Carbon, ends_at: ?Carbon, all_day: bool}|null
+     */
+    private function parseStructuredEventDate(array $fields, string $timezone): ?array
+    {
+        $date = $fields['start'] ?: $fields['date'];
+
+        if ($date === '') {
+            return null;
+        }
+
+        $result = $fields['time'] !== ''
+            ? $this->dateParser->parse($date, $fields['time'], $timezone)
+            : $this->dateParser->parseIso($date, $timezone);
+
+        if (! $result || ! $result['starts_at']) {
+            return null;
+        }
+
+        $endResult = null;
+
+        if ($fields['end'] !== '') {
+            $endResult = $this->dateParser->parseIso($fields['end'], $timezone);
+        } elseif ($fields['end_time'] !== '') {
+            $endResult = $this->dateParser->parse($date, $fields['end_time'], $timezone);
+        }
+
+        if ($endResult && $endResult['starts_at']) {
+            $result['ends_at'] = $endResult['starts_at'];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Extract conservative, explicitly labelled event dates from feed text. The
+     * publication date remains a last-resort fallback for legacy sources.
+     *
+     * @return array{starts_at: ?Carbon, ends_at: ?Carbon, all_day: bool}|null
+     */
+    private function extractLabelledDate(string $value, string $timezone): ?array
+    {
+        $text = html_entity_decode(strip_tags(str_replace(['<br>', '<br/>', '<br />'], ' ', $value)), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = preg_replace('/\s+/', ' ', $text) ?? '';
+        $date = '(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day)?,?\s+)?(?:[A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{4}-\d{2}-\d{2})';
+        $time = '(?:\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?(?:\s*(?:-|to|–|—)\s*\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)?)';
+        $pattern = '/\b(?:(?:event|meeting)\s*)?date\s*:?\s*(?<date>'.$date.')(?:\s*(?:at|,|\|)?\s*(?<time>'.$time.'))?|\b(?:when|starts?)\s*:?\s*(?<date_alt>'.$date.')(?:\s*(?:at|,|\|)?\s*(?<time_alt>'.$time.'))?/iu';
+
+        if (preg_match($pattern, $text, $matches) !== 1) {
+            return null;
+        }
+
+        return $this->dateParser->parse(
+            ($matches['date'] ?? '') ?: ($matches['date_alt'] ?? ''),
+            ($matches['time'] ?? '') ?: ($matches['time_alt'] ?? ''),
+            $timezone,
+        );
+    }
+
+    private function containsDate(string $value): bool
+    {
+        return preg_match('/\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|[A-Z][a-z]+\s+\d{1,2})\b/i', $value) === 1;
     }
 
     private function normalizeCalendarText(string $value): string
