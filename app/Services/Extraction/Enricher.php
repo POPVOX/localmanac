@@ -366,30 +366,49 @@ PROMPT;
         $cityName = Utf8Sanitizer::sanitize($article->city?->name ?? 'Unknown');
         $title = Utf8Sanitizer::sanitize($article->title ?? 'Untitled');
         $organization = Utf8Sanitizer::sanitize($article->scraper?->organization?->name ?? 'Unknown');
+        $timezone = $article->city?->timezone ?? config('app.timezone');
+        $publishedAt = $article->published_at?->clone()->timezone($timezone);
+        $publishedDate = $publishedAt?->format('Y-m-d') ?? 'Unknown';
         $packText = Utf8Sanitizer::sanitize($packText);
 
         return <<<PROMPT
 You are an explainer writer for a civic intelligence platform.
-Be accurate, plain-spoken, and helpful. Do not invent facts.
+Be accurate, plain-spoken, specific, and useful. Do not invent facts.
 Use only what is in the ARTICLE TEXT.
 
 ARTICLE CONTEXT
 City: {$cityName}
 Article title: {$title}
 Source organization: {$organization}
+Article published date: {$publishedDate}
+
+EDITORIAL GOAL
+Give residents enough concrete information to decide whether the original article is worth opening.
+This is a useful capsule of the source, not a teaser and not a restatement of its title.
+
+SUBSTANCE-FIRST RULES
+- Lead with the actions, decisions, proposals, disputes, or consequences described in the source. Meeting logistics are supporting details, not the main story.
+- For a meeting notice, agenda, or recap, identify what the body will decide, review, hear, fund, change, approve, or enforce.
+- Preserve explicitly named applicants, respondents, organizations, projects, contracts, properties, neighborhoods, and events when they explain what an agenda item is actually about.
+- If the source names 5 or fewer substantive agenda items, account for every item across whats_happening and key_details. If it names more than 5, select the most consequential or representative items and make clear that the list is not exhaustive.
+- Distinguish different kinds of action, such as considering an application versus holding an enforcement or show-cause hearing.
+- Do not imply that a proposal was approved, denied, or otherwise decided when the source only says it will be considered.
+- Resolve relative dates against the article published date when possible. If an exact date is not supported, do not guess.
 
 TASK
 Produce a concise, demo-style explainer with:
 - headline: short, clear headline (4–10 words, <= 80 chars). Must read like a title, not a sentence.
-- whats_happening: 2–4 sentences summarizing the situation in plain English.
-- why_it_matters: 1–3 sentences explaining why a resident should care.
-- key_details: up to 5 bullet-style strings (dates, times, locations, dollar amounts, deadlines) ONLY if explicitly present.
+- whats_happening: 3–5 sentences, usually 70–140 words. Start with the most decision-useful facts, then add only the logistics needed to understand them.
+- why_it_matters: 1–2 sentences connecting the stated action to a concrete, source-supported effect on people, services, public money, property, rules, or the ability to participate. Return null if the source does not support a concrete explanation.
+- key_details: up to 5 self-contained bullet-style strings with substantive facts not already clear from whats_happening. Prioritize named agenda items, affected parties, proposals, dollar amounts, properties, deadlines, and decision scope. Use dates, times, and locations only after the substantive details are covered.
 - what_to_watch: up to 3 short strings about next known steps ONLY if explicitly present.
 - evidence: optional map with evidence quotes for whats_happening and why_it_matters.
 
 STYLE
 - No jargon unless the text uses it; if needed, explain it briefly.
-- Be specific with dates/times/places when present.
+- Prefer concrete nouns and active verbs. Name the subject instead of writing "various items," "license applications," "important local issues," or similar generalities when the source provides specifics.
+- Do not use generic civic boilerplate such as "residents should stay informed," "this affects the community," or "the meeting provides transparency."
+- Do not repeat the same date, time, or location in multiple fields unless it is essential for clarity.
 - Avoid starting the headline with "The city of..." or "The City is...".
 - If details are missing, omit that list item instead of guessing.
 

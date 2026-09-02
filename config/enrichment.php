@@ -8,7 +8,7 @@ return [
         explode(',', (string) env('ENRICHMENT_PROVIDER_CHAIN', 'openai'))
     ))),
     'model' => 'gpt-4o-mini',
-    'prompt_version' => 'enrich_v1_prompt_002',
+    'prompt_version' => 'enrich_v1_prompt_004',
     'min_cleaned_text_chars' => 800,
     'max_text_chars' => 18000,
     'queue' => env('ENRICHMENT_QUEUE', 'enrichment'),

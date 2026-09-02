@@ -481,3 +481,60 @@ it('uses title and summary as fallback text when cleaned text is empty', functio
     expect($payload['analysis']['confidence'])->toBe(0.71)
         ->and($payload['explainer']['why_it_matters'])->toBe('Residents will see scheduling changes.');
 });
+
+it('prompts the explainer to prioritize specific meeting agenda items over logistics', function () {
+    config()->set('enrichment.enabled', true);
+
+    $city = City::create([
+        'name' => 'Jackson',
+        'slug' => 'jackson',
+    ]);
+
+    $article = Article::create([
+        'city_id' => $city->id,
+        'title' => 'Beer Board Meeting',
+        'status' => 'published',
+        'content_type' => 'html',
+        'published_at' => '2026-09-01 09:00:00',
+    ]);
+
+    ArticleBody::create([
+        'article_id' => $article->id,
+        'cleaned_text' => implode("\n\n", [
+            'The Jackson Beer Board will meet September 1, 2026, at 8:15 a.m. in City Hall to consider applications for beer licenses and conduct a Show-Cause hearing.',
+            'Jennifer Graves applied for a special occasion known as Dancing with the Stars at the Carl Perkins Civic Center on October 22, 2026.',
+            'Cara Hickerson applied for a Jackson Symphony League series at the Carl Perkins Civic Center on dates from September 12 through December 5, 2026.',
+            'Melissa Spurgeon applied for two West Tennessee Foundation Healthcare Foundation events on November 13 and November 14, 2026.',
+            'Mark Winston applied for an Omega Psi Phi Fraternity event at the Jackson Fairgrounds on September 19, 2026.',
+            'Show Cause Hearing: ASHUDEV, Inc. DBA-One Stop, 1425 South Highland Avenue, Patel, Shanikumar.',
+        ]),
+        'extracted_at' => now(),
+        'extraction_status' => 'success',
+    ]);
+
+    CivicAnalysisAgent::fake([[]]);
+    EntityEnrichmentAgent::fake([[]]);
+    ExplainerAgent::fake([
+        [
+            'explainer' => [
+                'headline' => 'Beer board reviews event applications',
+                'whats_happening' => 'The board will consider four event applications and hold a show-cause hearing.',
+                'why_it_matters' => null,
+                'key_details' => [],
+                'what_to_watch' => null,
+                'evidence' => null,
+            ],
+        ],
+    ]);
+
+    app(Enricher::class)->enrich($article->fresh());
+
+    ExplainerAgent::assertPrompted(function ($prompt): bool {
+        return $prompt->contains('Give residents enough concrete information to decide whether the original article is worth opening.')
+            && $prompt->contains('Meeting logistics are supporting details, not the main story.')
+            && $prompt->contains('account for every item across whats_happening and key_details')
+            && $prompt->contains('Article published date: 2026-09-01')
+            && $prompt->contains('Jennifer Graves')
+            && $prompt->contains('ASHUDEV, Inc. DBA-One Stop');
+    });
+});
