@@ -34,10 +34,11 @@
                     </flux:badge>
                 </div>
 
-                <dl class="mt-5 grid grid-cols-3 divide-x divide-[#e1dfd7] border-y border-[#e1dfd7] py-3">
-                    <div class="pr-3"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Sources') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $activeSourceCount }}<span class="text-xs font-normal text-[#87968f]"> / {{ $sourceCount }}</span></dd></div>
-                    <div class="px-3"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Articles · 7d') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $city->recent_articles_count }}</dd></div>
-                    <div class="pl-3"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Events · 30d') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $city->upcoming_events_count }}</dd></div>
+                <dl class="mt-5 grid grid-cols-2 divide-x divide-y divide-[#e1dfd7] border-y border-[#e1dfd7] sm:grid-cols-4 sm:divide-y-0">
+                    <div class="px-3 py-3 first:pl-0"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Members') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $city->members_count }}<span class="block text-[0.68rem] font-normal text-[#87968f]">{{ __('+:count · 30d', ['count' => $city->new_members_last_30d_count]) }}</span></dd></div>
+                    <div class="px-3 py-3"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Sources') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $activeSourceCount }}<span class="text-xs font-normal text-[#87968f]"> / {{ $sourceCount }}</span></dd></div>
+                    <div class="px-3 py-3"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Articles · 7d') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $city->recent_articles_count }}</dd></div>
+                    <div class="px-3 py-3 last:pr-0"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Events · 30d') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $city->upcoming_events_count }}</dd></div>
                 </dl>
 
                 <div class="mt-4 flex items-center justify-between gap-3 text-xs text-[#718078]">
@@ -46,7 +47,7 @@
                 </div>
 
                 <div class="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-[#e1dfd7] pt-4">
-                    <flux:button size="sm" variant="subtle" :href="route('admin.dashboard', ['cityId' => $city->id])" wire:navigate>{{ __('Open dashboard') }}</flux:button>
+                    <flux:button size="sm" variant="subtle" :href="route('admin.cities.analytics', $city)" wire:navigate>{{ __('User analytics') }}</flux:button>
                     <div class="flex gap-1">
                         <flux:button size="sm" variant="ghost" :href="route('admin.cities.preview', $city)" icon="arrow-top-right-on-square" target="_blank" rel="noopener noreferrer">{{ __('Preview') }}</flux:button>
                         <flux:button size="sm" variant="ghost" :href="route('admin.cities.access-codes', $city)" wire:navigate>{{ __('Codes') }}</flux:button>

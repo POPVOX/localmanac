@@ -7,7 +7,7 @@
             </flux:heading>
             <flux:subheading class="mt-2 max-w-2xl">
                 {{ $selectedCityName
-                    ? __('Publishing, source health, and recent activity for this location.')
+                    ? __('Audience growth, publishing, source health, and recent activity for this location.')
                     : __('Compare coverage and operations across the LocAlmanac network, then focus on any city.') }}
             </flux:subheading>
         </div>
@@ -107,17 +107,18 @@
                         </flux:badge>
                     </div>
 
-                    <dl class="mt-5 grid grid-cols-3 divide-x divide-[#e1dfd7] border-y border-[#e1dfd7] py-3">
-                        <div class="pr-3"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Sources') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $activeSourceCount }}<span class="text-xs font-normal text-[#87968f]"> / {{ $sourceCount }}</span></dd></div>
-                        <div class="px-3"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Articles · 7d') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $city->recent_articles_count }}</dd></div>
-                        <div class="pl-3"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Events · 30d') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $city->upcoming_events_count }}</dd></div>
+                    <dl class="mt-5 grid grid-cols-2 divide-x divide-y divide-[#e1dfd7] border-y border-[#e1dfd7] sm:grid-cols-4 sm:divide-y-0">
+                        <div class="px-3 py-3 first:pl-0"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Members') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $city->members_count }}<span class="block text-[0.68rem] font-normal text-[#87968f]">{{ __('+:count · 30d', ['count' => $city->new_members_last_30d_count]) }}</span></dd></div>
+                        <div class="px-3 py-3"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Sources') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $activeSourceCount }}<span class="text-xs font-normal text-[#87968f]"> / {{ $sourceCount }}</span></dd></div>
+                        <div class="px-3 py-3"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Articles · 7d') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $city->recent_articles_count }}</dd></div>
+                        <div class="px-3 py-3 last:pr-0"><dt class="text-[0.68rem] font-semibold uppercase tracking-wide text-[#87968f]">{{ __('Events · 30d') }}</dt><dd class="mt-1 text-xl font-semibold text-[#18342c]">{{ $city->upcoming_events_count }}</dd></div>
                     </dl>
 
                     <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
                         <flux:button
                             size="sm"
                             variant="subtle"
-                            :href="$selectedCityName ? route('admin.sources.index', ['cityId' => $city->id]) : route('admin.dashboard', ['cityId' => $city->id])"
+                            :href="$selectedCityName ? route('admin.sources.index', ['cityId' => $city->id]) : route('admin.cities.analytics', $city)"
                             wire:navigate
                         >{{ $selectedCityName ? __('Manage sources') : __('Open dashboard') }}</flux:button>
                         <flux:button size="sm" variant="ghost" :href="route('admin.cities.preview', $city)" icon="arrow-top-right-on-square" target="_blank" rel="noopener noreferrer">{{ __('Preview') }}</flux:button>
@@ -130,12 +131,109 @@
     </section>
 
     @if ($selectedCityName)
+        @php
+            $attributionRate = $memberCount > 0
+                ? (int) round(($attributedMemberCount / $memberCount) * 100)
+                : 0;
+        @endphp
+        <section id="user-analytics" class="space-y-4 scroll-mt-6" aria-labelledby="user-analytics-heading">
+            <div class="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                    <div class="admin-kicker">{{ __('Audience') }}</div>
+                    <flux:heading id="user-analytics-heading" size="lg" class="mt-1">{{ __('User analytics') }}</flux:heading>
+                    <flux:text variant="subtle" class="mt-1">{{ __('Understand membership growth and which partners or campaigns are bringing people into :city.', ['city' => $selectedCityName]) }}</flux:text>
+                </div>
+                <flux:button size="sm" variant="ghost" :href="route('admin.cities.access-codes', ['city' => $selectedCitySlug])" wire:navigate>{{ __('Manage access codes') }}</flux:button>
+            </div>
+
+            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div class="admin-stat !py-4">
+                    <div class="admin-kicker">{{ __('Members') }}</div>
+                    <div class="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[#18342c]">{{ number_format($memberCount) }}</div>
+                    <div class="mt-1 text-xs text-[#718078]">{{ __('with access to this city') }}</div>
+                </div>
+                <div class="admin-stat !py-4">
+                    <div class="admin-kicker">{{ __('New members') }}</div>
+                    <div class="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[#18342c]">{{ number_format($newMembersLast7d) }}</div>
+                    <div class="mt-1 text-xs text-[#718078]">{{ __('last 7 days · :count in 30 days', ['count' => number_format($newMembersLast30d)]) }}</div>
+                </div>
+                <div class="admin-stat !py-4">
+                    <div class="admin-kicker">{{ __('Active codes') }}</div>
+                    <div class="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[#18342c]">{{ number_format($activeAccessCodes) }}</div>
+                    <div class="mt-1 text-xs text-[#718078]">{{ __('available to partners and campaigns') }}</div>
+                </div>
+                <div class="admin-stat !py-4">
+                    <div class="admin-kicker">{{ __('Attributed') }}</div>
+                    <div class="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[#18342c]">{{ $attributionRate }}%</div>
+                    <div class="mt-1 text-xs text-[#718078]">{{ trans_choice(':count tracked member|:count tracked members', $attributedMemberCount, ['count' => number_format($attributedMemberCount)]) }} · {{ trans_choice(':count other|:count others', $unattributedMemberCount, ['count' => number_format($unattributedMemberCount)]) }}</div>
+                </div>
+            </div>
+
+            <div class="grid gap-4 xl:grid-cols-2">
+                <div class="admin-panel overflow-hidden">
+                    <div class="border-b border-[#e1dfd7] px-5 py-4">
+                        <flux:heading size="sm">{{ __('Campaign performance') }}</flux:heading>
+                        <flux:text variant="subtle" class="mt-1">{{ __('Members attributed to each access code.') }}</flux:text>
+                    </div>
+                    <div class="overflow-x-auto px-3 pb-3">
+                        <flux:table>
+                            <flux:table.columns sticky>
+                                <flux:table.column sticky>{{ __('Campaign or partner') }}</flux:table.column>
+                                <flux:table.column align="end">{{ __('30d') }}</flux:table.column>
+                                <flux:table.column align="end">{{ __('Total') }}</flux:table.column>
+                            </flux:table.columns>
+                            <flux:table.rows>
+                                @forelse ($topAccessCodes as $code)
+                                    <flux:table.row :key="$code->id">
+                                        <flux:table.cell variant="strong" sticky>
+                                            <div class="flex flex-col gap-1">
+                                                <span>{{ $code->label }}</span>
+                                                <flux:text size="sm" variant="subtle">{{ $code->last_redeemed_at?->tz($citySnapshots->first()?->timezone ?? config('app.timezone', 'UTC'))->diffForHumans() ?? __('Never used') }}</flux:text>
+                                            </div>
+                                        </flux:table.cell>
+                                        <flux:table.cell align="end">{{ number_format($code->recent_redemptions_count) }}</flux:table.cell>
+                                        <flux:table.cell align="end">{{ number_format($code->redemptions_count) }}</flux:table.cell>
+                                    </flux:table.row>
+                                @empty
+                                    <flux:table.row><flux:table.cell colspan="3"><flux:text variant="subtle">{{ __('No access codes have been created for this city yet.') }}</flux:text></flux:table.cell></flux:table.row>
+                                @endforelse
+                            </flux:table.rows>
+                        </flux:table>
+                    </div>
+                </div>
+
+                <div class="admin-panel overflow-hidden">
+                    <div class="border-b border-[#e1dfd7] px-5 py-4">
+                        <flux:heading size="sm">{{ __('Recent member grants') }}</flux:heading>
+                        <flux:text variant="subtle" class="mt-1">{{ __('The latest people who unlocked this city with a tracked code.') }}</flux:text>
+                    </div>
+                    <div class="divide-y divide-[#e1dfd7]">
+                        @forelse ($recentMemberGrants as $grant)
+                            <div class="flex items-center justify-between gap-4 px-5 py-3" wire:key="member-grant-{{ $grant->id }}">
+                                <div class="min-w-0">
+                                    <div class="truncate text-sm font-semibold text-[#18342c]">{{ $grant->user?->name ?? __('Deleted user') }}</div>
+                                    <div class="truncate text-xs text-[#718078]">{{ $grant->user?->email ?? __('Account removed') }}</div>
+                                </div>
+                                <div class="shrink-0 text-right">
+                                    <div class="text-xs font-medium text-[#4f675d]">{{ $grant->accessCode?->label ?? __('Deleted code') }}</div>
+                                    <div class="mt-1 text-xs text-[#87968f]">{{ $grant->redeemed_at?->tz($citySnapshots->first()?->timezone ?? config('app.timezone', 'UTC'))->diffForHumans() ?? '—' }}</div>
+                                </div>
+                            </div>
+                        @empty
+                            <div class="px-5 py-8 text-center"><flux:text variant="subtle">{{ __('No tracked access grants have been recorded yet.') }}</flux:text></div>
+                        @endforelse
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <section class="admin-panel flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between" aria-label="{{ __('Location shortcuts') }}">
             <div>
                 <div class="admin-kicker">{{ __('Manage :city', ['city' => $selectedCityName]) }}</div>
                 <div class="mt-1 text-sm text-[#667970]">{{ __('Jump directly to this location’s records without resetting the filter.') }}</div>
             </div>
             <div class="flex flex-wrap gap-2">
+                <flux:button size="sm" variant="ghost" href="#user-analytics">{{ __('User analytics') }}</flux:button>
                 <flux:button size="sm" variant="ghost" :href="route('admin.organizations.index', ['cityId' => $cityId])" wire:navigate>{{ __('Organizations') }}</flux:button>
                 <flux:button size="sm" variant="ghost" :href="route('admin.sources.index', ['cityId' => $cityId])" wire:navigate>{{ __('Sources') }}</flux:button>
                 <flux:button size="sm" variant="ghost" :href="route('admin.events.index', ['cityId' => $cityId])" wire:navigate>{{ __('Events') }}</flux:button>

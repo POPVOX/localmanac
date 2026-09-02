@@ -6,9 +6,16 @@
             <flux:subheading class="mt-2">{{ __('Manage public URLs, location details, and member chat access.') }}</flux:subheading>
         </div>
 
-        <flux:button variant="ghost" :href="route('admin.cities.index')" wire:navigate>
-            {{ __('Back to cities') }}
-        </flux:button>
+        <div class="flex flex-wrap gap-2">
+            @if ($city)
+                <flux:button variant="ghost" :href="route('admin.cities.analytics', $city)" wire:navigate>
+                    {{ __('User analytics') }}
+                </flux:button>
+            @endif
+            <flux:button variant="ghost" :href="route('admin.cities.index')" wire:navigate>
+                {{ __('Back to cities') }}
+            </flux:button>
+        </div>
     </div>
 
     <flux:card padding="xl" class="admin-panel space-y-6">

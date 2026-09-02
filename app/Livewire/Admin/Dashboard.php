@@ -6,6 +6,8 @@ use App\Models\Article;
 use App\Models\ChatSource;
 use App\Models\ChatSourceIngestionRun;
 use App\Models\City;
+use App\Models\CityAccessCode;
+use App\Models\CityAccessCodeRedemption;
 use App\Models\Event;
 use App\Models\EventIngestionRun;
 use App\Models\EventSource;
@@ -16,6 +18,7 @@ use App\Services\Admin\CityOverviewQuery;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Livewire\Component;
 
@@ -55,6 +58,18 @@ class Dashboard extends Component
 
     public int $failedRunsLast24h = 0;
 
+    public int $memberCount = 0;
+
+    public int $newMembersLast7d = 0;
+
+    public int $newMembersLast30d = 0;
+
+    public int $activeAccessCodes = 0;
+
+    public int $attributedMemberCount = 0;
+
+    public int $unattributedMemberCount = 0;
+
     public ?string $selectedCityName = null;
 
     public ?string $selectedCitySlug = null;
@@ -69,6 +84,10 @@ class Dashboard extends Component
 
     public Collection $recentActivity;
 
+    public Collection $topAccessCodes;
+
+    public Collection $recentMemberGrants;
+
     public bool $hasArticlesTable = false;
 
     public bool $hasEventRunsTable = false;
@@ -77,8 +96,12 @@ class Dashboard extends Component
         'cityId' => ['except' => null],
     ];
 
-    public function mount(): void
+    public function mount(?City $city = null): void
     {
+        if ($city?->exists) {
+            $this->cityId = $city->getKey();
+        }
+
         $this->loadDashboard();
     }
 
@@ -109,6 +132,7 @@ class Dashboard extends Component
         $this->selectedCityName = $selectedCity?->name;
         $this->selectedCitySlug = $selectedCity?->slug;
         $this->totalCities = $this->cityId ? 1 : $this->cities->count();
+        $this->loadUserAnalytics($selectedCity);
 
         $this->totalOrganizations = $this->scope(Organization::query())->count();
         $this->totalScrapers = $this->scope(Scraper::query())->count();
@@ -170,6 +194,53 @@ class Dashboard extends Component
             ->when($this->cityId, fn (Builder $query) => $query->whereKey($this->cityId))
             ->get();
         $this->recentActivity = $this->buildRecentActivity();
+    }
+
+    private function loadUserAnalytics(?City $city): void
+    {
+        $this->memberCount = 0;
+        $this->newMembersLast7d = 0;
+        $this->newMembersLast30d = 0;
+        $this->activeAccessCodes = 0;
+        $this->attributedMemberCount = 0;
+        $this->unattributedMemberCount = 0;
+        $this->topAccessCodes = collect();
+        $this->recentMemberGrants = collect();
+
+        if (! $city) {
+            return;
+        }
+
+        $memberships = DB::table('city_user')->where('city_id', $city->getKey());
+        $this->memberCount = (clone $memberships)->count();
+        $this->newMembersLast7d = (clone $memberships)
+            ->where('created_at', '>=', now()->subDays(7))
+            ->count();
+        $this->newMembersLast30d = (clone $memberships)
+            ->where('created_at', '>=', now()->subDays(30))
+            ->count();
+        $this->activeAccessCodes = $city->accessCodes()->available()->count();
+        $this->attributedMemberCount = $city->accessCodeRedemptions()->count();
+        $this->unattributedMemberCount = max(0, $this->memberCount - $this->attributedMemberCount);
+
+        $this->topAccessCodes = CityAccessCode::query()
+            ->where('city_id', $city->getKey())
+            ->withCount([
+                'redemptions',
+                'redemptions as recent_redemptions_count' => fn (Builder $query) => $query
+                    ->where('redeemed_at', '>=', now()->subDays(30)),
+            ])
+            ->orderByDesc('redemptions_count')
+            ->orderByDesc('last_redeemed_at')
+            ->limit(6)
+            ->get();
+
+        $this->recentMemberGrants = CityAccessCodeRedemption::query()
+            ->where('city_id', $city->getKey())
+            ->with(['accessCode', 'user'])
+            ->orderByDesc('redeemed_at')
+            ->limit(6)
+            ->get();
     }
 
     /**

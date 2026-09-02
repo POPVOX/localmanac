@@ -11,6 +11,7 @@
         </div>
 
         <div class="flex flex-wrap gap-2">
+            <flux:button variant="ghost" :href="route('admin.cities.analytics', $city)" wire:navigate>{{ __('User analytics') }}</flux:button>
             <flux:button variant="ghost" :href="route('admin.cities.edit', $city)" wire:navigate>{{ __('Location settings') }}</flux:button>
             <flux:button variant="ghost" :href="route('admin.cities.index')" wire:navigate>{{ __('Back to locations') }}</flux:button>
         </div>

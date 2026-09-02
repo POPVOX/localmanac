@@ -13,6 +13,9 @@ class CityOverviewQuery
         return City::query()
             ->withCount([
                 'organizations',
+                'users as members_count',
+                'users as new_members_last_30d_count' => fn (Builder $query) => $query
+                    ->where('city_user.created_at', '>=', now()->subDays(30)),
                 'accessCodes as active_access_codes_count' => fn (Builder $query) => $query->available(),
                 'scrapers as article_sources_count',
                 'scrapers as active_article_sources_count' => fn (Builder $query) => $query->where('is_enabled', true),

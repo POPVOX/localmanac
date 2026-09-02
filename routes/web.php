@@ -66,6 +66,7 @@ Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
         Route::get('dashboard', AdminDashboard::class)->name('dashboard');
         Route::get('cities', CitiesIndex::class)->name('cities.index');
         Route::get('cities/create', CitiesForm::class)->name('cities.create');
+        Route::get('cities/{city:slug}/analytics', AdminDashboard::class)->name('cities.analytics');
         Route::get('cities/{city:slug}/preview', UserDashboard::class)->name('cities.preview');
         Route::get('cities/{city:slug}/calendar', DemoCalendar::class)->name('cities.calendar');
         Route::get('cities/{city}/access-codes', CityAccessCodes::class)->name('cities.access-codes');
