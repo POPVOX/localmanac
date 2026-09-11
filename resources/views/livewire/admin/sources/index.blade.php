@@ -17,7 +17,7 @@
         @foreach ([
             ['kind' => 'article', 'label' => __('Article feeds'), 'count' => $categoryCounts['article'], 'icon' => 'newspaper', 'route' => 'admin.scrapers.index'],
             ['kind' => 'event', 'label' => __('Event calendars'), 'count' => $categoryCounts['event'], 'icon' => 'calendar-days', 'route' => 'admin.event-sources.index'],
-            ['kind' => 'chat', 'label' => __('Answer library'), 'count' => $categoryCounts['chat'], 'icon' => 'chat-bubble-left-right', 'route' => 'admin.chat-sources.index'],
+            ['kind' => 'chat', 'label' => __('Chat sources'), 'count' => $categoryCounts['chat'], 'icon' => 'chat-bubble-left-right', 'route' => 'admin.chat-sources.index'],
         ] as $category)
             <a
                 href="{{ route($category['route'], array_filter(['cityId' => $cityId])) }}"
@@ -50,7 +50,7 @@
             <option value="">{{ __('All purposes') }}</option>
             <option value="article">{{ __('Articles') }}</option>
             <option value="event">{{ __('Events') }}</option>
-            <option value="chat">{{ __('Answers') }}</option>
+            <option value="chat">{{ __('Chat knowledge') }}</option>
         </flux:select>
 
         <label class="flex h-11 items-center gap-3 self-end rounded-xl border border-[#d9d7ce] bg-white px-3 text-sm font-medium text-[#344f46]">

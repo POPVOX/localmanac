@@ -1,8 +1,10 @@
 <?php
 
+use App\Services\Ingestion\Assistant\ScraperAssistantSourceFetcher;
 use App\Services\Ingestion\Assistant\SourceDiscoveryService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 uses(TestCase::class);
@@ -33,6 +35,52 @@ it('discovers an article feed from a public news page', function () {
         ->and($result['source_url'])->toBe('https://lawrence.example.gov/news/feed.xml')
         ->and($result['config']['feed_url'])->toBe('https://lawrence.example.gov/news/feed.xml')
         ->and($result['endpoints'])->toHaveCount(1);
+});
+
+it('falls back to a rendered request when a valid page blocks direct http discovery', function () {
+    Http::fake([
+        'https://lawrence.example.gov/ordinances' => Http::response('Forbidden', 403),
+    ]);
+
+    $this->mock(ScraperAssistantSourceFetcher::class, function (MockInterface $mock): void {
+        $mock->shouldReceive('fetch')
+            ->once()
+            ->with('https://lawrence.example.gov/ordinances')
+            ->andReturn([
+                'html' => '<!doctype html><html><head><title>City Ordinances</title></head><body><main><h1>Ordinances</h1><article><a href="/ordinances/1">Noise ordinance</a></article></main></body></html>',
+                'final_url' => 'https://lawrence.example.gov/ordinances',
+                'renderer' => 'playwright',
+                'warnings' => [],
+                'used_webfetch' => false,
+            ]);
+    });
+
+    $result = app(SourceDiscoveryService::class)->discover(
+        'https://lawrence.example.gov/ordinances',
+        'article',
+    );
+
+    expect($result['kind'])->toBe('article')
+        ->and($result['renderer'])->toBe('playwright')
+        ->and($result['warnings'])->toContain('The site blocked or returned no content to a direct request, so discovery used a browser-rendered fallback.');
+});
+
+it('does not treat a site navigation calendar link as the purpose of an ordinance page', function () {
+    Http::fake([
+        'https://lawrence.example.gov/city-code' => Http::response(<<<'HTML'
+            <!doctype html><html><head><title>Lawrence City Code</title></head><body>
+            <header><nav><a href="/news">News</a></nav></header>
+            <main><h1>Code and ordinances</h1><article><a href="/code/chapter-1">Chapter 1 — Administration</a></article></main>
+            <footer><a href="/calendar.ics">City calendar</a></footer>
+            </body></html>
+            HTML, 200, ['Content-Type' => 'text/html']),
+    ]);
+
+    $result = app(SourceDiscoveryService::class)->discover('https://lawrence.example.gov/city-code');
+
+    expect($result['kind'])->toBe('article')
+        ->and($result['type'])->toBe('html')
+        ->and(collect($result['endpoints'])->pluck('url')->all())->not->toContain('https://lawrence.example.gov/calendar.ics');
 });
 
 it('classifies an event page and drafts reusable html calendar selectors', function () {

@@ -1,5 +1,6 @@
 <?php
 
+use App\Livewire\Admin\ChatSources\Form as ChatSourceForm;
 use App\Livewire\Admin\Dashboard as AdminDashboard;
 use App\Livewire\Admin\EventSources\Index as EventSourcesIndex;
 use App\Livewire\Admin\Scrapers\Index as ScrapersIndex;
@@ -43,6 +44,7 @@ it('discovers previews and creates an article source from one url', function () 
 
     Livewire::actingAs($user)->test(Wizard::class)
         ->set('cityId', $city->id)
+        ->set('sourcePurpose', 'article')
         ->set('sourceUrl', 'https://lawrence.example.gov/news')
         ->call('analyze')
         ->assertSet('step', 3)
@@ -72,6 +74,43 @@ it('links every primary add source action to the unified wizard', function () {
     }
 });
 
+it('requires an explicit destination before analyzing a source', function () {
+    $user = User::factory()->create();
+    $city = City::factory()->create();
+
+    Livewire::actingAs($user)->test(Wizard::class)
+        ->set('cityId', $city->id)
+        ->set('sourceUrl', 'https://lawrence.example.gov/city-code')
+        ->assertSee('Chat knowledge')
+        ->assertSee('News feed')
+        ->assertSee('Events calendar')
+        ->call('analyze')
+        ->assertHasErrors(['sourcePurpose']);
+});
+
+it('routes chat knowledge to the chat source form with the city and url preserved', function () {
+    $user = User::factory()->create();
+    $city = City::factory()->create();
+    $url = 'https://lawrence.example.gov/city-code';
+
+    Livewire::actingAs($user)->test(Wizard::class)
+        ->set('cityId', $city->id)
+        ->set('sourcePurpose', 'chat')
+        ->set('sourceUrl', $url)
+        ->call('analyze')
+        ->assertRedirect(route('admin.chat-sources.create', [
+            'cityId' => $city->id,
+            'sourceUrl' => $url,
+        ]));
+
+    Livewire::withQueryParams([
+        'cityId' => $city->id,
+        'sourceUrl' => $url,
+    ])->actingAs($user)->test(ChatSourceForm::class)
+        ->assertSet('cityId', $city->id)
+        ->assertSet('sourceUrl', $url);
+});
+
 it('discovers previews and creates an event source from the same wizard', function () {
     $user = User::factory()->create();
     $city = City::factory()->create(['timezone' => 'America/Chicago']);
@@ -83,6 +122,7 @@ it('discovers previews and creates an event source from the same wizard', functi
 
     Livewire::actingAs($user)->test(Wizard::class)
         ->set('cityId', $city->id)
+        ->set('sourcePurpose', 'event')
         ->set('sourceUrl', 'https://lawrence.example.gov/calendar.ics')
         ->call('analyze')
         ->assertSet('step', 3)
@@ -139,6 +179,7 @@ it('discovers and previews a CivicPlus calendar from its public page url', funct
 
     Livewire::actingAs($user)->test(Wizard::class)
         ->set('cityId', $city->id)
+        ->set('sourcePurpose', 'event')
         ->set('sourceUrl', 'https://madison.example.gov/calendar.aspx?')
         ->call('analyze')
         ->assertSet('step', 3)
@@ -181,6 +222,7 @@ it('does not allow an organization from another city to be attached', function (
 
     Livewire::actingAs($user)->test(Wizard::class)
         ->set('cityId', $city->id)
+        ->set('sourcePurpose', 'article')
         ->set('sourceUrl', 'https://example.gov/news.rss')
         ->call('analyze')
         ->set('organizationId', $organization->id)

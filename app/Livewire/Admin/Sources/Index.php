@@ -270,7 +270,7 @@ class Index extends Component
                 return $this->row(
                     source: $source,
                     kind: 'chat',
-                    label: __('Answers'),
+                    label: __('Chat knowledge'),
                     active: (bool) $source->is_active,
                     healthStatus: $healthStatus,
                     healthError: $source->latestRun?->error_message,

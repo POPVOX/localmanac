@@ -50,8 +50,11 @@
                     <flux:navlist.item icon="map-pin" :href="route('admin.cities.index')" :current="request()->routeIs('admin.cities.*') || request()->routeIs('admin.organizations.*')" wire:navigate>
                         {{ __('Locations') }}
                     </flux:navlist.item>
-                    <flux:navlist.item icon="signal" :href="route('admin.sources.index', $adminScopeQuery)" :current="request()->routeIs('admin.sources.*') || request()->routeIs('admin.scrapers.*') || request()->routeIs('admin.event-sources.*') || request()->routeIs('admin.chat-sources.*')" wire:navigate>
+                    <flux:navlist.item icon="signal" :href="route('admin.sources.index', $adminScopeQuery)" :current="request()->routeIs('admin.sources.*') || request()->routeIs('admin.scrapers.*') || request()->routeIs('admin.event-sources.*')" wire:navigate>
                         {{ __('Sources') }}
+                    </flux:navlist.item>
+                    <flux:navlist.item icon="chat-bubble-left-right" :href="route('admin.chat-sources.index', $adminScopeQuery)" :current="request()->routeIs('admin.chat-sources.*')" wire:navigate>
+                        {{ __('Chat sources') }}
                     </flux:navlist.item>
                 </flux:navlist.group>
 

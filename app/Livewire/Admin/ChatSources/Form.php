@@ -63,7 +63,16 @@ class Form extends Component
             $this->linkLimit = (int) ($this->source->link_limit ?? 6);
             $this->crawlRenderer = $this->source->crawl_renderer ?? 'auto';
         } else {
-            $this->cityId = $this->cityId ?? City::query()->orderBy('name')->value('id');
+            $requestedCityId = request()->integer('cityId');
+            $this->cityId = $requestedCityId && City::query()->whereKey($requestedCityId)->exists()
+                ? $requestedCityId
+                : City::query()->orderBy('name')->value('id');
+
+            $requestedUrl = trim((string) request()->query('sourceUrl', ''));
+
+            if ($requestedUrl !== '' && filter_var($requestedUrl, FILTER_VALIDATE_URL)) {
+                $this->sourceUrl = $requestedUrl;
+            }
         }
     }
 

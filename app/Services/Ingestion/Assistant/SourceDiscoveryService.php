@@ -30,27 +30,55 @@ class SourceDiscoveryService
      *     renderer: string
      * }
      */
-    public function discover(string $url): array
+    public function discover(string $url, ?string $preferredKind = null): array
     {
         $url = trim($url);
+        $preferredKind = $preferredKind !== null ? mb_strtolower(trim($preferredKind)) : null;
 
         if (! filter_var($url, FILTER_VALIDATE_URL) || ! in_array(parse_url($url, PHP_URL_SCHEME), ['http', 'https'], true)) {
             throw new InvalidArgumentException('Enter a valid http or https source URL.');
         }
 
+        if ($preferredKind !== null && ! in_array($preferredKind, ['article', 'event'], true)) {
+            throw new InvalidArgumentException('Choose articles or events as the source destination.');
+        }
+
+        $warnings = [];
         $probe = $this->httpFetcher->fetch($url);
 
-        if ($probe === null) {
-            throw new InvalidArgumentException('The source URL could not be reached.');
+        if ($probe === null || trim((string) ($probe['body'] ?? '')) === '') {
+            $probe = $this->renderedProbe($url);
+
+            if ($probe === null) {
+                throw new InvalidArgumentException('The source could not be inspected automatically. The page may block automated requests; try again or add it as a Chat source and select the browser renderer.');
+            }
+
+            $warnings[] = 'The site blocked or returned no content to a direct request, so discovery used a browser-rendered fallback.';
         }
 
         $body = trim((string) ($probe['body'] ?? ''));
         $contentType = mb_strtolower((string) ($probe['content_type'] ?? ''));
         $sourceUrl = (string) ($probe['url'] ?? $url);
         $renderer = (string) ($probe['renderer'] ?? 'http');
-        $warnings = [];
+
+        if ($this->looksLikeAccessChallenge($body)) {
+            $renderedProbe = $this->renderedProbe($sourceUrl);
+
+            if ($renderedProbe !== null && ! $this->looksLikeAccessChallenge((string) ($renderedProbe['body'] ?? ''))) {
+                $probe = $renderedProbe;
+                $body = trim((string) ($probe['body'] ?? ''));
+                $contentType = mb_strtolower((string) ($probe['content_type'] ?? ''));
+                $sourceUrl = (string) ($probe['url'] ?? $sourceUrl);
+                $renderer = (string) ($probe['renderer'] ?? 'playwright');
+                $warnings[] = 'Discovery used a browser-rendered fallback because the direct response was an access-check page.';
+            }
+        }
 
         if ($this->looksLikeIcs($body, $contentType, $sourceUrl)) {
+            if ($preferredKind === 'article') {
+                throw new InvalidArgumentException('This URL is an iCalendar feed. Choose Events as its destination or use a news/document page instead.');
+            }
+
             $draft = $this->eventDrafter->draft('ics', $sourceUrl, $body);
 
             return $this->result(
@@ -67,6 +95,10 @@ class SourceDiscoveryService
 
         if ($this->looksLikeJson($body, $contentType)) {
             if ($this->looksLikeEventJson($body, $sourceUrl)) {
+                if ($preferredKind === 'article') {
+                    throw new InvalidArgumentException('This endpoint contains dated event records. Choose Events as its destination or use a news/document source instead.');
+                }
+
                 $draft = $this->eventDrafter->draft('json_api', $sourceUrl, $body);
 
                 return $this->result(
@@ -85,7 +117,12 @@ class SourceDiscoveryService
         }
 
         if ($this->looksLikeFeed($body, $contentType)) {
-            $isEventFeed = $this->feedLooksEventFocused($body, $sourceUrl);
+            $detectedEventFeed = $this->feedLooksEventFocused($body, $sourceUrl);
+            $isEventFeed = match ($preferredKind) {
+                'event' => true,
+                'article' => false,
+                default => $detectedEventFeed,
+            };
             $kind = $isEventFeed ? 'event' : 'article';
             $draft = $isEventFeed
                 ? $this->eventDrafter->draft('rss', $sourceUrl, $body)
@@ -97,9 +134,9 @@ class SourceDiscoveryService
                 sourceUrl: $sourceUrl,
                 name: $this->feedName($body, $sourceUrl),
                 draft: $draft,
-                reasons: [$isEventFeed
-                    ? 'The feed is labeled as a calendar or events feed.'
-                    : 'The URL returns a syndication feed with article entries.'],
+                reasons: [$preferredKind !== null
+                    ? ($isEventFeed ? 'You selected Events; this feed will be tested for dated event entries.' : 'You selected News; this feed will be tested for article entries.')
+                    : ($isEventFeed ? 'The feed is labeled as a calendar or events feed.' : 'The URL returns a syndication feed with article entries.')],
                 endpoints: [['url' => $sourceUrl, 'type' => 'rss', 'label' => $isEventFeed ? 'Event feed' : 'Article feed']],
                 renderer: $renderer,
                 extraWarnings: $warnings,
@@ -119,7 +156,9 @@ class SourceDiscoveryService
         }
 
         $endpoints = $this->discoverHtmlEndpoints($body, $sourceUrl);
-        $civicPlusEndpoint = $this->discoverCivicPlusCalendarFeed($body, $sourceUrl, $endpoints);
+        $civicPlusEndpoint = $preferredKind === 'article'
+            ? null
+            : $this->discoverCivicPlusCalendarFeed($body, $sourceUrl, $endpoints);
 
         if ($civicPlusEndpoint !== null) {
             array_unshift($endpoints, $civicPlusEndpoint);
@@ -129,7 +168,9 @@ class SourceDiscoveryService
                 ->all();
         }
 
-        $civicWebEndpoint = $this->discoverCivicWebMeetingsApi($body, $sourceUrl);
+        $civicWebEndpoint = $preferredKind === 'article'
+            ? null
+            : $this->discoverCivicWebMeetingsApi($body, $sourceUrl);
 
         if ($civicWebEndpoint !== null) {
             $endpointProbe = $this->probeEndpoint($civicWebEndpoint['probe_url']);
@@ -164,8 +205,12 @@ class SourceDiscoveryService
         }
 
         $eventScore = $this->eventPageScore($body, $sourceUrl);
-        $eventEndpoint = collect($endpoints)->first(fn (array $endpoint): bool => in_array($endpoint['type'], ['ics', 'json_api'], true));
-        $feedEndpoint = collect($endpoints)->firstWhere('type', 'rss');
+        $eventEndpoint = $preferredKind === 'article'
+            ? null
+            : collect($endpoints)->first(fn (array $endpoint): bool => in_array($endpoint['type'], ['ics', 'json_api'], true));
+        $feedEndpoint = collect($endpoints)
+            ->where('type', 'rss')
+            ->first(fn (array $endpoint): bool => $preferredKind !== 'article' || ! $this->endpointLooksEventFocused($endpoint));
 
         if (is_array($eventEndpoint)) {
             $endpointProbe = $this->probeEndpoint($eventEndpoint['url']);
@@ -194,9 +239,14 @@ class SourceDiscoveryService
         if (is_array($feedEndpoint)) {
             $endpointProbe = $this->probeEndpoint($feedEndpoint['url']);
             $feedBody = $endpointProbe['body'] ?? $body;
-            $feedIsEventFocused = $eventScore >= 3
+            $detectedEventFeed = $eventScore >= 3
                 || $this->endpointLooksEventFocused($feedEndpoint)
                 || ($endpointProbe !== null && $this->feedLooksEventFocused($feedBody, $feedEndpoint['url']));
+            $feedIsEventFocused = match ($preferredKind) {
+                'event' => true,
+                'article' => false,
+                default => $detectedEventFeed,
+            };
             $kind = $feedIsEventFocused ? 'event' : 'article';
             $draft = $feedIsEventFocused
                 ? $this->eventDrafter->draft('rss', $feedEndpoint['url'], $feedBody)
@@ -214,16 +264,16 @@ class SourceDiscoveryService
                     ? $this->feedName($feedBody, $feedEndpoint['url'])
                     : $this->htmlName($body, $sourceUrl),
                 draft: $draft,
-                reasons: [$feedIsEventFocused
-                    ? 'The page is event-focused and publishes a dedicated feed.'
-                    : 'A dedicated article feed was discovered on the page.'],
+                reasons: [$preferredKind !== null
+                    ? ($feedIsEventFocused ? 'You selected Events; a feed was discovered and will be tested for dated entries.' : 'You selected News; a dedicated article feed was discovered on the page.')
+                    : ($feedIsEventFocused ? 'The page is event-focused and publishes a dedicated feed.' : 'A dedicated article feed was discovered on the page.')],
                 endpoints: $endpoints,
                 renderer: $renderer,
                 extraWarnings: $warnings,
             );
         }
 
-        if ($eventScore >= 4) {
+        if ($preferredKind === 'event' || ($preferredKind === null && $eventScore >= 4)) {
             $draft = $this->eventDrafter->draft('html', $sourceUrl, $body);
 
             return $this->result(
@@ -232,7 +282,9 @@ class SourceDiscoveryService
                 sourceUrl: $sourceUrl,
                 name: $this->htmlName($body, $sourceUrl),
                 draft: $draft,
-                reasons: ['The page contains repeated event, date, and calendar signals.'],
+                reasons: [$preferredKind === 'event'
+                    ? 'You selected Events; the page will be tested for dated event listings.'
+                    : 'The page contains repeated event, date, and calendar signals.'],
                 endpoints: $endpoints,
                 renderer: $renderer,
                 extraWarnings: $warnings,
@@ -247,7 +299,9 @@ class SourceDiscoveryService
             sourceUrl: $sourceUrl,
             name: $this->htmlName($body, $sourceUrl),
             draft: $draft,
-            reasons: ['The page is structured as a news or document listing.'],
+            reasons: [$preferredKind === 'article'
+                ? 'You selected News; the page will be tested for article or document listings.'
+                : 'The page is structured as a news or document listing.'],
             endpoints: $endpoints,
             renderer: $renderer,
             extraWarnings: $warnings,
@@ -266,6 +320,32 @@ class SourceDiscoveryService
         }
 
         return $probe;
+    }
+
+    /**
+     * @return array{url: string, status_code: int, content_type: string|null, body: string, renderer: string}|null
+     */
+    private function renderedProbe(string $url): ?array
+    {
+        try {
+            $rendered = $this->renderedFetcher->fetch($url);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $body = trim((string) ($rendered['html'] ?? ''));
+
+        if ($body === '') {
+            return null;
+        }
+
+        return [
+            'url' => (string) ($rendered['final_url'] ?? $url),
+            'status_code' => 200,
+            'content_type' => 'text/html',
+            'body' => $body,
+            'renderer' => (string) ($rendered['renderer'] ?? 'playwright'),
+        ];
     }
 
     /**
@@ -399,12 +479,18 @@ class SourceDiscoveryService
         $attributes = ['href', 'src', 'data-feed', 'data-feed-url', 'data-events-url', 'data-calendar-url', 'data-api-url', 'data-json-url', 'data-url'];
 
         foreach ($crawler->filter('link[href], a[href], iframe[src], script[src], [data-feed], [data-feed-url], [data-events-url], [data-calendar-url], [data-api-url], [data-json-url], [data-url]') as $node) {
+            if ($node instanceof \DOMElement && $node->tagName === 'a' && $this->isSiteNavigationLink($node)) {
+                continue;
+            }
+
             $context = implode(' ', [
                 (string) $node->textContent,
                 (string) $node->getAttribute('type'),
                 (string) $node->getAttribute('rel'),
                 (string) $node->getAttribute('id'),
                 (string) $node->getAttribute('class'),
+                (string) $node->getAttribute('aria-label'),
+                (string) $node->getAttribute('title'),
                 $this->nodeHasCalendarContext($node) ? 'calendar event' : '',
             ]);
 
@@ -670,19 +756,50 @@ class SourceDiscoveryService
     {
         $current = $node;
 
-        for ($depth = 0; $depth < 5 && $current !== null; $depth++) {
-            $context = mb_strtolower((string) $current->textContent);
-
+        for ($depth = 0; $depth < 4 && $current !== null; $depth++) {
             if ($current instanceof \DOMElement) {
-                $context .= ' '.mb_strtolower(implode(' ', [
+                $tag = mb_strtolower($current->tagName);
+
+                if ($depth > 0 && in_array($tag, ['html', 'body', 'main', 'header', 'nav', 'footer'], true)) {
+                    break;
+                }
+
+                $context = mb_strtolower(implode(' ', [
+                    mb_substr((string) $current->textContent, 0, 1200),
                     $current->getAttribute('id'),
                     $current->getAttribute('class'),
                     $current->getAttribute('name'),
+                    $current->getAttribute('aria-label'),
+                    $current->getAttribute('title'),
                 ]));
+            } else {
+                $context = mb_strtolower(mb_substr((string) $current->textContent, 0, 1200));
             }
 
-            if (str_contains($context, 'calendar')) {
+            if (Str::contains($context, ['calendar', 'upcoming events', 'event feed', 'meeting schedule'])) {
                 return true;
+            }
+
+            $current = $current->parentNode;
+        }
+
+        return false;
+    }
+
+    private function isSiteNavigationLink(\DOMElement $node): bool
+    {
+        $current = $node->parentNode;
+
+        while ($current instanceof \DOMElement) {
+            $tag = mb_strtolower($current->tagName);
+            $role = mb_strtolower($current->getAttribute('role'));
+
+            if (in_array($tag, ['header', 'nav', 'footer'], true) || $role === 'navigation') {
+                return true;
+            }
+
+            if (in_array($tag, ['main', 'body', 'html'], true)) {
+                return false;
             }
 
             $current = $current->parentNode;
@@ -743,7 +860,21 @@ class SourceDiscoveryService
         $textLength = mb_strlen(trim(strip_tags($body)));
         $lower = mb_strtolower($body);
 
-        return $textLength < 500 && Str::contains($lower, ['id="__next"', 'id="app"', 'enable javascript', 'data-reactroot']);
+        return $textLength < 500 && Str::contains($lower, ['id="__next"', 'id="app"', 'enable javascript', 'data-reactroot', 'checking your browser']);
+    }
+
+    private function looksLikeAccessChallenge(string $body): bool
+    {
+        $lower = mb_strtolower(mb_substr($body, 0, 30000));
+
+        return Str::contains($lower, [
+            'checking your browser',
+            'verify you are human',
+            'attention required! | cloudflare',
+            'cf-chl-',
+            'enable javascript and cookies to continue',
+            'access denied reference',
+        ]);
     }
 
     private function htmlName(string $body, string $url): string

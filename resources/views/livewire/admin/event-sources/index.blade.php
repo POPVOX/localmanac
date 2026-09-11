@@ -6,7 +6,7 @@
             <flux:subheading class="mt-2">{{ __('Manage calendar sources, review health, and run imports.') }}</flux:subheading>
         </div>
 
-        <flux:button variant="primary" :href="route('admin.sources.create')" icon="plus" wire:navigate>
+        <flux:button variant="primary" :href="route('admin.sources.create', array_filter(['cityId' => $cityId, 'purpose' => 'event']))" icon="plus" wire:navigate>
             {{ __('Add source') }}
         </flux:button>
     </div>

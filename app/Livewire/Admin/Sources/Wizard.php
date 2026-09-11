@@ -26,6 +26,8 @@ class Wizard extends Component
 
     public ?int $organizationId = null;
 
+    public string $sourcePurpose = '';
+
     public string $sourceUrl = '';
 
     public string $name = '';
@@ -73,23 +75,43 @@ class Wizard extends Component
         $this->cityId = $requestedCityId && City::query()->whereKey($requestedCityId)->exists()
             ? $requestedCityId
             : City::query()->orderBy('name')->value('id');
+
+        $requestedPurpose = mb_strtolower(trim((string) request()->query('purpose', '')));
+
+        if (request()->routeIs('admin.scrapers.create')) {
+            $requestedPurpose = 'article';
+        } elseif (request()->routeIs('admin.event-sources.create')) {
+            $requestedPurpose = 'event';
+        }
+
+        $this->sourcePurpose = in_array($requestedPurpose, ['article', 'event', 'chat'], true)
+            ? $requestedPurpose
+            : '';
     }
 
     public function analyze(
         SourceDiscoveryService $discovery,
         ScraperConfigPreviewer $scraperPreviewer,
         EventSourcePreviewer $eventPreviewer,
-    ): void {
+    ): RedirectResponse|Redirector|null {
         $this->validate([
             'cityId' => ['required', 'integer', 'exists:cities,id'],
+            'sourcePurpose' => ['required', Rule::in(['article', 'event', 'chat'])],
             'sourceUrl' => ['required', 'url:http,https', 'max:2000'],
         ]);
+
+        if ($this->sourcePurpose === 'chat') {
+            return redirect()->route('admin.chat-sources.create', [
+                'cityId' => $this->cityId,
+                'sourceUrl' => $this->sourceUrl,
+            ]);
+        }
 
         $this->discoveryError = null;
         $this->previewError = null;
 
         try {
-            $result = $discovery->discover($this->sourceUrl);
+            $result = $discovery->discover($this->sourceUrl, $this->sourcePurpose);
             $this->discoveredKind = $result['kind'];
             $this->discoveredType = $result['type'];
             $this->discoveredUrl = $result['source_url'];
@@ -109,6 +131,8 @@ class Wizard extends Component
             $this->discoveryError = trim($exception->getMessage()) ?: __('We could not analyze this source.');
             $this->dispatchToast(__('Source analysis failed'), $this->discoveryError, 'danger');
         }
+
+        return null;
     }
 
     public function preview(
@@ -175,9 +199,11 @@ class Wizard extends Component
     {
         $cityId = $this->cityId;
         $organizationId = $this->organizationId;
+        $sourcePurpose = $this->sourcePurpose;
         $this->reset();
         $this->cityId = $cityId;
         $this->organizationId = $organizationId;
+        $this->sourcePurpose = $sourcePurpose;
         $this->frequency = 'daily';
         $this->isActive = true;
         $this->step = 1;
@@ -193,7 +219,10 @@ class Wizard extends Component
             $this->organizationId = null;
         }
 
-        if (in_array($property, ['discoveredKind', 'discoveredType', 'discoveredUrl', 'rawConfig', 'cityId', 'organizationId'], true)) {
+        if (
+            $this->discoveredKind !== ''
+            && in_array($property, ['discoveredKind', 'discoveredType', 'discoveredUrl', 'rawConfig', 'cityId', 'organizationId'], true)
+        ) {
             $this->previewValid = false;
             $this->previewHash = null;
             $this->step = 2;

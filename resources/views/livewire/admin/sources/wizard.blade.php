@@ -6,7 +6,7 @@
                 {{ __('Add a source') }}
             </flux:heading>
             <flux:subheading class="mt-2 max-w-2xl">
-                {{ __('Paste a page, feed, or calendar URL. LocAlmanac will find the best endpoint, determine what it contains, and test it before anything is saved.') }}
+                {{ __('Choose what the source should power, then paste a page, feed, calendar, or document URL. LocAlmanac will find and test the best endpoint before anything is saved.') }}
             </flux:subheading>
         </div>
 
@@ -26,8 +26,47 @@
         <form wire:submit.prevent="analyze" class="admin-panel max-w-3xl space-y-6 p-6 sm:p-8">
             <div>
                 <flux:heading size="lg">{{ __('What should LocAlmanac follow?') }}</flux:heading>
-                <flux:text variant="subtle" class="mt-2">{{ __('Use the public page you would give a person. We will look for feeds, APIs, calendars, and repeated content automatically.') }}</flux:text>
+                <flux:text variant="subtle" class="mt-2">{{ __('First choose where this information belongs. This prevents a calendar link elsewhere on a government site from misclassifying the page you intended to add.') }}</flux:text>
             </div>
+
+            <fieldset>
+                <legend class="text-sm font-semibold text-[#18342c]">{{ __('What should this source power?') }}</legend>
+                <div class="mt-3 grid gap-3 md:grid-cols-3">
+                    <label class="relative cursor-pointer rounded-xl border p-4 transition {{ $sourcePurpose === 'article' ? 'border-[#1f654f] bg-[#edf5f0] ring-2 ring-[#c9ded3]' : 'border-[#d9d7ce] bg-white hover:border-[#aebfb6]' }}">
+                        <input class="sr-only" type="radio" wire:model.live="sourcePurpose" value="article" required>
+                        <span class="flex items-start gap-3">
+                            <span class="grid size-9 shrink-0 place-items-center rounded-lg bg-[#e3eee8] text-[#1f654f]"><flux:icon icon="newspaper" class="size-4.5" /></span>
+                            <span>
+                                <span class="block text-sm font-semibold text-[#18342c]">{{ __('News feed') }}</span>
+                                <span class="mt-1 block text-xs leading-5 text-[#667970]">{{ __('News releases, articles, notices, and public updates.') }}</span>
+                            </span>
+                        </span>
+                    </label>
+
+                    <label class="relative cursor-pointer rounded-xl border p-4 transition {{ $sourcePurpose === 'event' ? 'border-[#1f654f] bg-[#edf5f0] ring-2 ring-[#c9ded3]' : 'border-[#d9d7ce] bg-white hover:border-[#aebfb6]' }}">
+                        <input class="sr-only" type="radio" wire:model.live="sourcePurpose" value="event" required>
+                        <span class="flex items-start gap-3">
+                            <span class="grid size-9 shrink-0 place-items-center rounded-lg bg-[#e3eee8] text-[#1f654f]"><flux:icon icon="calendar-days" class="size-4.5" /></span>
+                            <span>
+                                <span class="block text-sm font-semibold text-[#18342c]">{{ __('Events calendar') }}</span>
+                                <span class="mt-1 block text-xs leading-5 text-[#667970]">{{ __('Meetings, hearings, activities, and dated events.') }}</span>
+                            </span>
+                        </span>
+                    </label>
+
+                    <label class="relative cursor-pointer rounded-xl border p-4 transition {{ $sourcePurpose === 'chat' ? 'border-[#1f654f] bg-[#edf5f0] ring-2 ring-[#c9ded3]' : 'border-[#d9d7ce] bg-white hover:border-[#aebfb6]' }}">
+                        <input class="sr-only" type="radio" wire:model.live="sourcePurpose" value="chat" required>
+                        <span class="flex items-start gap-3">
+                            <span class="grid size-9 shrink-0 place-items-center rounded-lg bg-[#e3eee8] text-[#1f654f]"><flux:icon icon="chat-bubble-left-right" class="size-4.5" /></span>
+                            <span>
+                                <span class="block text-sm font-semibold text-[#18342c]">{{ __('Chat knowledge') }}</span>
+                                <span class="mt-1 block text-xs leading-5 text-[#667970]">{{ __('Codes, ordinances, documents, services, and reference pages.') }}</span>
+                            </span>
+                        </span>
+                    </label>
+                </div>
+                @error('sourcePurpose') <p class="mt-2 text-sm text-red-600">{{ __('Choose News, Events, or Chat before continuing.') }}</p> @enderror
+            </fieldset>
 
             <flux:input
                 wire:model="sourceUrl"
@@ -35,8 +74,9 @@
                 type="url"
                 placeholder="https://example.gov/news-or-events"
                 required
-                autofocus
             />
+
+            <flux:text variant="subtle">{{ __('Use the public URL you would give a person. The analyzer will retry blocked pages with a browser renderer and look for feeds or APIs appropriate to the destination you selected.') }}</flux:text>
 
             <div class="grid gap-4 md:grid-cols-2">
                 <flux:select wire:model="cityId" :label="__('City')" required>
@@ -62,7 +102,7 @@
 
             <div class="flex justify-end">
                 <flux:button type="submit" variant="primary" icon="sparkles" wire:loading.attr="disabled" wire:target="analyze">
-                    <span wire:loading.remove wire:target="analyze">{{ __('Analyze source') }}</span>
+                    <span wire:loading.remove wire:target="analyze">{{ $sourcePurpose === 'chat' ? __('Continue to chat source') : __('Analyze source') }}</span>
                     <span wire:loading wire:target="analyze">{{ __('Finding the best endpoint…') }}</span>
                 </flux:button>
             </div>
@@ -81,6 +121,9 @@
                                 <flux:heading id="detected-source" size="lg" class="mt-1">
                                     {{ $discoveredKind === 'event' ? __('Events and calendar listings') : __('News and civic articles') }}
                                 </flux:heading>
+                                <flux:text class="mt-2 font-medium text-[#285f4d]">
+                                    {{ $sourcePurpose === 'event' ? __('Destination selected: Events calendar') : __('Destination selected: News feed') }}
+                                </flux:text>
                                 <flux:text variant="subtle" class="mt-2 break-all">{{ $discoveredUrl }}</flux:text>
                             </div>
                         </div>
@@ -160,11 +203,7 @@
                         <flux:icon icon="chevron-down" class="size-4 transition group-open:rotate-180" />
                     </summary>
                     <div class="mt-6 space-y-5 border-t border-[#e1dfd7] pt-6">
-                        <div class="grid gap-4 md:grid-cols-2">
-                            <flux:select wire:model.live="discoveredKind" :label="__('Content destination')">
-                                <option value="article">{{ __('Articles') }}</option>
-                                <option value="event">{{ __('Events') }}</option>
-                            </flux:select>
+                        <div>
                             <flux:select wire:model.live="discoveredType" :label="__('Source type')">
                                 @foreach ($discoveredKind === 'event' ? ['ics', 'rss', 'json_api', 'html'] : ['rss', 'html'] as $type)
                                     <option value="{{ $type }}">{{ strtoupper(str_replace('_', ' ', $type)) }}</option>

@@ -5,7 +5,7 @@
 <div class="admin-page" @if($hasActiveRuns) wire:poll.10s @endif>
     <div class="admin-page-header">
         <div>
-            <div class="admin-kicker">{{ __('Answer library') }}</div>
+            <div class="admin-kicker">{{ __('Chat knowledge') }}</div>
             <flux:heading size="xl" level="1" class="mt-2 font-serif !text-4xl !font-medium tracking-[-0.03em] text-[#123e32]">{{ __('Chat Sources') }}</flux:heading>
             <flux:subheading class="mt-2">{{ __('Manage the trusted sources used for local answers.') }}</flux:subheading>
         </div>
