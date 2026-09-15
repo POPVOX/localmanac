@@ -181,41 +181,46 @@ const run = async () => {
     headless: true,
     ...(proxy ? { proxy } : {}),
   });
-  const storageState = await resolveStorageState();
-  let context = await browser.newContext({
-    userAgent,
-    ...(storageState ? { storageState } : {}),
-  });
-  let { html, finalUrl } = await navigateAndExtract(context, url);
+  try {
+    const storageState = await resolveStorageState();
+    let context = await browser.newContext({
+      userAgent,
+      ...(storageState ? { storageState } : {}),
+    });
+    let { html, finalUrl } = await navigateAndExtract(context, url);
 
-  if (isChallengePage(html) && refreshOnBlocked && refreshAttempts > 0) {
-    for (let attempt = 1; attempt <= refreshAttempts; attempt += 1) {
-      await context.close();
+    if (isChallengePage(html) && refreshOnBlocked && refreshAttempts > 0) {
+      for (let attempt = 1; attempt <= refreshAttempts; attempt += 1) {
+        await context.close();
 
-      context = await browser.newContext({ userAgent });
-      const refreshed = await navigateAndExtract(context, url, {
-        warmup: true,
-        reloadOnChallenge: true,
-      });
+        context = await browser.newContext({ userAgent });
+        const refreshed = await navigateAndExtract(context, url, {
+          warmup: true,
+          reloadOnChallenge: true,
+        });
 
-      html = refreshed.html;
-      finalUrl = refreshed.finalUrl;
+        html = refreshed.html;
+        finalUrl = refreshed.finalUrl;
 
-      if (!isChallengePage(html)) {
-        break;
+        if (!isChallengePage(html)) {
+          break;
+        }
       }
     }
+
+    if (storageStatePath) {
+      await mkdir(path.dirname(storageStatePath), { recursive: true });
+      await context.storageState({ path: storageStatePath });
+    }
+
+    await context.close();
+
+    process.stdout.write(JSON.stringify({ url: finalUrl, html }));
+  } finally {
+    // Close Chromium and remove its temporary profile even when navigation,
+    // selector waits, or storage-state writes fail.
+    await browser.close();
   }
-
-  if (storageStatePath) {
-    await mkdir(path.dirname(storageStatePath), { recursive: true });
-    await context.storageState({ path: storageStatePath });
-  }
-
-  await context.close();
-  await browser.close();
-
-  process.stdout.write(JSON.stringify({ url: finalUrl, html }));
 };
 
 run().catch((error) => {
