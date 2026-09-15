@@ -45,6 +45,52 @@ function makeGenericListingScraper(City $city, int $maxLinks = 5): Scraper
     ]);
 }
 
+it('excludes navigation and sponsor destinations before applying the news link limit', function () {
+    $scraper = makeGenericListingScraper(makeGenericListingCity(), 1);
+    $config = $scraper->config;
+    $config['list']['link_selector'] = 'a[href]';
+    $scraper->config = $config;
+    Http::preventStrayRequests();
+    Http::fake([
+        $scraper->source_url => Http::response('<body>'
+            .'<nav><a href="/about">About</a></nav><footer><a href="/privacy">Privacy</a></footer>'
+            .'<a href="https://maps.example.com/place">Map</a><a href="https://ads.example.com/sale">Ad</a>'
+            .'<div class="sponsors"><a href="/sponsor">Sponsor</a></div>'
+            .'<a rel="sponsored" href="/offer">Offer</a><a href="#top">Top</a>'
+            .'<a href="mailto:clerk@example.com">Email</a><a href="tel:123">Phone</a><a href="javascript:void(0)">Open</a>'
+            .'<a href="https://www.example.com/stories/alpha">Council news</a></body>', 200),
+        'https://www.example.com/stories/alpha' => Http::response(file_get_contents(base_path('tests/Fixtures/generic_listing_article_full.html')), 200),
+    ]);
+
+    $items = app(GenericListingFetcher::class)->fetch($scraper);
+
+    expect($items)->toHaveCount(1)->and($items[0]['title'])->toBe('Council meets on zoning');
+    Http::assertSentCount(2);
+});
+
+it('accepts explicit external document hosts and hands PDF notices to document extraction', function () {
+    $scraper = makeGenericListingScraper(makeGenericListingCity());
+    $config = $scraper->config;
+    $config['list']['allowed_hosts'] = ['documents.example.gov'];
+    $scraper->config = $config;
+    Http::preventStrayRequests();
+    Http::fake([
+        $scraper->source_url => Http::response('<div class="listing">'
+            .'<a class="story-link" href="https://documents.example.gov/hearing.PDF?download=1">Public hearing notice</a>'
+            .'<a class="story-link" href="https://other.example.gov/unapproved.pdf">Unapproved host</a></div>', 200),
+    ]);
+
+    $items = app(GenericListingFetcher::class)->fetch($scraper);
+
+    expect($items)->toHaveCount(1)
+        ->and($items[0]['title'])->toBe('Public hearing notice')
+        ->and($items[0]['content_type'])->toBe('pdf')
+        ->and($items[0]['source']['source_type'])->toBe('pdf')
+        ->and($items[0]['canonical_url'])->toBe('https://documents.example.gov/hearing.PDF?download=1')
+        ->and($items[0])->not->toHaveKey('body');
+    Http::assertSentCount(1);
+});
+
 it('extracts links and ingests article content in best-effort mode', function () {
     $city = makeGenericListingCity();
     $scraper = makeGenericListingScraper($city);

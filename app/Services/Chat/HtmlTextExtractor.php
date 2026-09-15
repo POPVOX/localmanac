@@ -6,6 +6,13 @@ use Symfony\Component\DomCrawler\Crawler;
 
 class HtmlTextExtractor
 {
+    private const CONTENT_SELECTORS = [
+        '#moduleContent', '[data-cpRole="mainContentContainer"]', '.moduleContentNew',
+        'main', '[role="main"]', 'article', '#content', '#contents', '#main',
+        '#main-content', '#mainContent', '.mainContent', '.main-content',
+        '.page-content', '.pageContent', '.content', '#page',
+    ];
+
     /**
      * @return array{
      *     title: string|null,
@@ -35,6 +42,12 @@ class HtmlTextExtractor
         }
 
         $links = $this->extractLinks($crawler);
+        // Work on a separate tree: retain the original link inventory for provenance.
+        $crawler = new Crawler($html, $baseUrl);
+        $crawler->filter('script, style, nav, footer, [role="navigation"], [role="contentinfo"], .navbar, .nav-content, .breadcrumb, .breadCrumbsArea, .site-header, .site-footer, .footer, .sidebarMainLinks')->each(function (Crawler $node): void {
+            $element = $node->getNode(0);
+            $element?->parentNode?->removeChild($element);
+        });
         $contentLinks = $this->extractContentLinks($crawler);
         $text = $this->extractMainText($crawler);
 
@@ -89,30 +102,14 @@ class HtmlTextExtractor
      */
     private function extractContentLinks(Crawler $crawler): array
     {
-        $selectors = [
-            '#moduleContent',
-            '[data-cpRole="mainContentContainer"]',
-            '#page',
-            '.moduleContentNew',
-            'main',
-            '[role="main"]',
-            'article',
-            '#content',
-            '.content',
-            '.page-content',
-            '.main-content',
-        ];
-
-        foreach ($selectors as $selector) {
+        foreach ([...self::CONTENT_SELECTORS, 'body'] as $selector) {
             if ($crawler->filter($selector)->count() === 0) {
                 continue;
             }
 
             $links = $this->extractLinks($crawler->filter($selector));
 
-            if ($links !== []) {
-                return $links;
-            }
+            return $links;
         }
 
         return [];
@@ -120,21 +117,7 @@ class HtmlTextExtractor
 
     private function extractMainText(Crawler $crawler): string
     {
-        $selectors = [
-            '#moduleContent',
-            '[data-cpRole="mainContentContainer"]',
-            '#page',
-            '.moduleContentNew',
-            'main',
-            '[role="main"]',
-            'article',
-            '#content',
-            '.content',
-            '.page-content',
-            '.main-content',
-        ];
-
-        foreach ($selectors as $selector) {
+        foreach (self::CONTENT_SELECTORS as $selector) {
             if ($crawler->filter($selector)->count() === 0) {
                 continue;
             }
