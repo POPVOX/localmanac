@@ -6,8 +6,9 @@ use App\Enums\ArticlePublishedPrecision;
 use App\Models\Scraper;
 use App\Services\Chat\Ingestion\PageFetcher;
 use Carbon\Carbon;
+use GuzzleHttp\Psr7\Uri;
+use GuzzleHttp\Psr7\UriResolver;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Symfony\Component\DomCrawler\Crawler;
 
@@ -56,6 +57,8 @@ class GenericListingFetcher
 
         $linkAttr = Arr::get($listConfig, 'link_attr', 'href');
         $maxLinks = (int) Arr::get($listConfig, 'max_links', 50);
+        $allowedHosts = Arr::get($listConfig, 'allowed_hosts', []);
+        $allowedHosts = is_array($allowedHosts) ? $allowedHosts : [];
 
         $contentSelector = Arr::get($articleConfig, 'content_selector');
 
@@ -88,6 +91,7 @@ class GenericListingFetcher
             maxPages: $maxPages,
             paginationSelector: is_string($paginationSelector) ? $paginationSelector : null,
             paginationAttr: is_string($paginationAttr) && trim($paginationAttr) !== '' ? $paginationAttr : 'href',
+            allowedHosts: $allowedHosts,
         );
 
         $items = [];
@@ -97,6 +101,23 @@ class GenericListingFetcher
         foreach ($links as $link) {
             $url = $link['url'];
             $titleHint = $link['title'] ?? '';
+
+            if (preg_match('/\.(pdf|docx?)(?:$|[?#])/i', $url, $documentMatch) === 1) {
+                $items[] = [
+                    'city_id' => $scraper->city_id,
+                    'scraper_id' => $scraper->id,
+                    'title' => $titleHint !== '' ? $titleHint : basename((string) parse_url($url, PHP_URL_PATH)),
+                    'content_type' => strtolower($documentMatch[1]),
+                    'canonical_url' => $url,
+                    'source' => [
+                        'source_type' => strtolower($documentMatch[1]),
+                        'source_url' => $url,
+                        'accessed_at' => $accessedAt,
+                    ],
+                ];
+
+                continue;
+            }
 
             try {
                 $articleHtml = $this->fetchPageHtml($url, $renderer, false, $articlePlaywrightOptions, true);
@@ -117,6 +138,11 @@ class GenericListingFetcher
             $crawler = new Crawler($articleHtml, $url);
 
             $canonicalUrl = $this->extractCanonicalUrl($crawler, $url);
+
+            if (! $this->isAllowedHost($canonicalUrl, $sourceUrl, $allowedHosts)) {
+                continue;
+            }
+
             $title = $this->extractTitle($crawler);
             $title = $title ?: ($titleHint ?: $canonicalUrl);
             $publishedAtData = $this->extractPublishedAt($crawler, $timezone);
@@ -166,15 +192,22 @@ class GenericListingFetcher
     /**
      * @return array<int, array{url: string, title: string}>
      */
-    private function extractLinks(string $html, string $baseUrl, string $selector, string $linkAttr, int $maxLinks): array
+    private function extractLinks(string $html, string $baseUrl, string $selector, string $linkAttr, int $maxLinks, array $allowedHosts = []): array
     {
         $crawler = new Crawler($html, $baseUrl);
 
-        $links = $crawler->filter($selector)->each(function (Crawler $node) use ($linkAttr, $baseUrl) {
+        $links = $crawler->filter($selector)->each(function (Crawler $node) use ($linkAttr, $baseUrl, $allowedHosts) {
             $href = $node->attr($linkAttr) ?? '';
+
+            if (trim($href) === '' || str_starts_with(trim($href), '#')
+                || $this->isBoilerplateLink($node)
+                || in_array('sponsored', preg_split('/\s+/', strtolower($node->attr('rel') ?? '')) ?: [], true)) {
+                return null;
+            }
+
             $resolved = $this->resolveUrl($href, $baseUrl);
 
-            if (! $resolved) {
+            if (! $resolved || ! $this->isAllowedHost($resolved, $baseUrl, $allowedHosts)) {
                 return null;
             }
 
@@ -209,6 +242,41 @@ class GenericListingFetcher
         return $deduped;
     }
 
+    /** @param array<int, string> $allowedHosts */
+    private function isAllowedHost(string $url, string $baseUrl, array $allowedHosts): bool
+    {
+        if (! in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
+            return false;
+        }
+
+        $normalize = fn (string $host): string => preg_replace('/^www\./', '', strtolower(trim($host))) ?? '';
+        $host = $normalize((string) parse_url($url, PHP_URL_HOST));
+        $hosts = array_map($normalize, array_filter([
+            (string) parse_url($baseUrl, PHP_URL_HOST), ...$allowedHosts,
+        ], 'is_string'));
+
+        return $host !== '' && in_array($host, $hosts, true);
+    }
+
+    private function isBoilerplateLink(Crawler $node): bool
+    {
+        $parent = $node->getNode(0)?->parentNode;
+
+        while ($parent instanceof \DOMElement) {
+            $classes = preg_split('/\s+/', strtolower($parent->getAttribute('class'))) ?: [];
+
+            if (in_array(strtolower($parent->tagName), ['nav', 'footer'], true)
+                || strtolower($parent->getAttribute('role')) === 'navigation'
+                || array_intersect($classes, ['navbar', 'site-header', 'site-footer', 'footer', 'sidebarmainlinks', 'sponsors', 'sponsor-logos', 'advertisement']) !== []) {
+                return true;
+            }
+
+            $parent = $parent->parentNode;
+        }
+
+        return false;
+    }
+
     /**
      * @param  array<string, mixed>  $playwrightOptions
      * @return array<int, array{url: string, title: string}>
@@ -224,6 +292,7 @@ class GenericListingFetcher
         int $maxPages,
         ?string $paginationSelector,
         string $paginationAttr,
+        array $allowedHosts = [],
     ): array {
         $pages = [
             ['url' => $listingUrl, 'html' => $listingHtml],
@@ -245,6 +314,7 @@ class GenericListingFetcher
                 selector: $linkSelector,
                 linkAttr: $linkAttr,
                 maxLinks: 0,
+                allowedHosts: $allowedHosts,
             );
 
             foreach ($batch as $link) {
@@ -462,36 +532,15 @@ class GenericListingFetcher
             return null;
         }
 
-        if (Str::startsWith($url, '//')) {
-            $scheme = parse_url($baseUrl, PHP_URL_SCHEME) ?: 'https';
+        try {
+            $resolved = UriResolver::resolve(new Uri($baseUrl), new Uri($url))->withFragment('');
 
-            return $scheme.':'.$url;
-        }
-
-        if (Str::startsWith($url, ['http://', 'https://'])) {
-            return $url;
-        }
-
-        $base = parse_url($baseUrl);
-
-        if (! $base || ! isset($base['scheme'], $base['host'])) {
+            return in_array(strtolower($resolved->getScheme()), ['http', 'https'], true)
+                ? (string) $resolved
+                : null;
+        } catch (\Throwable) {
             return null;
         }
-
-        $scheme = $base['scheme'];
-        $host = $base['host'];
-        $port = isset($base['port']) ? ':'.$base['port'] : '';
-        $path = $base['path'] ?? '/';
-
-        if (Str::startsWith($url, '/')) {
-            return "{$scheme}://{$host}{$port}{$url}";
-        }
-
-        $directory = preg_replace('#/[^/]*$#', '/', $path) ?: '/';
-        $directory = Str::finish($directory, '/');
-        $directory = Str::start($directory, '/');
-
-        return "{$scheme}://{$host}{$port}{$directory}{$url}";
     }
 
     private function extractCanonicalUrl(Crawler $crawler, string $fallback): string

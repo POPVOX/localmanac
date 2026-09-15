@@ -145,3 +145,25 @@ it('rejects non-html binary responses before extraction', function () {
 
     expect($fetcher->fetch('https://example.com/agenda.pdf'))->toBeNull();
 });
+
+it('passes PDF bytes to callers that have a document extractor without launching a browser', function (string $contentType) {
+    config(['chat.crawl_renderer' => 'auto']);
+    $body = "%PDF-1.7\n\xFF\xFE binary-data";
+    $httpFetcher = Mockery::mock(HttpPageFetcher::class);
+    $httpFetcher->shouldReceive('fetch')->once()->andReturn([
+        'url' => 'https://example.gov/download?id=123',
+        'status_code' => 200, 'content_type' => $contentType,
+        'body' => $body, 'renderer' => 'http',
+    ]);
+    $playwrightFetcher = Mockery::mock(PlaywrightPageFetcher::class);
+    $playwrightFetcher->shouldReceive('fetch')->never();
+    $htmlExtractor = Mockery::mock(HtmlTextExtractor::class);
+    $htmlExtractor->shouldReceive('extract')->never();
+    $fetcher = new PageFetcher($httpFetcher, $playwrightFetcher, $htmlExtractor);
+
+    $result = $fetcher->fetch('https://example.gov/download?id=123', allowPdf: true);
+
+    expect($result['body'])->toBe($body)
+        ->and($result['content_type'])->toBe('application/pdf')
+        ->and($result['renderer'])->toBe('http');
+})->with(['application/pdf', 'application/octet-stream']);

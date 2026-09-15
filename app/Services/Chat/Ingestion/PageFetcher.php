@@ -15,7 +15,7 @@ class PageFetcher
     /**
      * @return array{url: string, status_code: int, content_type: string|null, body: string, renderer: string}|null
      */
-    public function fetch(string $url, ?string $rendererOverride = null, array $playwrightOptions = []): ?array
+    public function fetch(string $url, ?string $rendererOverride = null, array $playwrightOptions = [], bool $allowPdf = false): ?array
     {
         $mode = $rendererOverride && $rendererOverride !== ''
             ? $rendererOverride
@@ -33,6 +33,13 @@ class PageFetcher
 
         if ($httpResult === null) {
             return $this->playwrightFetch($url, $playwrightOptions);
+        }
+
+        // Chat has a PDF extractor; HTML-only consumers keep the default rejection.
+        if ($allowPdf && str_starts_with(ltrim($httpResult['body']), '%PDF-')) {
+            $httpResult['content_type'] = 'application/pdf';
+
+            return $httpResult;
         }
 
         if (! $this->isProcessableResponse($httpResult['content_type'] ?? null, $httpResult['body'])) {

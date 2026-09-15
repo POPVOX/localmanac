@@ -153,3 +153,36 @@ it('extracts table rows as text', function () {
     expect($result['text'])->toContain('Material | Fee')
         ->and($result['text'])->toContain('Secured load | $44.85 per ton');
 });
+
+it('recognizes legacy municipal content wrappers without following the header menu', function (string $wrapper) {
+    $html = '<html><body><nav><a href="/shopping">Shopping</a></nav>'
+        .'<div '.$wrapper.'><h2>Public notices</h2><a href="/agenda.pdf">Council agenda</a>'
+        .'<section class="sidebarMainLinks"><a href="/contact">Contact us</a></section>'
+        .'<div class="footer"><a href="/social">Social media</a></div></div>'
+        .'<footer><a href="/privacy">Privacy</a></footer></body></html>';
+
+    $result = (new HtmlTextExtractor)->extract($html, 'https://example.gov');
+
+    expect($result['content_links'])->toBe([['href' => '/agenda.pdf', 'text' => 'Council agenda']])
+        ->and($result['text'])->toContain('Public notices')
+        ->not->toContain('Shopping')->not->toContain('Privacy')->not->toContain('Contact us')->not->toContain('Social media')
+        ->and($result['links'])->toHaveCount(5);
+})->with(['class="mainContent"', 'id="main"']);
+
+it('uses content outside navigation when a page has no recognized content wrapper', function () {
+    $result = (new HtmlTextExtractor)->extract(
+        '<body><nav><a href="/menu">Menu</a></nav><div><a href="/permit">Permit application</a></div></body>',
+        'https://example.gov'
+    );
+
+    expect($result['content_links'])->toBe([['href' => '/permit', 'text' => 'Permit application']]);
+});
+
+it('does not fall back to unrelated links when the main article has no links', function () {
+    $result = (new HtmlTextExtractor)->extract(
+        '<body><main><p>Residents may apply at city hall.</p></main><aside><a href="/sale">Advertisement</a></aside></body>',
+        'https://example.gov'
+    );
+
+    expect($result['content_links'])->toBeEmpty();
+});

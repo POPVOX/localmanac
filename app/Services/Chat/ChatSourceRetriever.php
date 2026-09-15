@@ -3,6 +3,7 @@
 namespace App\Services\Chat;
 
 use App\Models\ArticleChunk;
+use App\Models\ChatSource;
 use App\Models\ChatSourceChunk;
 use App\Services\Chat\Event\EventIntentDetector;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
@@ -33,7 +34,7 @@ class ChatSourceRetriever
     {
         $question = trim($question);
 
-        if ($sources->isEmpty() || $question === '') {
+        if (($sources->isEmpty() && $cityId === null) || $question === '') {
             return [
                 'evidence' => [],
                 'meta' => [
@@ -43,7 +44,11 @@ class ChatSourceRetriever
             ];
         }
 
-        $sourceIds = $sources->pluck('id')->map(fn ($id) => (int) $id)->all();
+        // Metadata selection is a prompt hint, not a boundary on the city's knowledge.
+        $sourceIds = ($cityId !== null
+            ? ChatSource::query()->where('city_id', $cityId)->where('is_active', true)->pluck('id')
+            : $sources->pluck('id'))
+            ->map(fn ($id) => (int) $id)->all();
         $limit = (int) config('chat.retrieval_chunk_limit', 8);
         $proceduralFocusTerms = $this->isProceduralQuestion($question)
             ? $this->proceduralFocusTerms($question)

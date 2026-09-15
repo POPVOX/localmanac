@@ -11,6 +11,38 @@ use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
 
+it('finds city content outside the metadata shortlist without including inactive or other-city sources', function (bool $v2) {
+    config(['scout.driver' => 'collection', 'chat.vector_enabled' => false, 'chat.fts_enabled' => true,
+        'chat.retrieval_v2_enabled' => $v2, 'chat.reranking_enabled' => false]);
+    $city = City::factory()->create();
+    ChatSource::factory()->count(12)->create([
+        'city_id' => $city->id, 'name' => 'Community information', 'description' => null, 'tags' => [],
+        'priority' => 100, 'is_active' => true,
+    ]);
+    $target = ChatSource::factory()->create([
+        'city_id' => $city->id, 'name' => 'Environmental services', 'description' => null, 'tags' => [],
+        'priority' => 0, 'is_active' => true,
+    ]);
+    $inactive = ChatSource::factory()->create(['city_id' => $city->id, 'is_active' => false]);
+    $otherCitySource = ChatSource::factory()->create(['is_active' => true]);
+    foreach ([$target, $inactive, $otherCitySource] as $source) {
+        $page = ChatSourcePage::factory()->create([
+            'chat_source_id' => $source->id, 'title' => 'Household hazardous waste',
+            'url' => 'https://example.gov/waste/'.$source->id, 'canonical_url' => null,
+        ]);
+        ChatSourceChunk::factory()->create([
+            'chat_source_page_id' => $page->id, 'chunk_index' => 0,
+            'content' => 'Dispose of household hazardous waste at the environmental service center. Bring proof of residency.',
+        ]);
+    }
+    $shortlist = app(\App\Services\Chat\ChatSourceSelector::class)->select($city->id, 'hazardous waste disposal');
+    expect($shortlist)->toHaveCount(12)->and($shortlist->pluck('id'))->not->toContain($target->id);
+
+    $result = app(ChatSourceRetriever::class)->retrieve($shortlist, 'hazardous waste disposal', $city->id);
+
+    expect(array_column($result['evidence'], 'source_url'))->toBe(['https://example.gov/waste/'.$target->id]);
+})->with([false, true]);
+
 it('retrieves ingested chunks using full text search', function () {
     config()->set('scout.driver', 'collection');
     config()->set('chat.vector_enabled', false);

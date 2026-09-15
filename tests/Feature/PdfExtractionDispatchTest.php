@@ -9,11 +9,49 @@ use App\Services\Ingestion\Deduplicator;
 use App\Services\Ingestion\Fetchers\RssFetcher;
 use App\Services\Ingestion\Fetchers\WichitaArchivePdfListFetcher;
 use App\Services\Ingestion\ScrapeRunner;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Mockery as M;
 
 afterEach(function (): void {
     M::close();
+});
+
+it('queues extraction for municipal documents discovered by the generic listing fetcher', function () {
+    Queue::fake();
+    Http::preventStrayRequests();
+    $city = City::factory()->create();
+    $scraper = Scraper::create([
+        'city_id' => $city->id,
+        'name' => 'Public notices',
+        'slug' => 'public-notices',
+        'type' => 'html',
+        'source_url' => 'https://example.gov/public-notices.html',
+        'is_enabled' => true,
+        'config' => [
+            'profile' => 'generic_listing',
+            'fetch' => ['renderer' => 'http'],
+            'list' => ['link_selector' => '.mainContent a[href]', 'max_links' => 10],
+            'article' => ['content_selector' => 'main'],
+        ],
+    ]);
+    Http::fake([
+        $scraper->source_url => Http::response('<div class="mainContent">'
+            .'<a href="/notices/hearing.pdf?download=1">Public hearing notice</a></div>', 200),
+    ]);
+
+    $run = app(ScrapeRunner::class)->run($scraper);
+    $article = Article::where('scraper_id', $scraper->id)->sole();
+
+    expect($run->status)->toBe('success')
+        ->and($run->items_created)->toBe(1)
+        ->and($article->content_type)->toBe('pdf')
+        ->and($article->body)->toBeNull()
+        ->and($article->sources()->sole()->source_type)->toBe('pdf');
+    Queue::assertPushed(ExtractPdfBody::class, fn (ExtractPdfBody $job): bool => $job->articleId === $article->id
+        && $job->pdfUrl === 'https://example.gov/notices/hearing.pdf?download=1'
+        && $job->queue === 'scraping');
+    Http::assertSentCount(1);
 });
 
 it('queues pdf extraction jobs for pdf items', function () {
