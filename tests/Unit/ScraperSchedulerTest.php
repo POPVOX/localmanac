@@ -10,6 +10,24 @@ use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
 
+it('backs off failed sources for an hour', function () {
+    $now = CarbonImmutable::parse('2026-10-10 18:00:00', 'UTC');
+    $city = City::create(['name' => 'Houston', 'slug' => 'houston', 'timezone' => 'UTC']);
+    $source = Scraper::create([
+        'city_id' => $city->id, 'name' => 'Public Notices', 'slug' => 'public-notices',
+        'type' => 'html', 'source_url' => 'https://example.gov/notices',
+        'frequency' => 'hourly', 'is_enabled' => true, 'config' => [],
+    ]);
+    ScraperRun::create([
+        'scraper_id' => $source->id, 'city_id' => $city->id, 'status' => 'failed',
+        'started_at' => $now->subMinutes(60), 'finished_at' => $now->subMinutes(59),
+        'items_found' => 0, 'items_created' => 0, 'items_updated' => 0,
+    ]);
+
+    expect(app(ScraperScheduler::class)->dueScrapers($now)->pluck('id'))->not->toContain($source->id);
+    expect(app(ScraperScheduler::class)->dueScrapers($now->addMinute())->pluck('id'))->toContain($source->id);
+});
+
 it('honors daily run times in each city timezone', function () {
     $nowUtc = CarbonImmutable::parse('2025-01-02 16:00:00', 'UTC');
 

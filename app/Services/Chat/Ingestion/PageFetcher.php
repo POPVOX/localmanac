@@ -3,6 +3,8 @@
 namespace App\Services\Chat\Ingestion;
 
 use App\Services\Chat\HtmlTextExtractor;
+use App\Services\Ingestion\DownloadPolicy;
+use App\Services\Ingestion\DownloadRejected;
 
 class PageFetcher
 {
@@ -16,6 +18,20 @@ class PageFetcher
      * @return array{url: string, status_code: int, content_type: string|null, body: string, renderer: string}|null
      */
     public function fetch(string $url, ?string $rendererOverride = null, array $playwrightOptions = [], bool $allowPdf = false): ?array
+    {
+        if (app(DownloadPolicy::class)->isMediaUrl($url)) {
+            return null;
+        }
+
+        try {
+            return $this->fetchPage($url, $rendererOverride, $playwrightOptions, $allowPdf);
+        } catch (DownloadRejected) {
+            // Do not retry a rejected download using a browser.
+            return null;
+        }
+    }
+
+    private function fetchPage(string $url, ?string $rendererOverride, array $playwrightOptions, bool $allowPdf): ?array
     {
         $mode = $rendererOverride && $rendererOverride !== ''
             ? $rendererOverride

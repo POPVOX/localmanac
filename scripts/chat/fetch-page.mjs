@@ -142,6 +142,9 @@ const scrollForLazyLoad = async (page) => {
 
 const navigateAndExtract = async (context, targetUrl, { warmup = false, reloadOnChallenge = false } = {}) => {
   const page = await context.newPage();
+  await page.route('**/*', (route) =>
+    route.request().resourceType() === 'media' ? route.abort() : route.continue()
+  );
 
   if (warmup) {
     try {
@@ -185,6 +188,7 @@ const run = async () => {
     const storageState = await resolveStorageState();
     let context = await browser.newContext({
       userAgent,
+      acceptDownloads: false,
       ...(storageState ? { storageState } : {}),
     });
     let { html, finalUrl } = await navigateAndExtract(context, url);
@@ -193,7 +197,7 @@ const run = async () => {
       for (let attempt = 1; attempt <= refreshAttempts; attempt += 1) {
         await context.close();
 
-        context = await browser.newContext({ userAgent });
+        context = await browser.newContext({ userAgent, acceptDownloads: false });
         const refreshed = await navigateAndExtract(context, url, {
           warmup: true,
           reloadOnChallenge: true,

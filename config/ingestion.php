@@ -1,6 +1,9 @@
 <?php
 
 return [
+    'failed_source_retry_minutes' => (int) env('INGESTION_FAILED_SOURCE_RETRY_MINUTES', 60),
+    'max_download_bytes' => (int) env('INGESTION_MAX_DOWNLOAD_BYTES', 25 * 1024 * 1024),
+
     'quality_guard' => [
         'enabled' => (bool) env('INGESTION_QUALITY_GUARD_ENABLED', true),
         'min_words' => (int) env('INGESTION_QUALITY_GUARD_MIN_WORDS', 12),

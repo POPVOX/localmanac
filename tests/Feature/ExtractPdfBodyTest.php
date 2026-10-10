@@ -221,6 +221,26 @@ it('marks failure when response is not a pdf', function () {
         ->and($body?->extraction_meta['http_status'])->toBe(200);
 });
 
+it('records rejected media and oversized documents without storing them', function (array $headers) {
+    \Illuminate\Support\Facades\Storage::fake('local');
+    Http::globalOptions(['handler' => new \GuzzleHttp\Handler\MockHandler([
+        new \GuzzleHttp\Psr7\Response(200, $headers),
+    ])]);
+    $city = City::create(['name' => 'Houston', 'slug' => 'houston']);
+    $article = Article::create([
+        'city_id' => $city->id, 'title' => 'Meeting download',
+        'status' => 'published', 'content_type' => 'pdf',
+    ]);
+
+    (new ExtractPdfBody($article->id, 'https://example.gov/download?id=1'))->handle();
+
+    expect($article->body()->first()?->extraction_status)->toBe('failed')
+        ->and(\Illuminate\Support\Facades\Storage::disk('local')->allFiles())->toBe([]);
+})->with([
+    'video' => [['Content-Type' => 'video/mp4', 'Content-Length' => '130774179']],
+    'large PDF' => [['Content-Type' => 'application/pdf', 'Content-Length' => '30000000']],
+]);
+
 it('extracts docx responses and refreshes article text', function () {
     Queue::fake();
 
