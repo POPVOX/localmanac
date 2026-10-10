@@ -11,6 +11,10 @@ use Illuminate\Support\Facades\DB;
 
 uses(Tests\TestCase::class, RefreshDatabase::class);
 
+beforeEach(function () {
+    \Illuminate\Support\Facades\Queue::fake([\App\Jobs\EnrichArticle::class]);
+});
+
 function makeCity(): City
 {
     return City::create([

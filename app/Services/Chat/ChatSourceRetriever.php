@@ -53,18 +53,38 @@ class ChatSourceRetriever
         $proceduralFocusTerms = $this->isProceduralQuestion($question)
             ? $this->proceduralFocusTerms($question)
             : [];
+        // Preserve the requested service, not merely an incidental subject word.
+        if ($proceduralFocusTerms !== []) {
+            foreach (['permit', 'licens'] as $service) {
+                if (str_contains(mb_strtolower($question), $service)) {
+                    $proceduralFocusTerms[] = $service;
+                }
+            }
+        }
 
         $focusedRows = $this->proceduralFocusSearch($sourceIds, $proceduralFocusTerms, $limit);
         $vectorRows = $this->vectorSearch($sourceIds, $question, $limit);
         $ftsLimit = max($limit, (int) config('chat.retrieval_fts_limit', $limit));
         $ftsRows = $this->ftsSearch($sourceIds, $question, $ftsLimit);
 
-        if (config('chat.retrieval_v2_enabled', false)) {
+        // Procedural title boosts and full-text ranks have different scales.
+        // Fuse their positions so a focused keyword match cannot drown out a
+        // full-text match for the actual question.
+        if (config('chat.retrieval_v2_enabled', false) || $proceduralFocusTerms !== []) {
             $rows = collect($this->reciprocalRankFusion->fuse([
                 'procedural' => $focusedRows,
                 'dense' => $vectorRows,
                 'lexical' => $ftsRows,
             ], 'chunk_id'));
+            if (! config('chat.retrieval_v2_enabled', false)) {
+                $pageCounts = [];
+                $rows = $rows->filter(function (array $row) use (&$pageCounts): bool {
+                    $page = $row['page_id'];
+                    $pageCounts[$page] = ($pageCounts[$page] ?? 0) + 1;
+
+                    return $pageCounts[$page] <= 2;
+                })->take($limit);
+            }
         } else {
             $rows = collect($focusedRows);
 
@@ -91,6 +111,10 @@ class ChatSourceRetriever
 
         $rows = $this->deduplicateRows($rows)
             ->filter(fn (array $row): bool => ! $this->isBlockedRow($row))
+            ->filter(fn (array $row): bool => $this->matchesTopic(
+                ($row['page_title'] ?? '').' '.($row['page_url'] ?? '').' '.($row['chunk'] ?? ''),
+                $proceduralFocusTerms
+            ))
             ->take((int) config('chat.retrieval_max_evidence', 24));
 
         $chunkEvidence = $rows
@@ -137,6 +161,11 @@ class ChatSourceRetriever
                 ->all();
         }
 
+        $evidence = array_values(array_filter($evidence, fn (array $item): bool => $this->matchesTopic(
+            ($item['title'] ?? '').' '.($item['source_url'] ?? '').' '.($item['snippet'] ?? ''),
+            $proceduralFocusTerms
+        )));
+
         $pagesUsed = collect($evidence)
             ->pluck('source_url')
             ->unique()
@@ -165,7 +194,25 @@ class ChatSourceRetriever
         $query = $this->baseQuery($sourceIds);
         $this->applyProceduralFocusConstraints($query, $focusTerms);
 
-        $rows = $query
+        $rank = [];
+        $bindings = [];
+        foreach ($focusTerms as $term) {
+            foreach (['pages.title' => 16, 'pages.url' => 8, 'chunks.content' => 2] as $column => $weight) {
+                $rank[] = "case when lower(coalesce({$column}, '')) like ? then {$weight} else 0 end";
+                $bindings[] = '%'.$term.'%';
+            }
+        }
+
+        $rankSql = '('.implode(' + ', $rank).')';
+        $query->selectRaw($rankSql.' as procedural_rank', $bindings)
+            ->selectRaw('row_number() over (partition by pages.id order by '.$rankSql.' desc, chunks.id) as page_position', $bindings);
+
+        // A long document must not fill the candidate window before shorter
+        // service guides can be considered.
+        $rows = DB::query()->fromSub($query, 'candidates')
+            ->where('page_position', '<=', 2)
+            ->orderByDesc('procedural_rank')
+            ->orderBy('chunk_id')
             ->limit(max($limit * 2, 8))
             ->get();
 
@@ -203,7 +250,7 @@ class ChatSourceRetriever
                 'page_fetched_at' => $row->page_fetched_at ? (string) $row->page_fetched_at : null,
                 'page_updated_at' => $row->page_updated_at ? (string) $row->page_updated_at : null,
                 'page_created_at' => $row->page_created_at ? (string) $row->page_created_at : null,
-                'score' => max(12, 10 + ($matches * 8) + min($proceduralSignals, 4)),
+                'score' => 10 + (int) $row->procedural_rank + ($matches * 4) + min($proceduralSignals, 4),
             ];
         })->all();
     }
@@ -221,6 +268,10 @@ class ChatSourceRetriever
         try {
             $query = ChatSourceChunk::query()
                 ->whereHas('page.source', fn (EloquentBuilder $b) => $b->whereIn('id', $sourceIds)->where('is_active', true))
+                ->whereHas('page', function (EloquentBuilder $page): void {
+                    $page->where(fn (EloquentBuilder $q) => $q->whereNull('status_code')->orWhereBetween('status_code', [200, 299]))
+                        ->where(fn (EloquentBuilder $q) => $q->whereNull('title')->orWhereNotIn(DB::raw('lower(trim(title))'), ChatSourceGuard::ERROR_TITLES));
+                })
                 ->whereNotNull('embedding');
 
             if (! (clone $query)->exists()) {
@@ -417,6 +468,10 @@ class ChatSourceRetriever
      */
     private function ftsSearch(array $sourceIds, string $question, int $limit): array
     {
+        $question = implode(' ', $this->keywordTerms($question));
+        if ($question === '') {
+            return [];
+        }
         if (! config('chat.fts_enabled', true)) {
             return [];
         }
@@ -476,12 +531,24 @@ class ChatSourceRetriever
             return [];
         }
 
+        $rank = [];
+        $bindings = [];
+        foreach ($terms as $term) {
+            foreach (['pages.title' => 4, 'chunks.content' => 1] as $column => $weight) {
+                $rank[] = "case when lower(coalesce({$column}, '')) like ? then {$weight} else 0 end";
+                $bindings[] = '%'.$term.'%';
+            }
+        }
+
         $rows = $this->baseQuery($sourceIds)
             ->where(function ($builder) use ($terms) {
                 foreach ($terms as $term) {
                     $builder->orWhere('chunks.content', 'like', '%'.$term.'%');
                 }
             })
+            ->selectRaw('('.implode(' + ', $rank).') as lexical_rank', $bindings)
+            ->orderByDesc('lexical_rank')
+            ->orderBy('chunks.id')
             ->limit($limit)
             ->get();
 
@@ -514,6 +581,7 @@ class ChatSourceRetriever
             ->join('chat_sources as sources', 'sources.id', '=', 'pages.chat_source_id')
             ->whereIn('sources.id', $sourceIds)
             ->where('sources.is_active', true)
+            ->where(fn (Builder $query) => $query->whereNull('pages.status_code')->orWhereBetween('pages.status_code', [200, 299]))
             ->where(function (Builder $query): void {
                 $query->whereNull('pages.url')
                     ->orWhere('pages.url', 'not like', '%/cdn-cgi/%');
@@ -524,11 +592,7 @@ class ChatSourceRetriever
             })
             ->where(function (Builder $query): void {
                 $query->whereNull('pages.title')
-                    ->orWhereRaw('lower(pages.title) not in (?, ?, ?)', [
-                        'email protection | cloudflare',
-                        'attention required! | cloudflare',
-                        'just a moment...',
-                    ]);
+                    ->orWhereNotIn(DB::raw('lower(trim(pages.title))'), ChatSourceGuard::ERROR_TITLES);
             })
             ->select([
                 'chunks.id as chunk_id',
@@ -551,14 +615,25 @@ class ChatSourceRetriever
      */
     private function applyProceduralFocusConstraints(Builder $query, array $focusTerms): void
     {
-        $query->where(function (Builder $builder) use ($focusTerms): void {
-            foreach ($focusTerms as $term) {
-                $builder->orWhere('chunks.content', 'like', '%'.$term.'%')
-                    ->orWhere('pages.title', 'like', '%'.$term.'%')
-                    ->orWhere('pages.url', 'like', '%'.$term.'%')
-                    ->orWhere('pages.canonical_url', 'like', '%'.$term.'%');
+        foreach ($focusTerms as $term) {
+            $query->where(function (Builder $builder) use ($term): void {
+                foreach (['chunks.content', 'pages.title', 'pages.url', 'pages.canonical_url'] as $column) {
+                    $builder->orWhereRaw("lower(coalesce({$column}, '')) like ?", ['%'.$term.'%']);
+                }
+            });
+        }
+    }
+
+    private function matchesTopic(string $content, array $terms): bool
+    {
+        $content = mb_strtolower($content);
+        foreach ($terms as $term) {
+            if (! str_contains($content, $term)) {
+                return false;
             }
-        });
+        }
+
+        return true;
     }
 
     /**
@@ -568,7 +643,7 @@ class ChatSourceRetriever
     private function mapEvidence(array $row): array
     {
         $sourceUrl = $row['canonical_url'] ?: $row['page_url'];
-        $effectiveScore = min((float) ($row['combined_score'] ?? ($row['score'] ?? 1)), 25.0);
+        $effectiveScore = (float) ($row['combined_score'] ?? ($row['score'] ?? 1));
 
         return [
             'id' => 'chunk_'.$row['chunk_id'],
@@ -587,6 +662,10 @@ class ChatSourceRetriever
      */
     private function articleFtsSearch(int $cityId, string $question, int $limit): array
     {
+        $question = implode(' ', $this->keywordTerms($question));
+        if ($question === '') {
+            return [];
+        }
         if (DB::connection()->getDriverName() !== 'pgsql') {
             return [];
         }
@@ -740,7 +819,9 @@ class ChatSourceRetriever
                 });
 
             foreach ($neighbors as $neighbor) {
-                $expanded->put($neighbor['chunk_id'], $neighbor);
+                if (! $expanded->has($neighbor['chunk_id'])) {
+                    $expanded->put($neighbor['chunk_id'], $neighbor);
+                }
             }
         }
 
@@ -770,7 +851,8 @@ class ChatSourceRetriever
             $expanded[] = $term;
 
             // Basic stemming for common plural forms improves lexical recall/ranking.
-            if (mb_strlen($term) > 4 && str_ends_with($term, 's')) {
+            if (mb_strlen($term) > 4 && str_ends_with($term, 's')
+                && ! str_ends_with($term, 'ous') && ! str_ends_with($term, 'ss')) {
                 $expanded[] = mb_substr($term, 0, -1);
             }
         }
@@ -880,10 +962,15 @@ class ChatSourceRetriever
             'apply', 'application', 'obtain', 'get', 'renew', 'register', 'file',
             'submit', 'request', 'schedule', 'report', 'permit', 'permits',
             'license', 'licenses', 'process', 'procedure', 'steps', 'step', 'city',
+            'dispose', 'disposal',
+            'much', 'cost', 'costs', 'per',
         ];
 
-        return collect($this->keywordTerms($question))
+        $terms = $this->keywordTerms($question);
+
+        return collect($terms)
             ->reject(fn (string $term): bool => in_array($term, $ignored, true))
+            ->reject(fn (string $term): bool => str_ends_with($term, 's') && in_array(mb_substr($term, 0, -1), $terms, true))
             ->values()
             ->all();
     }
@@ -958,6 +1045,7 @@ class ChatSourceRetriever
             'has', 'had', 'into', 'onto', 'about', 'your', 'my', 'our', 'their', 'them', 'they', 'you', 'its',
             'a', 'an', 'of', 'to', 'in', 'on', 'at', 'by', 'or', 'if', 'as',
             'city', 'local', 'municipal',
+            'how', 'get', 'getting', 'please',
         ];
     }
 

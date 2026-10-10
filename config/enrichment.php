@@ -12,6 +12,8 @@ return [
     'min_cleaned_text_chars' => 800,
     'max_text_chars' => 18000,
     'queue' => env('ENRICHMENT_QUEUE', 'enrichment'),
+    // All workers share the application database, even across hosting providers.
+    'lock_store' => env('ENRICHMENT_LOCK_STORE', 'database'),
     'http_timeout' => (int) env('ENRICHMENT_HTTP_TIMEOUT', 120),
     'http_retries' => (int) env('ENRICHMENT_HTTP_RETRIES', 2),
     'http_retry_sleep_ms' => (int) env('ENRICHMENT_HTTP_RETRY_SLEEP_MS', 250),

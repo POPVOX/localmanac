@@ -148,9 +148,14 @@ class PlaywrightPageFetcher
             return null;
         }
 
+        $status = (int) ($payload['status_code'] ?? 0);
+        if ($status < 200 || $status >= 300) {
+            return null;
+        }
+
         return [
             'url' => (string) ($payload['url'] ?? $url),
-            'status_code' => 200,
+            'status_code' => $status,
             'content_type' => 'text/html',
             'body' => (string) $payload['html'],
             'renderer' => 'playwright',

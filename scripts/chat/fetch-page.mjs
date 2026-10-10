@@ -156,7 +156,7 @@ const navigateAndExtract = async (context, targetUrl, { warmup = false, reloadOn
     }
   }
 
-  await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout });
+  let response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout });
   await settlePage(page);
   await scrollForLazyLoad(page);
 
@@ -166,7 +166,7 @@ const navigateAndExtract = async (context, targetUrl, { warmup = false, reloadOn
   if (reloadOnChallenge && isChallengePage(html)) {
     try {
       await page.waitForTimeout(2000);
-      await page.reload({ waitUntil: 'domcontentloaded', timeout });
+      response = await page.reload({ waitUntil: 'domcontentloaded', timeout });
       await settlePage(page);
       html = await page.content();
       finalUrl = page.url();
@@ -175,7 +175,7 @@ const navigateAndExtract = async (context, targetUrl, { warmup = false, reloadOn
     }
   }
 
-  return { html, finalUrl };
+  return { html, finalUrl, statusCode: response?.status() ?? null };
 };
 
 const run = async () => {
@@ -191,7 +191,7 @@ const run = async () => {
       acceptDownloads: false,
       ...(storageState ? { storageState } : {}),
     });
-    let { html, finalUrl } = await navigateAndExtract(context, url);
+    let { html, finalUrl, statusCode } = await navigateAndExtract(context, url);
 
     if (isChallengePage(html) && refreshOnBlocked && refreshAttempts > 0) {
       for (let attempt = 1; attempt <= refreshAttempts; attempt += 1) {
@@ -205,6 +205,7 @@ const run = async () => {
 
         html = refreshed.html;
         finalUrl = refreshed.finalUrl;
+        statusCode = refreshed.statusCode;
 
         if (!isChallengePage(html)) {
           break;
@@ -219,7 +220,7 @@ const run = async () => {
 
     await context.close();
 
-    process.stdout.write(JSON.stringify({ url: finalUrl, html }));
+    process.stdout.write(JSON.stringify({ url: finalUrl, html, status_code: statusCode }));
   } finally {
     // Close Chromium and remove its temporary profile even when navigation,
     // selector waits, or storage-state writes fail.

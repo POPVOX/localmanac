@@ -112,3 +112,20 @@ it('dispatches enrichment after pdf extraction', function () {
 
     Queue::assertPushedOn((string) config('enrichment.queue', 'analysis'), EnrichArticle::class);
 });
+
+it('does not requeue analysis when repeated scrapes contain unchanged text', function () {
+    Queue::fake();
+    $city = City::factory()->create();
+    $item = ['city_id' => $city->id, 'title' => 'Budget hearing', 'status' => 'published',
+        'source' => ['source_url' => 'https://example.com/budget'],
+        'body' => ['cleaned_text' => 'The city will hold a budget hearing on Friday.']];
+    $writer = new ArticleWriter;
+    $article = $writer->write($item);
+    // Release the pending-job lock to test the producer independently of uniqueness.
+    (new Illuminate\Bus\UniqueLock((new EnrichArticle($article->id))->uniqueVia()))->release(new EnrichArticle($article->id));
+    $writer->write($item, $article->fresh());
+    Queue::assertPushed(EnrichArticle::class, 1);
+    $item['body']['cleaned_text'] = 'The city rescheduled the budget hearing to Monday.';
+    $writer->write($item, $article->fresh());
+    Queue::assertPushed(EnrichArticle::class, 2);
+});

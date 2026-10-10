@@ -12,23 +12,45 @@ use App\Services\Articles\ArticleTextService;
 use App\Services\Chat\Ingestion\ArticleChunkEmbedder;
 use App\Services\Extraction\ClaimWriter;
 use App\Services\Extraction\Enricher;
+use App\Services\Extraction\EnrichmentFingerprint;
 use App\Services\Extraction\ProjectionWriter;
 use App\Services\Ingestion\PostgresSequenceSynchronizer;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
-class EnrichArticle implements ShouldQueue
+class EnrichArticle implements ShouldBeUniqueUntilProcessing, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 120;
 
-    public int $tries = 3;
+    // Lock contention must not exhaust retries; actual failures remain bounded.
+    public int $tries = 0;
+
+    public int $maxExceptions = 3;
+
+    public function uniqueId(): string
+    {
+        return (string) $this->articleId;
+    }
+
+    public function uniqueVia(): Repository
+    {
+        return Cache::store(config('enrichment.lock_store', 'database'));
+    }
+
+    public function backoff(): array
+    {
+        return [60, 300, 900];
+    }
 
     /**
      * Create a new job instance.
@@ -55,58 +77,87 @@ class EnrichArticle implements ShouldQueue
         PostgresSequenceSynchronizer $sequenceSynchronizer,
         ArticleChunkEmbedder $articleChunkEmbedder
     ): void {
-        $article = Article::query()
-            ->with(['body', 'city', 'scraper.organization'])
-            ->find($this->articleId);
+        $lock = $this->uniqueVia()->lock('enrichment-processing:'.$this->articleId, $this->timeout + 60);
+        if (! $lock->get()) {
+            $this->release(30);
 
-        if (! $article) {
-            return;
-        }
-
-        if (! config('enrichment.enabled', true)) {
             return;
         }
 
         try {
-            $this->processArticle(
-                $article,
-                $enricher,
-                $claimWriter,
-                $projectionWriter,
-                $projector,
-                $processTimelineProjector,
-                $articleExplainerProjector,
-                $calculator,
-                $articleTextService,
-                $articleChunkEmbedder
-            );
-        } catch (UniqueConstraintViolationException $exception) {
-            if (! $this->isRecoverablePrimaryKeyViolation($exception)) {
-                throw $exception;
+            $retryAt = (int) $this->uniqueVia()->get('enrichment-retry-after:'.$this->articleId, 0);
+            if ($retryAt > now()->timestamp) {
+                $this->release($retryAt - now()->timestamp);
+
+                return;
             }
 
-            $recovered = $this->resolveSequenceDrift($sequenceSynchronizer);
+            $article = Article::query()
+                ->with(['body', 'city', 'scraper.organization', 'analysis'])
+                ->find($this->articleId);
 
-            if (! $recovered) {
-                throw $exception;
+            if (! $article) {
+                return;
             }
 
-            Log::warning('Recovered from Postgres sequence drift while enriching article.', [
-                'article_id' => $article->id,
-            ]);
+            if (! config('enrichment.enabled', true)) {
+                return;
+            }
 
-            $this->processArticle(
-                $article,
-                $enricher,
-                $claimWriter,
-                $projectionWriter,
-                $projector,
-                $processTimelineProjector,
-                $articleExplainerProjector,
-                $calculator,
-                $articleTextService,
-                $articleChunkEmbedder
-            );
+            $fingerprint = app(EnrichmentFingerprint::class);
+            if ($article->analysis?->enrichment_input_hash === $fingerprint->forArticle($article)) {
+                return;
+            }
+
+            try {
+                $this->processArticle(
+                    $article,
+                    $enricher,
+                    $claimWriter,
+                    $projectionWriter,
+                    $projector,
+                    $processTimelineProjector,
+                    $articleExplainerProjector,
+                    $calculator,
+                    $articleTextService,
+                    $articleChunkEmbedder
+                );
+            } catch (UniqueConstraintViolationException $exception) {
+                if (! $this->isRecoverablePrimaryKeyViolation($exception)) {
+                    throw $exception;
+                }
+
+                $recovered = $this->resolveSequenceDrift($sequenceSynchronizer);
+
+                if (! $recovered) {
+                    throw $exception;
+                }
+
+                Log::warning('Recovered from Postgres sequence drift while enriching article.', [
+                    'article_id' => $article->id,
+                ]);
+
+                $this->processArticle(
+                    $article,
+                    $enricher,
+                    $claimWriter,
+                    $projectionWriter,
+                    $projector,
+                    $processTimelineProjector,
+                    $articleExplainerProjector,
+                    $calculator,
+                    $articleTextService,
+                    $articleChunkEmbedder
+                );
+            }
+        } catch (\Throwable $exception) {
+            // Existing duplicate jobs must share the failure cooldown too.
+            // Per-job backoff alone still permits every old copy to call AI.
+            $this->uniqueVia()->put('enrichment-retry-after:'.$this->articleId, now()->addMinutes(5)->timestamp, 300);
+
+            throw $exception;
+        } finally {
+            $lock->release();
         }
     }
 
@@ -123,6 +174,9 @@ class EnrichArticle implements ShouldQueue
         ArticleChunkEmbedder $articleChunkEmbedder
     ): void {
         $payload = $enricher->enrich($article);
+        if (($payload['_complete'] ?? true) !== true) {
+            throw new \RuntimeException('Article enrichment did not complete; retain the job for retry.');
+        }
         $analysis = is_array($payload['analysis'] ?? null) ? $payload['analysis'] : [];
         $enrichment = is_array($payload['enrichment'] ?? null) ? $payload['enrichment'] : [];
         $processTimeline = is_array($payload['process_timeline'] ?? null)
@@ -159,6 +213,7 @@ class EnrichArticle implements ShouldQueue
                 'prompt_version' => $promptVersion !== '' ? $promptVersion : null,
                 'confidence' => is_numeric($confidence) ? (float) $confidence : null,
                 'last_scored_at' => now(),
+                'enrichment_input_hash' => null,
             ]
         );
 
@@ -181,6 +236,12 @@ class EnrichArticle implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
         }
+
+        // Mark completion only after claims and projections succeed. Keep the
+        // loaded body snapshot so a concurrent content update still needs work.
+        ArticleAnalysis::where('article_id', $article->id)->update([
+            'enrichment_input_hash' => app(EnrichmentFingerprint::class)->forArticle($article),
+        ]);
     }
 
     private function isRecoverablePrimaryKeyViolation(UniqueConstraintViolationException $exception): bool

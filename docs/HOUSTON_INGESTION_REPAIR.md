@@ -76,3 +76,18 @@ The fixed code still needs actual source coverage and completed extraction/embed
 - Public Notices: Chat source 348 and News scraper 61. The News scraper's stored browser wait selector is `main`, whereas the portal uses `.mainContent`. Correct that selector if browser rendering is needed; HTTP fetching worked for the captured portal page.
 
 These are observed run records, not a current capacity check or proof that the fixes have been deployed. No production source settings were changed during this inspection.
+
+## October 10 follow-up
+
+The follow-up patch preserves Playwright's actual HTTP status, rejects HTTP errors and common error pages returned with status 200, and marks an empty crawl failed while retaining previously valid content. Retrieval excludes stored error pages, requires the requested procedural topic, ranks candidates before limiting them, limits repeated chunks from one page, and combines search ranks without comparing incompatible raw scores. Generic words such as "how" and "get" no longer drive the relaxed full-text search.
+
+Read-only checks against the current PostgreSQL database found:
+
+- Source 234 includes the Environmental Service Centers page and its chunks. The repaired candidate retrieval returns that official disposal guide; the original retrieval did not. This is a retrieval check, not a generated-answer evaluation.
+- Source 258 contains a single "404 Not Found" page recorded with HTTP status 200. Source 271 already covers the correctly cased `/planning/HistoricPres/` root, with 73 pages. Repair source 258 to the specific [historic landmark designation page](https://www.houstontx.gov/planning/HistoricPres/historic_landmarks.html), rather than adding another duplicate root source, then recrawl and verify its chunks.
+- The city's residential/commercial demolition pages (`hpwcode1142` and `hpwcode1159`), permit office landing page, and historic landmark designation page were absent across Houston's stored sources. Add or repair targeted source coverage only after checking the actual fetch response. Public web checks returned HTTP 403 for the permitting pages, so deployment alone cannot promise their availability.
+- A 5,000-job enrichment sample contained only 929 distinct article IDs. The enrichment patch prevents unchanged redispatch, uses shared processing locks and failure cooldowns, and records completed input fingerprints. It does not purge the backlog; existing records without fingerprints may need one successful run.
+
+Before rollout, identify the repository, branch and deployed revision for the public web application and every queue consumer. The AWS Forge checkout was at `1ec1761` during inspection and runs Horizon against remote Laravel Cloud PostgreSQL and Redis. Public DNS and matching frontend asset filenames do not establish the public PHP revision. Laravel Cloud deployment inspection still requires an authenticated session; do not treat a successful Forge deployment as proof that the public application was updated.
+
+Deploy the enrichment migration before restarting workers, then verify successful fingerprints, queue progress, error-page rejection and the four Houston questions. Preserve the existing queue and source data during verification.

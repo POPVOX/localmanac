@@ -12,6 +12,18 @@ use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
 
+it('records an empty or rejected crawl as a failure while preserving previous valid content', function () {
+    Queue::fake();
+    $source = ChatSource::factory()->create();
+    $page = ChatSourcePage::factory()->create(['chat_source_id' => $source->id, 'title' => 'Valid guide']);
+    $crawler = Mockery::mock(ChatSourceCrawler::class);
+    $crawler->shouldReceive('crawl')->once()->andReturn([]);
+    app()->instance(ChatSourceCrawler::class, $crawler);
+    $run = app(ChatSourceIngestionRunner::class)->run($source);
+    expect($run->status)->toBe('failed')->and($page->fresh())->not->toBeNull();
+    Queue::assertNothingPushed();
+});
+
 it('records ingestion metrics and updates last run at on success', function () {
     Queue::fake();
 

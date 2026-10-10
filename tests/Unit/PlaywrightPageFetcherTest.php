@@ -5,6 +5,14 @@ use Illuminate\Support\Facades\Log;
 
 uses(Tests\TestCase::class);
 
+it('rejects rendered HTTP errors and unknown response status', function (?int $status) {
+    $payload = json_encode(['url' => 'https://example.com/missing', 'html' => '<html><body>Error page</body></html>', 'status_code' => $status]);
+    $nodeStub = makeExecutableScript('node-error-'.($status ?? 'missing').'.sh', "#!/bin/sh\necho '".$payload."'\n");
+    $scriptStub = makeExecutableScript('error-stub.mjs', '// Placeholder');
+    config(['chat.playwright_node_binary' => $nodeStub, 'chat.playwright_script' => $scriptStub]);
+    expect(app(PlaywrightPageFetcher::class)->fetch('https://example.com/missing'))->toBeNull();
+})->with([404, 403, 500, 503, null]);
+
 function makeExecutableScript(string $filename, string $contents): string
 {
     $directory = storage_path('framework/testing/playwright-fetcher');
@@ -23,7 +31,7 @@ function makeExecutableScript(string $filename, string $contents): string
 it('uses configured absolute node binary for playwright fetches', function () {
     $nodeStub = makeExecutableScript('node-stub-success.sh', <<<'SH'
 #!/bin/sh
-echo '{"url":"https://example.com/final","html":"<html><body>Rendered</body></html>"}'
+echo '{"status_code":200,"url":"https://example.com/final","html":"<html><body>Rendered</body></html>"}'
 SH);
 
     $scriptStub = makeExecutableScript('playwright-script-stub.mjs', <<<'JS'
@@ -72,7 +80,7 @@ JS);
 it('passes storage state and proxy options to playwright process', function () {
     $nodeStub = makeExecutableScript('node-stub-env.sh', <<<'SH'
 #!/bin/sh
-printf '{"url":"https://example.com/final","html":"<html><body>%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s</body></html>"}' \
+printf '{"status_code":200,"url":"https://example.com/final","html":"<html><body>%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s</body></html>"}' \
   "$PLAYWRIGHT_STORAGE_STATE_PATH" \
   "$PLAYWRIGHT_PROXY_SERVER" \
   "$PLAYWRIGHT_PROXY_USERNAME" \
@@ -122,7 +130,7 @@ JS);
 it('ignores placeholder proxy and storage state values', function () {
     $nodeStub = makeExecutableScript('node-stub-env-placeholder.sh', <<<'SH'
 #!/bin/sh
-printf '{"url":"https://example.com/final","html":"<html><body>%s|%s|%s|%s|%s</body></html>"}' \
+printf '{"status_code":200,"url":"https://example.com/final","html":"<html><body>%s|%s|%s|%s|%s</body></html>"}' \
   "$PLAYWRIGHT_STORAGE_STATE_PATH" \
   "$PLAYWRIGHT_PROXY_SERVER" \
   "$PLAYWRIGHT_PROXY_USERNAME" \
