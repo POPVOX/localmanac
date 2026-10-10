@@ -19,7 +19,7 @@ class ScraperScheduler
         $this->expireStaleRuns();
 
         $scrapers = Scraper::query()
-            ->with(['city', 'latestSuccessfulRun'])
+            ->with(['city', 'latestSuccessfulRun', 'latestRun'])
             ->where('is_enabled', true)
             ->whereIn('type', ['rss', 'html'])
             ->whereDoesntHave('runs', function ($query) {
@@ -34,6 +34,21 @@ class ScraperScheduler
 
     private function isDue(Scraper $scraper, CarbonImmutable $nowUtc): bool
     {
+        $lastRun = $scraper->latestRun;
+        // A run that never reached a worker has not attempted a download yet.
+        $lastAttemptAt = $lastRun?->started_at !== null ? $lastRun->finished_at : null;
+
+        // A failed overdue source must not launch another download every minute.
+        if ($lastRun?->status === 'failed' && $lastAttemptAt !== null) {
+            $retryAt = CarbonImmutable::instance($lastAttemptAt)->addMinutes(
+                max(1, (int) config('ingestion.failed_source_retry_minutes', 60))
+            );
+
+            if ($nowUtc->lessThan($retryAt)) {
+                return false;
+            }
+        }
+
         return match ($scraper->frequency ?? 'daily') {
             'hourly' => $this->isHourlyDue($scraper, $nowUtc),
             'daily' => $this->isDailyDue($scraper, $nowUtc),

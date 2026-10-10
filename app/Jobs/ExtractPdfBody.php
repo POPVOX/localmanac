@@ -6,6 +6,8 @@ use App\Models\Article;
 use App\Models\ArticleBody;
 use App\Models\Scraper;
 use App\Services\Articles\ArticleTextService;
+use App\Services\Ingestion\DownloadPolicy;
+use App\Services\Ingestion\DownloadRejected;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -60,7 +62,24 @@ class ExtractPdfBody implements ShouldQueue
         $meta['ocr_pages'] = 0;
         $meta['ocr_length'] = 0;
 
-        $response = $this->httpClient()->get($this->pdfUrl);
+        $downloadPolicy = app(DownloadPolicy::class);
+        try {
+            if ($downloadPolicy->isMediaUrl($this->pdfUrl)) {
+                throw new DownloadRejected('Media URL skipped.');
+            }
+
+            $response = $this->httpClient()->get($this->pdfUrl);
+            $downloadPolicy->assertHeaders($response->toPsrResponse());
+            $downloadPolicy->assertSize(strlen($response->body()));
+        } catch (\Throwable $exception) {
+            if ($rejection = $downloadPolicy->rejectionFrom($exception)) {
+                $this->persistBody($article, null, null, 'failed', $rejection->getMessage(), $meta);
+
+                return;
+            }
+
+            throw $exception;
+        }
         $meta['http_status'] = $response->status();
         $meta['content_type'] = $response->header('Content-Type');
         $meta['content_disposition'] = $response->header('Content-Disposition');
@@ -224,8 +243,11 @@ class ExtractPdfBody implements ShouldQueue
 
     protected function httpClient()
     {
+        $policy = app(DownloadPolicy::class);
+
         return Http::timeout(45)
-            ->retry(2, 500)
+            ->withOptions($policy->options())
+            ->retry(2, 500, fn (\Exception $exception): bool => $policy->rejectionFrom($exception) === null)
             ->withHeaders(['User-Agent' => 'LocalmanacBot/1.0']);
     }
 
