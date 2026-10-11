@@ -641,6 +641,7 @@ class GenericListingFetcher
             '.sno-story-byline',
             '.entry-date',
             '.posted-on',
+            '.published-on',
             '.post-date',
         ];
 

@@ -1035,4 +1035,5 @@ it('reads CivicLive publication dates without confusing meeting dates', function
     'explicit publication before the meeting' => ['<div id="news_content_date">Posted on 09/22/2026</div><div id="news_content_body">The board meets on September 22, 2026.<p><em>Published on 9/18/26</em></p></div>', '2026-09-18 00:00:00'],
     'posted date when no separate publication label exists' => ['<div id="news_content_date">Posted on 09/22/2026</div><div id="news_content_body">The board will meet in October.</div>', '2026-09-22 00:00:00'],
     'a meeting date alone is not publication metadata' => ['<div id="news_content_body">The board meets on September 22, 2026.</div>', null],
+    'OpenCities publication label' => ['<p class="published-on small-text">Published on October 09, 2026</p><p>Road closures begin October 12, 2026.</p>', '2026-10-09 00:00:00'],
 ]);
