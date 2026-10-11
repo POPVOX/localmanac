@@ -362,7 +362,7 @@ it('counts added today from visible feed items by ingestion time instead of sour
         ->set('cityId', $city->id)
         ->assertSee('Freshly Added Permit Filing')
         ->assertDontSee('National Story Added Today')
-        ->assertSeeHtml('text-base font-semibold text-emerald-600">1</div>');
+        ->assertViewHas('stats', fn (array $stats): bool => $stats['addedToday'] === 1);
 });
 
 it('still returns clearly national stories in dashboard search results', function () {
@@ -609,3 +609,14 @@ function registerFailingScoutEngine(): void
     $engineManager->forgetDrivers();
     $engineManager->extend('fake', fn () => $engine);
 }
+
+it('keeps draft duplicates out of the public feed and indexed search results', function () {
+    config()->set('scout.driver', 'collection');
+    $city = City::factory()->create();
+    Article::factory()->create(['city_id' => $city->id, 'title' => 'Published budget notice', 'summary' => 'Budget meeting notice for residents.', 'status' => 'published']);
+    Article::factory()->create(['city_id' => $city->id, 'title' => 'Draft budget duplicate', 'summary' => 'Budget meeting notice for residents.', 'status' => 'draft']);
+    Livewire::test(Dashboard::class)->set('cityId', $city->id)
+        ->assertSee('Published budget notice')->assertDontSee('Draft budget duplicate')
+        ->set('articleSearch', 'budget')
+        ->assertSee('Published budget notice')->assertDontSee('Draft budget duplicate');
+});
