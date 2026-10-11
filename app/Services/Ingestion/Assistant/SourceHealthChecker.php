@@ -87,7 +87,7 @@ class SourceHealthChecker
         $proposal = null;
 
         try {
-            $discovery = $this->discovery->discover((string) $source->source_url);
+            $discovery = $this->discovery->discover((string) $source->source_url, $expectedKind);
 
             if ($discovery['kind'] === $expectedKind && $this->proposalPreviews($source, $discovery)) {
                 $proposal = [

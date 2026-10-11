@@ -566,6 +566,15 @@ class SourceDiscoveryService
      */
     private function classifyEndpoint(string $value, string $context): ?array
     {
+        $path = mb_strtolower((string) parse_url($value, PHP_URL_PATH));
+        $host = mb_strtolower((string) parse_url($value, PHP_URL_HOST));
+        // Embed metadata and calendar subscription UIs do not return event
+        // records, even when their query string contains an event/feed URL.
+        if (str_contains($path, '/oembed/')
+            || ($host === 'calendar.google.com' && str_contains($path, '/render'))) {
+            return null;
+        }
+
         $haystack = mb_strtolower($value.' '.$context);
         $eventFocused = Str::contains($haystack, ['event', 'calendar', 'meeting', 'agenda']);
 
