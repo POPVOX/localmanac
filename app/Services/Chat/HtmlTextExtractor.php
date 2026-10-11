@@ -44,7 +44,7 @@ class HtmlTextExtractor
         $links = $this->extractLinks($crawler);
         // Work on a separate tree: retain the original link inventory for provenance.
         $crawler = new Crawler($html, $baseUrl);
-        $crawler->filter('script, style, nav, footer, [role="navigation"], [role="contentinfo"], .navbar, .nav-content, .breadcrumb, .breadCrumbsArea, .site-header, .site-footer, .footer, .sidebarMainLinks')->each(function (Crawler $node): void {
+        $crawler->filter('script, style, nav, footer, [role="navigation"], [role="contentinfo"], [role="tab"], .navbar, .nav-content, .breadcrumb, .breadCrumbsArea, .site-header, .site-footer, .footer, .sidebarMainLinks')->each(function (Crawler $node): void {
             $element = $node->getNode(0);
             $element?->parentNode?->removeChild($element);
         });

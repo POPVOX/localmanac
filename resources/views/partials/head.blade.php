@@ -1,5 +1,5 @@
 <meta charset="utf-8" />
-<meta name="localmanac-code-version" content="2026-10-11-jackson-summaries" />
+<meta name="localmanac-code-version" content="2026-10-11-faq-content" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
 <title>{{ $title ?? config('app.name') }}</title>

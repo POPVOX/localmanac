@@ -205,3 +205,17 @@ it('does not fall back to unrelated links when the main article has no links', f
 
     expect($result['content_links'])->toBeEmpty();
 });
+
+it('excludes FAQ tab navigation while preserving answers inside an accordion tablist', function () {
+    $html = '<html><body><main><h1>City services</h1>'
+        .'<div role="tablist"><ul><li><a role="tab" href="#waste">WASTE NAVIGATION ONLY</a></li><li><a role="tab" href="#historic">HISTORIC NAVIGATION ONLY</a></li></ul></div>'
+        .'<div class="TA-tab-content TA-accordionMode" role="tablist">'
+        .'<div class="accordionTabHead"><a role="tab" href="#waste">WASTE NAVIGATION ONLY</a></div>'
+        .'<div role="tabpanel" id="waste"><p>Household hazardous waste collection is held in April and October.</p></div>'
+        .'<div role="tabpanel" id="historic"><p>Contact the <a href="/planning">Planning Department</a> for historic designation.</p></div>'
+        .'</div></main></body></html>';
+    $result = app(\App\Services\Chat\HtmlTextExtractor::class)->extract($html, 'https://example.gov/faq');
+    expect($result['text'])->toContain('Household hazardous waste collection is held in April and October.')
+        ->toContain('Planning Department (https://example.gov/planning)')
+        ->not->toContain('NAVIGATION ONLY');
+});
