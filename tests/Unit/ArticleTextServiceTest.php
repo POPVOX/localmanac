@@ -451,3 +451,10 @@ it('rewrites abbreviated service boilerplate into a readable title', function ()
     expect($article->title)
         ->toBe('Water and sewer service for Bridger at Central Addition');
 });
+
+it('replaces a city website welcome summary with the actual notice text', function () {
+    $article = Article::factory()->create(['title' => 'Budget Committee Meeting', 'summary' => 'Welcome to the official website of City of Jackson in Tennessee.']);
+    $body = 'The Budget Committee will meet on October 29, 2026 at 3:00 PM in City Hall.';
+    app(ArticleTextService::class)->refresh($article, cleanedText: $body);
+    expect($article->fresh()->summary)->toBe($body);
+});
