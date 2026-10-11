@@ -2564,8 +2564,12 @@ class AnswerSynthesizer
      */
     private function extractReferredEntities(string $answer, City $city): array
     {
+        // A sentence-ending period or paragraph break is not part of a name.
+        // Keep dotted initials (U.S.) without consuming the next sentence's verb.
+        $nameWord = "(?:(?:[A-Z]\\.){2,}|[A-Z][A-Za-z&'-]*(?:\\.[A-Za-z][A-Za-z&'-]*)*)";
+
         preg_match_all(
-            '/(?i:\b(?:call|contact|report(?:\s+(?:it|them))?\s+to|notify|visit|reach(?:\s+out)?\s+to|go to|through|via)\s+(?:the\s+)?)([A-Z][A-Za-z&.\'-]*(?:\s+[A-Z][A-Za-z&.\'-]*){0,3})\b/',
+            '/(?i:\b(?:call|contact|report(?:[\t ]+(?:it|them))?[\t ]+to|notify|visit|reach(?:[\t ]+out)?[\t ]+to|go to|through|via)[\t ]+(?:the[\t ]+)?)('.$nameWord.'(?:[\t ]+'.$nameWord.'){0,3})/',
             $answer,
             $matches
         );
