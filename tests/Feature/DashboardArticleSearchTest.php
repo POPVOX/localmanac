@@ -362,7 +362,7 @@ it('counts added today from visible feed items by ingestion time instead of sour
         ->set('cityId', $city->id)
         ->assertSee('Freshly Added Permit Filing')
         ->assertDontSee('National Story Added Today')
-        ->assertSeeHtml('text-base font-semibold text-emerald-600">1</div>');
+        ->assertViewHas('stats', fn (array $stats): bool => $stats['addedToday'] === 1);
 });
 
 it('still returns clearly national stories in dashboard search results', function () {
