@@ -49,6 +49,7 @@ class HtmlTextExtractor
             $element?->parentNode?->removeChild($element);
         });
         $contentLinks = $this->extractContentLinks($crawler);
+        $this->preserveInlineLinks($crawler);
         $text = $this->extractMainText($crawler);
 
         return [
@@ -59,6 +60,30 @@ class HtmlTextExtractor
             'content_links' => $contentLinks,
             'links' => $links,
         ];
+    }
+
+    private function preserveInlineLinks(Crawler $crawler): void
+    {
+        $crawler->filter('a[href]')->each(function (Crawler $link): void {
+            $href = trim((string) $link->attr('href'));
+            $label = trim($link->text('', true));
+
+            if ($label === '' || $href === '' || str_starts_with($href, '#')) {
+                return;
+            }
+
+            $url = $link->link()->getUri();
+
+            if (! in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)
+                || str_contains($label, $url)) {
+                return;
+            }
+
+            // Keep a form's destination next to its label in the indexed excerpt.
+            // The original link inventories above remain unchanged for crawling.
+            $node = $link->getNode(0);
+            $node?->appendChild($node->ownerDocument->createTextNode(' ('.$url.')'));
+        });
     }
 
     /**
