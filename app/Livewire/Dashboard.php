@@ -431,7 +431,7 @@ class Dashboard extends Component
 
     private function articleQuery(?City $city): Builder
     {
-        $query = Article::query();
+        $query = Article::query()->where('status', 'published');
 
         if ($city?->id) {
             $query->where('city_id', $city->id);
@@ -490,7 +490,7 @@ class Dashboard extends Component
                 return $this->emptyArticlePaginator();
             }
 
-            $query = Article::query()
+            $query = $this->articleQuery($city)
                 ->whereIn('id', $orderedIds->all());
 
             if ($city?->id) {
@@ -532,7 +532,7 @@ class Dashboard extends Component
                 return $this->emptyArticlePaginator();
             }
 
-            $matched = Article::query()
+            $matched = $this->articleQuery($city)
                 ->whereIn('id', $pageIds->all())
                 ->with($this->articleRelations())
                 ->get()

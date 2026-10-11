@@ -609,3 +609,14 @@ function registerFailingScoutEngine(): void
     $engineManager->forgetDrivers();
     $engineManager->extend('fake', fn () => $engine);
 }
+
+it('keeps draft duplicates out of the public feed and indexed search results', function () {
+    config()->set('scout.driver', 'collection');
+    $city = City::factory()->create();
+    Article::factory()->create(['city_id' => $city->id, 'title' => 'Published budget notice', 'summary' => 'Budget meeting notice for residents.', 'status' => 'published']);
+    Article::factory()->create(['city_id' => $city->id, 'title' => 'Draft budget duplicate', 'summary' => 'Budget meeting notice for residents.', 'status' => 'draft']);
+    Livewire::test(Dashboard::class)->set('cityId', $city->id)
+        ->assertSee('Published budget notice')->assertDontSee('Draft budget duplicate')
+        ->set('articleSearch', 'budget')
+        ->assertSee('Published budget notice')->assertDontSee('Draft budget duplicate');
+});
