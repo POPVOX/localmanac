@@ -2,6 +2,7 @@
 
 namespace App\Services\Ingestion\Assistant;
 
+use App\Services\Ingestion\Fetchers\HtmlProfiles\SidearmScheduleProfile;
 use Symfony\Component\DomCrawler\Crawler;
 
 class EventSourceConfigDrafter
@@ -294,6 +295,14 @@ class EventSourceConfigDrafter
                 ],
                 'confidence' => 0.96,
                 'warnings' => [],
+            ];
+        }
+
+        if (SidearmScheduleProfile::hasScheduleData($body)) {
+            return [
+                'config' => ['profile' => 'sidearm_schedule', 'timezone' => null, 'max_items' => 100],
+                'confidence' => 0.9,
+                'warnings' => ['Confirm the schedule timezone and locations. Games with unannounced times or cancellations are skipped.'],
             ];
         }
 
