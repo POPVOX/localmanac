@@ -764,3 +764,26 @@ it('retrieves historic designation guidance without requiring city names and inc
     $result = app(ChatSourceRetriever::class)->retrieve(collect([$local]), 'How do I get historic designation for my property in Jackson, Tennessee?', $city->id);
     expect(array_column($result['evidence'], 'source_url'))->toBe(['https://example.gov/faq/'.$local->id]);
 })->with([false, true]);
+
+it('does not let city-name matches crowd service evidence out of a limited lexical search', function () {
+    config(['scout.driver' => 'collection', 'chat.vector_enabled' => false,
+        'chat.fts_enabled' => true, 'chat.retrieval_fts_limit' => 1,
+        'chat.retrieval_chunk_limit' => 1, 'chat.retrieval_neighbor_window' => 0,
+        'chat.reranking_enabled' => false]);
+    $city = City::factory()->create(['name' => 'Wichita', 'state' => 'Kansas', 'country' => 'US']);
+    $source = ChatSource::factory()->create(['city_id' => $city->id, 'is_active' => true]);
+    foreach ([
+        ['Wichita Kansas', 'Wichita Kansas city information and unrelated navigation.', 'navigation'],
+        ['Environmental center', 'Household hazardous waste is accepted at the collection center.', 'waste'],
+    ] as [$title, $content, $path]) {
+        $page = ChatSourcePage::factory()->create(['chat_source_id' => $source->id,
+            'title' => $title, 'url' => 'https://example.gov/'.$path, 'canonical_url' => null]);
+        ChatSourceChunk::factory()->create(['chat_source_page_id' => $page->id,
+            'chunk_index' => 0, 'content' => $content]);
+    }
+
+    $result = app(ChatSourceRetriever::class)->retrieve(collect([$source]),
+        'Household hazardous waste in Wichita, Kansas', $city->id);
+
+    expect(array_column($result['evidence'], 'source_url'))->toBe(['https://example.gov/waste']);
+});
