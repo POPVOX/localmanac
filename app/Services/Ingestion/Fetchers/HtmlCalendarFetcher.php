@@ -10,6 +10,7 @@ use App\Services\Ingestion\Fetchers\HtmlProfiles\FullCalendarInlineProfile;
 use App\Services\Ingestion\Fetchers\HtmlProfiles\GenericHtmlListProfile;
 use App\Services\Ingestion\Fetchers\HtmlProfiles\HtmlProfileRegistry;
 use App\Services\Ingestion\Fetchers\HtmlProfiles\JsonLdEventsProfile;
+use App\Services\Ingestion\Fetchers\HtmlProfiles\SidearmScheduleProfile;
 use App\Services\Ingestion\Fetchers\HtmlProfiles\WichitaChamberEventsProfile;
 use Illuminate\Support\Arr;
 use InvalidArgumentException;
@@ -54,6 +55,7 @@ class HtmlCalendarFetcher implements EventSourceFetcher
                 new WichitaChamberEventsProfile($this->dateParser, $this->normalizer),
                 new JsonLdEventsProfile($this->dateParser, $this->normalizer),
                 new FullCalendarInlineProfile($this->dateParser, $this->normalizer),
+                new SidearmScheduleProfile($this->dateParser, $this->normalizer),
             ],
             new GenericHtmlListProfile($this->dateParser, $this->normalizer),
         );
