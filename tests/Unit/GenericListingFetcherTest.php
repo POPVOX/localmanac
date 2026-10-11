@@ -1018,3 +1018,21 @@ it('reports an unavailable listing without a browser retry when fallback is disa
     expect(fn () => (new GenericListingFetcher($fetcher))->fetch($scraper))
         ->toThrow(InvalidArgumentException::class, 'Failed to fetch listing page');
 });
+
+it('reads CivicLive publication dates without confusing meeting dates', function (string $body, ?string $expected) {
+    $scraper = makeGenericListingScraper(makeGenericListingCity());
+    Http::preventStrayRequests();
+    Http::fake([
+        $scraper->source_url => Http::response('<div class="listing"><a class="story-link" href="/notice">Meeting notice</a></div>'),
+        'https://example.com/notice' => Http::response('<html><head><title>Meeting notice</title></head><body><div class="article-content">'.$body.'</div></body></html>'),
+    ]);
+    $item = app(GenericListingFetcher::class)->fetch($scraper)[0];
+    expect($item['published_at']?->copy()->setTimezone('America/Chicago')->toDateTimeString())->toBe($expected);
+    if ($expected !== null) {
+        expect($item['published_precision'])->toBe(ArticlePublishedPrecision::Date->value);
+    }
+})->with([
+    'explicit publication before the meeting' => ['<div id="news_content_date">Posted on 09/22/2026</div><div id="news_content_body">The board meets on September 22, 2026.<p><em>Published on 9/18/26</em></p></div>', '2026-09-18 00:00:00'],
+    'posted date when no separate publication label exists' => ['<div id="news_content_date">Posted on 09/22/2026</div><div id="news_content_body">The board will meet in October.</div>', '2026-09-22 00:00:00'],
+    'a meeting date alone is not publication metadata' => ['<div id="news_content_body">The board meets on September 22, 2026.</div>', null],
+]);
