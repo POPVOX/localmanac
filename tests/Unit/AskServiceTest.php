@@ -75,7 +75,7 @@ it('uses a single authenticated selector to synthesizer orchestration path for s
         ->and(array_keys($response))->toBe(['answer', 'citations', 'city', 'meta', 'conversation_id']);
 });
 
-it('returns fallback when no chat sources are selected even for event questions', function () {
+it('uses the unified synthesis path for events even without standalone chat sources', function () {
     $city = City::factory()->create([
         'name' => 'Wichita',
         'slug' => 'wichita',
@@ -89,7 +89,21 @@ it('returns fallback when no chat sources are selected even for event questions'
         ->andReturn(collect());
 
     $synthesizer = Mockery::mock(AnswerSynthesizer::class);
-    $synthesizer->shouldNotReceive('synthesizeStreaming');
+    $synthesizer->shouldReceive('synthesizeStreaming')->once()
+        ->with(
+            'What city council, board, and public meetings are coming up in Wichita in the next 14 days?',
+            Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)),
+            Mockery::on(fn (Collection $sources): bool => $sources->isEmpty()),
+            Mockery::on(fn (User $resolvedUser): bool => $resolvedUser->is($user)),
+            null,
+            Mockery::type('callable'),
+            'What city council, board, and public meetings are coming up in Wichita in the next 14 days?',
+        )->andReturn([
+            'answer' => 'City council meets on Tuesday.',
+            'citations' => [['title' => 'Council meeting', 'source_url' => 'https://example.com/council', 'type' => 'event']],
+            'confidence' => 0.95,
+            'source_mode' => 'local',
+        ]);
 
     $service = new AskService($selector, $synthesizer);
     $response = $service->answerStreamingForUser(
@@ -100,8 +114,8 @@ it('returns fallback when no chat sources are selected even for event questions'
         fn () => null,
     );
 
-    expect($response['answer'])->toBe('I could not find the answer in the sources I checked. Try a different wording or a more specific question.')
-        ->and($response['citations'])->toBe([])
+    expect($response['answer'])->toBe('City council meets on Tuesday.')
+        ->and($response['citations'][0]['source_url'])->toBe('https://example.com/council')
         ->and($response['conversation_id'])->toBeNull();
 });
 
@@ -793,7 +807,16 @@ it('returns a clean fallback for unrelated empty-source reference queries withou
         ->andReturn(collect());
 
     $synthesizer = Mockery::mock(AnswerSynthesizer::class);
-    $synthesizer->shouldNotReceive('synthesizeStreaming');
+    $synthesizer->shouldReceive('synthesizeStreaming')->once()
+        ->with(
+            'Who do I call about trash pickup?',
+            Mockery::on(fn (City $resolvedCity): bool => $resolvedCity->is($city)),
+            Mockery::on(fn (Collection $sources): bool => $sources->isEmpty()),
+            Mockery::on(fn (User $resolvedUser): bool => $resolvedUser->is($user)),
+            null,
+            Mockery::type('callable'),
+            'Who do I call about trash pickup?',
+        )->andReturn(['answer' => '', 'citations' => [], 'confidence' => 0.0]);
 
     $service = new AskService($selector, $synthesizer);
     $response = $service->answerStreamingForUser(
