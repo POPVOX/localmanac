@@ -28,6 +28,7 @@ class ArticleAnalysis extends Model
         'prompt_version',
         'confidence',
         'last_scored_at',
+        'enrichment_input_hash',
     ];
 
     /**

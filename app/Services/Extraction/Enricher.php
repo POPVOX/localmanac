@@ -139,6 +139,7 @@ class Enricher
         }
 
         $payload = [
+            '_complete' => true,
             'analysis' => $civicPayload['analysis'],
             'enrichment' => $this->normalizeEnrichmentPayload(null, $issueAreaSlugs)['enrichment'],
             'process_timeline' => $civicPayload['process_timeline'],
@@ -170,6 +171,7 @@ class Enricher
             ]);
 
             $enrichmentPayload = $this->normalizeEnrichmentPayload(null, $issueAreaSlugs);
+            $payload['_complete'] = false;
         }
 
         $payload['enrichment'] = $enrichmentPayload['enrichment'];
@@ -204,6 +206,7 @@ class Enricher
 
             // Keep empty explainer
             $payload['explainer'] = $this->emptyExplainer();
+            $payload['_complete'] = false;
         }
 
         return $payload;
@@ -245,6 +248,7 @@ class Enricher
     private function emptyPayload(): array
     {
         return [
+            '_complete' => false,
             'analysis' => [
                 'dimensions' => [
                     'comprehensibility' => 0.0,

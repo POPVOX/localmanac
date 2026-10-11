@@ -4,6 +4,15 @@ namespace App\Services\Chat;
 
 class ChatSourceGuard
 {
+    public const ERROR_TITLES = [
+        'email protection | cloudflare', 'attention required! | cloudflare', 'just a moment...',
+        '404 not found', '404 - not found', '404', 'error 404', 'page not found', 'not found',
+        '403 forbidden', '403', 'forbidden', 'access denied',
+        '500 internal server error', 'internal server error',
+        '502 bad gateway', 'bad gateway', '503 service unavailable', 'service unavailable',
+        '504 gateway timeout', 'gateway timeout',
+    ];
+
     public function isBlockedUrl(?string $url): bool
     {
         if (! is_string($url) || trim($url) === '') {
@@ -29,11 +38,12 @@ class ChatSourceGuard
         $normalizedTitle = mb_strtolower(trim((string) $title));
         $normalizedContent = mb_strtolower(trim($content));
 
-        if (in_array($normalizedTitle, [
-            'email protection | cloudflare',
-            'attention required! | cloudflare',
-            'just a moment...',
-        ], true)) {
+        if (in_array($normalizedTitle, self::ERROR_TITLES, true)) {
+            return true;
+        }
+
+        if (mb_strlen($normalizedContent) < 1000
+            && preg_match('/^(?:404\\s+not found|403\\s+forbidden|502\\s+bad gateway|503\\s+service unavailable)\\b/', $normalizedContent)) {
             return true;
         }
 
@@ -47,10 +57,6 @@ class ChatSourceGuard
             return false;
         }
 
-        return ! in_array(mb_strtolower(trim((string) $title)), [
-            'email protection | cloudflare',
-            'attention required! | cloudflare',
-            'just a moment...',
-        ], true);
+        return ! $this->isBlockedPage($url, null, $title);
     }
 }

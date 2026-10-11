@@ -1,7 +1,7 @@
 # Enrichment Process (Current)
 
 Verified against code: Yes
-Last updated: March 2026
+Last updated: October 10, 2026
 
 ## Purpose
 
@@ -17,7 +17,7 @@ Common triggers include:
 - direct command dispatch (`enrich:article`)
 - backfill command dispatch (`enrich:backfill`)
 
-Queue: `analysis`
+Queue: `enrichment` by default, configurable with `ENRICHMENT_QUEUE`.
 
 ## Preflight Gates
 
@@ -25,8 +25,9 @@ Enrichment exits early when:
 
 - `enrichment.enabled` is false
 - article missing
-- `ArticleBody.cleaned_text` is empty
-- cleaned text is below `enrichment.min_cleaned_text_chars`
+- the current input fingerprint already completed successfully
+
+Missing body text falls back to the article title and summary. Short text is logged but still processed.
 
 Text is UTF-8 sanitized and truncated to `enrichment.max_text_chars`.
 
@@ -53,7 +54,7 @@ Pass outputs are normalized into one payload containing:
 - explainer content
 - merged confidence
 
-If later passes fail, previously successful pass outputs are retained where possible.
+If any pass fails, the job retries without overwriting existing completed analysis with a partial payload.
 
 ## Persistence Path in `EnrichArticle`
 
@@ -82,6 +83,12 @@ After enrichment payload generation, `EnrichArticle` performs:
 ## Reliability and Recovery
 
 `EnrichArticle` includes retry logic for recoverable PK sequence drift and calls `PostgresSequenceSynchronizer` for relevant tables before retry.
+
+Unchanged scrape results no longer dispatch another enrichment job. Pending jobs coalesce by article ID, and a shared cache lock prevents concurrent processing of an article. Successful jobs store an input fingerprint after claims and projections finish; old duplicate jobs then exit without another AI call. A changed body or enrichment configuration requires new work. Embedding failures remain logged separately and do not rerun completed analysis.
+
+Failures share a five-minute cooldown across duplicate jobs. Lock contention releases the job without consuming its exception budget; actual exceptions are limited to three per new job. Previously serialized jobs retain their original retry settings.
+
+Deploy the nullable `article_analyses.enrichment_input_hash` migration before restarting workers. `ENRICHMENT_LOCK_STORE` defaults to the database cache; all producers and workers must use the same database, cache prefix and lock store. Upgrade every worker host, including consumers outside Horizon. Existing analyses without a fingerprint may be processed once to establish one. This change does not purge the existing queue.
 
 ## Debug Checklist
 

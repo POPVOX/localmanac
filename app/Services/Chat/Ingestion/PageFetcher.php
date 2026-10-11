@@ -2,6 +2,7 @@
 
 namespace App\Services\Chat\Ingestion;
 
+use App\Services\Chat\ChatSourceGuard;
 use App\Services\Chat\HtmlTextExtractor;
 use App\Services\Ingestion\DownloadPolicy;
 use App\Services\Ingestion\DownloadRejected;
@@ -24,7 +25,19 @@ class PageFetcher
         }
 
         try {
-            return $this->fetchPage($url, $rendererOverride, $playwrightOptions, $allowPdf);
+            $result = $this->fetchPage($url, $rendererOverride, $playwrightOptions, $allowPdf);
+            if ($result === null || ($result['status_code'] ?? 0) < 200 || ($result['status_code'] ?? 0) >= 300) {
+                return null;
+            }
+
+            if (! str_starts_with(ltrim($result['body']), '%PDF-')) {
+                $page = $this->htmlTextExtractor->extract($result['body'], $result['url'] ?? $url);
+                if (app(ChatSourceGuard::class)->isBlockedPage($url, $page['canonical_url'] ?? null, $page['title'] ?? null, $page['text'] ?? '')) {
+                    return null;
+                }
+            }
+
+            return $result;
         } catch (DownloadRejected) {
             // Do not retry a rejected download using a browser.
             return null;

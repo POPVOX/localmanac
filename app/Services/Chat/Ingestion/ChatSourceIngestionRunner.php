@@ -64,6 +64,9 @@ class ChatSourceIngestionRunner
             $shouldUpdateLastRunAt = true;
 
             $pages = $this->crawler->crawl($source);
+            if ($pages === []) {
+                throw new \RuntimeException('No usable content was fetched. Check the source URL and response status.');
+            }
             $pagesFound = count($pages);
             $queue = (string) config('chat.embedding_queue', 'embedding');
             $now = now();

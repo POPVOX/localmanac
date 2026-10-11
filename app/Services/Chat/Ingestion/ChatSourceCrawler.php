@@ -54,7 +54,7 @@ class ChatSourceCrawler
             $result = $this->fetcher->fetch($url, $rendererOverride, [], true);
             $fetchDurationMs = (int) round((microtime(true) - $fetchStartedAt) * 1000);
 
-            if ($result === null) {
+            if ($result === null || ($result['status_code'] ?? 200) >= 400) {
                 continue;
             }
 

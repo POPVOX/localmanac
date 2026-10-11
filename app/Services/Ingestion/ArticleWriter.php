@@ -29,6 +29,9 @@ class ArticleWriter
 
         return DB::transaction(function () use ($item, $existing, $cityId, $title, $source, $sourceUrl) {
             $article = $existing ?? new Article;
+            $oldText = $existing === null ? null : trim((string) $existing->body?->cleaned_text);
+            $oldTitle = $article->title;
+            $oldPublishedAt = $article->published_at?->toIso8601String();
             $shouldReindex = false;
             $shouldAnalyze = false;
             $shouldRefreshFromExistingBody = false;
@@ -92,7 +95,10 @@ class ArticleWriter
                 );
 
                 $shouldReindex = true;
-                $shouldAnalyze = is_string($cleanedText) && trim($cleanedText) !== '';
+                $shouldAnalyze = is_string($cleanedText) && trim($cleanedText) !== ''
+                    && ($existing === null || trim($cleanedText) !== $oldText
+                        || $article->title !== $oldTitle
+                        || $article->published_at?->toIso8601String() !== $oldPublishedAt);
             } else {
                 $article->loadMissing('body');
                 $storedCleanedText = $this->stringValue($article->body?->cleaned_text);
