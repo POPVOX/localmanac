@@ -314,6 +314,8 @@ class AnswerSynthesizer
             'Return plain text only. Do not include citation markers, IDs, JSON, or metadata.',
             'If answer support is insufficient, answer exactly: "'.self::NO_ANSWER_MESSAGE.'"',
             'Do not invent facts, URLs, dates, or numbers.',
+            'Keep requirements, application portals, appointments, fees and hours tied to the exact facility, jurisdiction and service described by their source. Never transfer a county facility requirement to a city facility, or a specialized program requirement to the general public.',
+            'For a general city service question, prefer the general city service guide. If only a specialized program is supported, state its limited scope and say the general process could not be verified.',
             'If the evidence includes a phone number, URL, or street address that helps answer the question, include it directly in the answer.',
             'If you tell the user to call, show the actual phone number.',
             'If you tell the user to visit a site or GIS tool, show the exact URL.',
