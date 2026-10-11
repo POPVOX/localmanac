@@ -147,11 +147,11 @@
                                             {{ $city->name }}
                                         </div>
                                         <div class="mt-1 text-sm text-[#a9bdb4] sm:hidden">
-                                            {{ collect([$city->state, $city->country])->filter()->implode(', ') }}
+                                            {{ collect([$city->hasStateInName() ? null : $city->state, $city->country])->filter()->implode(', ') }}
                                         </div>
                                     </div>
                                     <div class="hidden text-sm text-[#a9bdb4] sm:block">
-                                        {{ collect([$city->state, $city->country])->filter()->implode(', ') }}
+                                        {{ collect([$city->hasStateInName() ? null : $city->state, $city->country])->filter()->implode(', ') }}
                                     </div>
                                     <span class="grid size-11 place-items-center rounded-full border border-white/25 text-[#b9ddca] transition group-hover:border-[#b9ddca] group-hover:bg-white/10">
                                         <flux:icon icon="arrow-right" class="size-4" />

@@ -12,6 +12,90 @@ class City extends Model
 {
     use HasFactory;
 
+    private const US_STATES = [
+        'AL' => 'Alabama',
+        'AK' => 'Alaska',
+        'AZ' => 'Arizona',
+        'AR' => 'Arkansas',
+        'CA' => 'California',
+        'CO' => 'Colorado',
+        'CT' => 'Connecticut',
+        'DE' => 'Delaware',
+        'DC' => 'District of Columbia',
+        'FL' => 'Florida',
+        'GA' => 'Georgia',
+        'HI' => 'Hawaii',
+        'ID' => 'Idaho',
+        'IL' => 'Illinois',
+        'IN' => 'Indiana',
+        'IA' => 'Iowa',
+        'KS' => 'Kansas',
+        'KY' => 'Kentucky',
+        'LA' => 'Louisiana',
+        'ME' => 'Maine',
+        'MD' => 'Maryland',
+        'MA' => 'Massachusetts',
+        'MI' => 'Michigan',
+        'MN' => 'Minnesota',
+        'MS' => 'Mississippi',
+        'MO' => 'Missouri',
+        'MT' => 'Montana',
+        'NE' => 'Nebraska',
+        'NV' => 'Nevada',
+        'NH' => 'New Hampshire',
+        'NJ' => 'New Jersey',
+        'NM' => 'New Mexico',
+        'NY' => 'New York',
+        'NC' => 'North Carolina',
+        'ND' => 'North Dakota',
+        'OH' => 'Ohio',
+        'OK' => 'Oklahoma',
+        'OR' => 'Oregon',
+        'PA' => 'Pennsylvania',
+        'RI' => 'Rhode Island',
+        'SC' => 'South Carolina',
+        'SD' => 'South Dakota',
+        'TN' => 'Tennessee',
+        'TX' => 'Texas',
+        'UT' => 'Utah',
+        'VT' => 'Vermont',
+        'VA' => 'Virginia',
+        'WA' => 'Washington',
+        'WV' => 'West Virginia',
+        'WI' => 'Wisconsin',
+        'WY' => 'Wyoming',
+    ];
+
+    public function displayName(): string
+    {
+        $name = trim((string) $this->name);
+        $state = trim((string) $this->state);
+
+        return $state === '' || $this->hasStateInName() ? $name : $name.', '.$state;
+    }
+
+    public function hasStateInName(): bool
+    {
+        $state = trim((string) $this->state);
+        if ($state === '') {
+            return false;
+        }
+
+        $variants = [$state];
+        if (in_array(strtoupper(trim((string) $this->country)), ['', 'US', 'USA', 'UNITED STATES', 'UNITED STATES OF AMERICA'], true)) {
+            foreach (self::US_STATES as $code => $fullName) {
+                if (strcasecmp($state, $code) === 0 || strcasecmp($state, $fullName) === 0) {
+                    $variants = [$code, $fullName];
+                    break;
+                }
+            }
+        }
+
+        $suffix = implode('|', array_map(fn (string $variant): string => preg_quote($variant, '/'), $variants));
+
+        return preg_match('/,\s*(?:'.$suffix.')\s*$/iu', (string) $this->name) === 1;
+    }
+
     /**
      * @var list<string>
      */

@@ -63,7 +63,7 @@
                                             : route($currentSurface === 'calendar' ? 'cities.calendar' : 'cities.show', $availableCity);
                                     @endphp
                                     <option value="{{ $cityUrl }}" @selected(isset($city) && $city?->is($availableCity))>
-                                        {{ $availableCity->name }}@if ($availableCity->state), {{ $availableCity->state }}@endif
+                                        {{ $availableCity->displayName() }}
                                     </option>
                                 @endforeach
                             </select>

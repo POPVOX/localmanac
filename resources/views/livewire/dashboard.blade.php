@@ -16,7 +16,7 @@
             <div>
                 <div class="editorial-eyebrow">{{ __('Local briefing') }}</div>
                 <h1 class="mt-3 font-serif text-4xl font-medium tracking-[-0.035em] text-[#123e32] sm:text-5xl">
-                    {{ $city?->name ?? __('Your city') }}@if ($city?->state)<span class="text-[#718078]">, {{ $city->state }}</span>@endif
+                    {{ $city?->displayName() ?? __('Your city') }}
                 </h1>
                 <p class="mt-3 max-w-2xl text-sm leading-6 text-[#5d7168] sm:text-base">
                     {{ __('Reporting, public information, and upcoming events gathered for this community.') }}

@@ -24,8 +24,7 @@
                 <div class="flex items-start justify-between gap-4">
                     <div>
                         <div class="flex flex-wrap items-center gap-2">
-                            <flux:heading size="lg">{{ $city->name }}</flux:heading>
-                            @if ($city->state)<span class="text-xs font-semibold uppercase tracking-wide text-[#87968f]">{{ $city->state }}</span>@endif
+                            <flux:heading size="lg">{{ $city->displayName() }}</flux:heading>
                         </div>
                         <div class="mt-1 text-xs text-[#718078]">/{{ $city->slug }} · {{ $city->timezone }}</div>
                     </div>
