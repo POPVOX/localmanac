@@ -2589,7 +2589,7 @@ class AnswerSynthesizer
         ])->map(fn (string $value): string => $this->normalizeSupportText($value))->all();
 
         return collect($matches[1] ?? [])
-            ->map(fn (string $value): string => trim($value))
+            ->map(fn (string $value): string => preg_replace("/['’]s$/u", '', trim($value)) ?? trim($value))
             ->filter(fn (string $value): bool => $value !== '')
             ->reject(fn (string $value): bool => in_array($this->normalizeSupportText($value), $ignored, true))
             ->unique()

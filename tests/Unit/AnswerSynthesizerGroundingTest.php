@@ -28,4 +28,7 @@ it('grounds referred entities within sentence and paragraph boundaries', functio
     'unsupported organization after a sentence' => ['Submit plans via ProjectDox. Contact the Fictional Permit Agency.', false],
     'unsupported organization after a paragraph' => ["Submit plans via ProjectDox.\n\nContact the Fictional Permit Agency.", false],
     'unsupported URL remains rejected' => ['Apply via ProjectDox at https://invented.example/apply.', false],
+    'possessive organization name' => ["Submit plans via ProjectDox.\n\nFor more information, visit the Houston Permitting Center's website.", true],
+    'curly possessive organization name' => ['Visit the Houston Permitting Center’s website.', true],
+    'unsupported possessive organization' => ["Visit the Fictional Permit Agency's website.", false],
 ]);
