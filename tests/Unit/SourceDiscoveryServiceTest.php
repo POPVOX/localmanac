@@ -350,3 +350,25 @@ it('discovers the CivicWeb meetings api instead of scraping its empty calendar s
 
     Http::assertSent(fn ($request): bool => $request->url() === 'https://lawrenceks.civicweb.net/Services/MeetingsService.svc/meetings?month=8&year=2026&surroundingmonths=0');
 });
+
+it('chooses the direct calendar feed rather than a subscription UI or embed metadata', function () {
+    $ics = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:lecture\nSUMMARY:Community lecture\nDTSTART:20261020T170000Z\nEND:VEVENT\nEND:VCALENDAR";
+    Http::fake([
+        'https://calendar.example.edu/' => Http::response(<<<'HTML'
+            <html><head><title>University events</title>
+            <link rel="alternate" type="application/json+oembed" href="/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fcalendar.example.edu%2Fevents">
+            </head><body><main>
+            <a href="https://calendar.google.com/calendar/render?cid=https%3A%2F%2Fcalendar.example.edu%2Fcalendar%2F1.ics">Subscribe to iCal feed</a>
+            <a href="/calendar/1.ics">Download iCal feed</a>
+            </main></body></html>
+            HTML, 200, ['Content-Type' => 'text/html']),
+        'https://calendar.example.edu/calendar/1.ics' => Http::response($ics, 200, ['Content-Type' => 'text/calendar']),
+    ]);
+
+    $result = app(SourceDiscoveryService::class)->discover('https://calendar.example.edu/', 'event');
+
+    expect($result['source_url'])->toBe('https://calendar.example.edu/calendar/1.ics')
+        ->and($result['type'])->toBe('ics')
+        ->and($result['endpoints'])->toHaveCount(1);
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'oembed') || str_contains($request->url(), 'calendar.google.com'));
+});
