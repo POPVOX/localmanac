@@ -60,3 +60,23 @@ it('keeps a short service guide when one long document has many higher ranked ch
     $result = app(ChatSourceRetriever::class)->retrieve(collect([$source]), 'How do I dispose of hazardous waste?');
     expect(array_column($result['evidence'], 'source_url'))->toContain($guide->url);
 });
+
+it('keeps the city permit guide when the same airport page appears under many sources', function () {
+    config(['chat.vector_enabled' => false, 'chat.reranking_enabled' => false,
+        'chat.retrieval_v2_enabled' => false, 'chat.retrieval_chunk_limit' => 4, 'chat.retrieval_neighbor_window' => 0]);
+    $source = ChatSource::factory()->create(['is_active' => true]);
+    foreach (range(1, 12) as $i) {
+        $copySource = ChatSource::factory()->create(['is_active' => true, 'city_id' => $source->city_id]);
+        $copy = ChatSourcePage::factory()->create(['chat_source_id' => $copySource->id,
+            'title' => 'Building Standards, Permits and TIP', 'url' => 'https://airport.example.gov/building-permits',
+            'canonical_url' => 'https://airport.example.gov/building-permits']);
+        ChatSourceChunk::factory()->create(['chat_source_page_id' => $copy->id,
+            'content' => 'To get a building permit on airport property, submit a Tenant Improvement Program application.']);
+    }
+    $guide = ChatSourcePage::factory()->create(['chat_source_id' => $source->id,
+        'title' => 'Permits', 'url' => 'https://example.gov/building-code/permits', 'canonical_url' => null]);
+    ChatSourceChunk::factory()->create(['chat_source_page_id' => $guide->id,
+        'content' => 'Apply for residential and commercial building permits through the city permitting center.']);
+    $result = app(ChatSourceRetriever::class)->retrieve(collect([$source]), 'How do I get a building permit?', $source->city_id);
+    expect(array_column($result['evidence'], 'source_url'))->toContain($guide->url);
+});

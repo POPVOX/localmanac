@@ -71,15 +71,21 @@ class ChatSourceRetriever
         // Fuse their positions so a focused keyword match cannot drown out a
         // full-text match for the actual question.
         if (config('chat.retrieval_v2_enabled', false) || $proceduralFocusTerms !== []) {
-            $rows = collect($this->reciprocalRankFusion->fuse([
-                'procedural' => $focusedRows,
-                'dense' => $vectorRows,
-                'lexical' => $ftsRows,
-            ], 'chunk_id'));
+            $rankedLists = array_map(fn (array $candidates): array => $this->deduplicateRows(collect($candidates))
+                ->map(function (array $row): array {
+                    $row['retrieval_key'] = $this->rowIdentity($row);
+
+                    return $row;
+                })->all(), [
+                    'procedural' => $focusedRows,
+                    'dense' => $vectorRows,
+                    'lexical' => $ftsRows,
+                ]);
+            $rows = collect($this->reciprocalRankFusion->fuse($rankedLists, 'retrieval_key'));
             if (! config('chat.retrieval_v2_enabled', false)) {
                 $pageCounts = [];
                 $rows = $rows->filter(function (array $row) use (&$pageCounts): bool {
-                    $page = $row['page_id'];
+                    $page = $this->documentIdentity($row);
                     $pageCounts[$page] = ($pageCounts[$page] ?? 0) + 1;
 
                     return $pageCounts[$page] <= 2;
@@ -205,10 +211,10 @@ class ChatSourceRetriever
 
         $rankSql = '('.implode(' + ', $rank).')';
         $query->selectRaw($rankSql.' as procedural_rank', $bindings)
-            ->selectRaw('row_number() over (partition by pages.id order by '.$rankSql.' desc, chunks.id) as page_position', $bindings);
+            ->selectRaw("row_number() over (partition by lower(coalesce(nullif(pages.canonical_url, ''), nullif(pages.url, ''), cast(pages.id as varchar))) order by ".$rankSql.' desc, chunks.id) as page_position', $bindings);
 
-        // A long document must not fill the candidate window before shorter
-        // service guides can be considered.
+        // Copies of a URL across sources and long documents must not fill the
+        // candidate window before other service guides can be considered.
         $rows = DB::query()->fromSub($query, 'candidates')
             ->where('page_position', '<=', 2)
             ->orderByDesc('procedural_rank')
@@ -912,13 +918,20 @@ class ChatSourceRetriever
     private function deduplicateRows(Collection $rows): Collection
     {
         return $rows
-            ->unique(function (array $row): string {
-                $url = mb_strtolower((string) ($row['canonical_url'] ?? $row['page_url'] ?? ''));
-                $snippet = preg_replace('/\\s+/u', ' ', mb_strtolower(trim((string) ($row['chunk'] ?? '')))) ?? '';
-
-                return md5($url.'|'.$snippet);
-            })
+            ->unique(fn (array $row): string => $this->rowIdentity($row))
             ->values();
+    }
+
+    private function documentIdentity(array $row): string
+    {
+        return mb_strtolower(trim((string) (($row['canonical_url'] ?? null) ?: ($row['page_url'] ?? $row['page_id']))));
+    }
+
+    private function rowIdentity(array $row): string
+    {
+        $snippet = preg_replace('/\\s+/u', ' ', mb_strtolower(trim((string) ($row['chunk'] ?? '')))) ?? '';
+
+        return md5($this->documentIdentity($row).'|'.$snippet);
     }
 
     /**
