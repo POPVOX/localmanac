@@ -55,13 +55,7 @@ class AskService
 
         $sources = $this->selector->select($city->id, $normalizedQuestion);
 
-        if ($sources->isEmpty()) {
-            $fallback = $this->resolveFallbackResponse($city, $sources);
-            $this->logAnswerDiagnostics($question, $normalizedQuestion, $city, $sources, 0.0, 'fallback', false, 'sources_empty');
-
-            return array_merge($fallback, ['conversation_id' => $effectiveConversationId]);
-        }
-
+        // News and calendar evidence can exist even without standalone chat sources.
         try {
             $answerPayload = $this->synthesizer->synthesizeStreaming(
                 question: $normalizedQuestion,
