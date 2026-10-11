@@ -41,8 +41,32 @@ class IcsFetcher implements EventSourceFetcher
 
         $timezone = Arr::get($source->config, 'timezone') ?? $source->city?->timezone ?? 'UTC';
 
-        $items = collect($this->parseIcs($response->body(), $timezone, $sourceUrl));
         $config = $source->config ?? [];
+        $decodeText = (bool) ($config['decode_text'] ?? false);
+        $items = collect($this->parseIcs($response->body(), $timezone, $sourceUrl, $decodeText));
+
+        if (($config['profile'] ?? null) === 'sidearm') {
+            $host = strtolower((string) parse_url($sourceUrl, PHP_URL_HOST));
+            $excludedSports = array_map('strval', (array) ($config['exclude_sport_ids'] ?? []));
+            $items = $items->filter(function (EventDTO $event) use ($source, $host, $excludedSports): bool {
+                // SIDEARM also uses date-only values for TBA games. Wait for an
+                // announced time rather than publish these as all-day events.
+                if ($event->allDay || ! preg_match('/^vcal_(\d+)-(.+)$/i', (string) $event->externalId, $match)
+                    || strtolower($match[2]) !== $host) {
+                    return false;
+                }
+                $eventUrl = html_entity_decode((string) $event->eventUrl, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                parse_str((string) parse_url($eventUrl, PHP_URL_QUERY), $query);
+                if (in_array((string) ($query['sport_id'] ?? ''), $excludedSports, true)) {
+                    return false;
+                }
+                $event->sourceHash = sha1($source->city_id.'|sidearm|'.$host.'|'.$match[1]);
+                $event->eventUrl = $eventUrl ?: null;
+                $event->sourceUrl = $event->eventUrl;
+
+                return true;
+            })->unique('sourceHash');
+        }
 
         if (isset($config['past_days']) || isset($config['future_days'])) {
             $today = Carbon::now($timezone)->startOfDay();
@@ -64,9 +88,9 @@ class IcsFetcher implements EventSourceFetcher
     /**
      * @return array<int, EventDTO>
      */
-    private function parseIcs(string $body, string $timezone, string $baseUrl): array
+    private function parseIcs(string $body, string $timezone, string $baseUrl, bool $decodeText): array
     {
-        $lines = $this->unfoldLines($body);
+        $lines = $this->unfoldLines($body, $decodeText);
         $items = [];
         $current = [];
         $inEvent = false;
@@ -81,7 +105,7 @@ class IcsFetcher implements EventSourceFetcher
 
             if ($line === 'END:VEVENT') {
                 if ($inEvent) {
-                    $dto = $this->mapEvent($current, $timezone, $baseUrl);
+                    $dto = $this->mapEvent($current, $timezone, $baseUrl, $decodeText);
 
                     if ($dto) {
                         $items[] = $dto;
@@ -126,13 +150,13 @@ class IcsFetcher implements EventSourceFetcher
     /**
      * @param  array<string, array<int, array{value: string, params: array<string, string>}>>  $event
      */
-    private function mapEvent(array $event, string $timezone, string $baseUrl): ?EventDTO
+    private function mapEvent(array $event, string $timezone, string $baseUrl, bool $decodeText): ?EventDTO
     {
         if (strtoupper((string) $this->firstValue($event['STATUS'] ?? [])) === 'CANCELLED') {
             return null;
         }
 
-        $summary = $this->firstValue($event['SUMMARY'] ?? []);
+        $summary = $this->textValue($event['SUMMARY'] ?? [], $decodeText);
         $dtStart = $this->firstEntry($event['DTSTART'] ?? []);
 
         if (! $summary || ! $dtStart) {
@@ -140,8 +164,8 @@ class IcsFetcher implements EventSourceFetcher
         }
 
         $dtEnd = $this->firstEntry($event['DTEND'] ?? []);
-        $location = $this->firstValue($event['LOCATION'] ?? []);
-        $description = $this->firstValue($event['DESCRIPTION'] ?? []);
+        $location = $this->textValue($event['LOCATION'] ?? [], $decodeText);
+        $description = $this->textValue($event['DESCRIPTION'] ?? [], $decodeText);
         $url = $this->firstValue($event['URL'] ?? []);
         $uid = $this->firstValue($event['UID'] ?? []);
 
@@ -361,7 +385,7 @@ class IcsFetcher implements EventSourceFetcher
     /**
      * @return array<int, string>
      */
-    private function unfoldLines(string $body): array
+    private function unfoldLines(string $body, bool $decodeText): array
     {
         $lines = preg_split("/\r\n|\n|\r/", $body) ?: [];
         $unfolded = [];
@@ -372,12 +396,12 @@ class IcsFetcher implements EventSourceFetcher
             }
 
             if (preg_match('/^[ \t]/', $line) === 1 && $unfolded !== []) {
-                $unfolded[count($unfolded) - 1] .= ltrim($line);
+                $unfolded[count($unfolded) - 1] .= $decodeText ? substr($line, 1) : ltrim($line);
 
                 continue;
             }
 
-            $unfolded[] = trim($line);
+            $unfolded[] = $decodeText ? $line : trim($line);
         }
 
         return $unfolded;
@@ -418,5 +442,16 @@ class IcsFetcher implements EventSourceFetcher
     private function firstValue(array $entries): ?string
     {
         return $entries[0]['value'] ?? null;
+    }
+
+    private function textValue(array $entries, bool $decodeText): ?string
+    {
+        $value = $this->firstValue($entries);
+
+        // Opt in per feed: changing an existing title can change its legacy
+        // identity hash, so old feeds need an identity audit before enabling.
+        return $value === null || ! $decodeText ? $value : strtr($value, [
+            '\\n' => "\n", '\\N' => "\n", '\\,' => ',', '\\;' => ';', '\\\\' => '\\',
+        ]);
     }
 }

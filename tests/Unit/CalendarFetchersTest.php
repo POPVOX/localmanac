@@ -17,6 +17,56 @@ use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
 
+it('decodes escaped calendar text and preserves meaningful whitespace across folded lines', function () {
+    $ics = <<<'ICS'
+BEGIN:VCALENDAR
+BEGIN:VEVENT
+SUMMARY:Music\, food\; fun
+DTSTART:20261012T170000Z
+LOCATION:Park\, Lawrence
+DESCRIPTION:First\nSecond\\n literal
+  word
+END:VEVENT
+END:VCALENDAR
+ICS;
+    Http::fake(['https://example.com/calendar.ics' => Http::response($ics)]);
+    $events = app(IcsFetcher::class)->fetch(new EventSource([
+        'source_type' => 'ics', 'source_url' => 'https://example.com/calendar.ics',
+        'config' => ['decode_text' => true],
+    ]));
+    expect($events[0]->title)->toBe('Music, food; fun')
+        ->and($events[0]->locationName)->toBe('Park, Lawrence')
+        ->and($events[0]->description)->toBe("First\nSecond\\n literal word");
+});
+
+it('matches SIDEARM schedule identities while excluding overlapping sports and TBA dates', function () {
+    $ics = "BEGIN:VCALENDAR\n";
+    foreach ([
+        ['1001', 'example.org', '20261017T160000Z', 17],
+        ['1001', 'example.org', '20261017T160000Z', 17],
+        ['1002', 'example.org', '20261017', 17],
+        ['1003', 'example.org', '20261017T160000Z', 2],
+        ['1004', 'unrelated.org', '20261017T160000Z', 17],
+    ] as [$id, $host, $date, $sport]) {
+        $ics .= "BEGIN:VEVENT\nUID:vcal_$id-$host\nSUMMARY:Game\nDTSTART:$date\nURL:https://example.org/calendar.aspx?game_id=$id&amp;sport_id=$sport\nEND:VEVENT\n";
+    }
+    $ics .= 'END:VCALENDAR';
+    Http::fake(['https://example.org/calendar.ics' => Http::response($ics)]);
+    $source = new EventSource([
+        'city_id' => 4, 'source_type' => 'ics', 'source_url' => 'https://example.org/calendar.ics',
+        'config' => ['profile' => 'sidearm', 'timezone' => 'America/Chicago', 'exclude_sport_ids' => [2, 4]],
+    ]);
+    $events = app(IcsFetcher::class)->fetch($source);
+    expect($events)->toHaveCount(1)
+        ->and($events[0]->sourceHash)->toBe(sha1('4|sidearm|example.org|1001'))
+        ->and($events[0]->startsAt->toIso8601String())->toBe('2026-10-17T11:00:00-05:00')
+        ->and($events[0]->eventUrl)->toBe('https://example.org/calendar.aspx?game_id=1001&sport_id=17');
+
+    $source->config = [];
+    $generic = app(IcsFetcher::class)->fetch($source);
+    expect($generic)->toHaveCount(5)->and($generic[2]->allDay)->toBeTrue();
+});
+
 it('bounds calendar feeds after filtering old and canceled occurrences', function () {
     $this->travelTo(Carbon::parse('2026-10-11 12:00:00', 'America/Chicago'));
     $ics = "BEGIN:VCALENDAR\n";
