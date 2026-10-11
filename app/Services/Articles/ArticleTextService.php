@@ -678,6 +678,7 @@ class ArticleTextService
         $summary = mb_strtolower(trim($summary));
 
         foreach ([
+            'welcome to the official website',
             'various items were discussed',
             'important local issues affecting',
             'community issues and opportunities',
