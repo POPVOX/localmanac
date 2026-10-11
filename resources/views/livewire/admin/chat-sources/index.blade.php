@@ -45,8 +45,10 @@
     <flux:card padding="lg" class="admin-panel space-y-4">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <flux:heading size="lg">{{ __('Ingestion Summary') }}</flux:heading>
-            <flux:text variant="subtle">{{ __('Last 24 hours') }}</flux:text>
+            <flux:text variant="subtle">{{ $cities->firstWhere('id', $cityId)?->name ?? __('All locations') }}</flux:text>
         </div>
+
+        <flux:text size="sm" variant="subtle">{{ __('Metrics follow the filters above. Only Pages (24h) is limited to the last 24 hours.') }}</flux:text>
 
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <flux:card padding="md" class="space-y-1">

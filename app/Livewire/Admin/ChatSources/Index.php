@@ -140,8 +140,7 @@ class Index extends Component
 
         $search = trim($this->search);
 
-        $sources = ChatSource::query()
-            ->with(['city', 'latestRun'])
+        $filteredSources = ChatSource::query()
             ->when($search !== '', function ($query) use ($search) {
                 $query->leftJoin('cities', 'cities.id', '=', 'chat_sources.city_id')
                     ->select('chat_sources.*')
@@ -152,8 +151,11 @@ class Index extends Component
                             ->orWhere('cities.name', 'like', "%{$search}%");
                     });
             })
-            ->when($this->cityId, fn ($query) => $query->where('city_id', $this->cityId))
-            ->when($this->activeOnly, fn ($query) => $query->where('is_active', true))
+            ->when($this->cityId, fn ($query) => $query->where('chat_sources.city_id', $this->cityId))
+            ->when($this->activeOnly, fn ($query) => $query->where('chat_sources.is_active', true));
+
+        $sources = (clone $filteredSources)
+            ->with(['city', 'latestRun'])
             ->when($this->sortField, function ($query) {
                 $allowed = [
                     'chat_sources.name',
@@ -176,6 +178,7 @@ class Index extends Component
         $cutoff = now()->subDay();
 
         $summaryRow = ChatSourcePage::query()
+            ->whereIn('chat_source_id', (clone $filteredSources)->select('chat_sources.id'))
             ->selectRaw('count(*) as total_pages')
             ->selectRaw('count(*) filter (where fetched_at >= ?) as pages_last_24h', [$cutoff])
             ->selectRaw('count(*) filter (where renderer = ?) as playwright_pages', ['playwright'])
@@ -193,7 +196,7 @@ class Index extends Component
             'avg_fetch_ms' => $summaryRow->avg_fetch_ms ? (int) round((float) $summaryRow->avg_fetch_ms) : null,
         ];
 
-        $slowSources = ChatSource::query()
+        $slowSources = (clone $filteredSources)
             ->join('chat_source_pages', 'chat_source_pages.chat_source_id', '=', 'chat_sources.id')
             ->select('chat_sources.id', 'chat_sources.name', 'chat_sources.source_url')
             ->selectRaw('count(*) as page_count')
