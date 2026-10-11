@@ -210,7 +210,11 @@ class SourceDiscoveryService
             : collect($endpoints)->first(fn (array $endpoint): bool => in_array($endpoint['type'], ['ics', 'json_api'], true));
         $feedEndpoint = collect($endpoints)
             ->where('type', 'rss')
-            ->first(fn (array $endpoint): bool => $preferredKind !== 'article' || ! $this->endpointLooksEventFocused($endpoint));
+            ->first(fn (array $endpoint): bool => match (true) {
+                $preferredKind === 'article' => ! $this->endpointLooksEventFocused($endpoint),
+                $preferredKind === 'event' || $eventScore >= 4 => $this->endpointLooksEventFocused($endpoint),
+                default => true,
+            });
 
         if (is_array($eventEndpoint)) {
             $endpointProbe = $this->probeEndpoint($eventEndpoint['url']);
@@ -239,8 +243,7 @@ class SourceDiscoveryService
         if (is_array($feedEndpoint)) {
             $endpointProbe = $this->probeEndpoint($feedEndpoint['url']);
             $feedBody = $endpointProbe['body'] ?? $body;
-            $detectedEventFeed = $eventScore >= 3
-                || $this->endpointLooksEventFocused($feedEndpoint)
+            $detectedEventFeed = $this->endpointLooksEventFocused($feedEndpoint)
                 || ($endpointProbe !== null && $this->feedLooksEventFocused($feedBody, $feedEndpoint['url']));
             $feedIsEventFocused = match ($preferredKind) {
                 'event' => true,
@@ -571,6 +574,7 @@ class SourceDiscoveryService
         // Embed metadata and calendar subscription UIs do not return event
         // records, even when their query string contains an event/feed URL.
         if (str_contains($path, '/oembed/')
+            || preg_match('~/wp-json/wp/v2/(?:pages|posts)(?:/|$)~', $path) === 1
             || ($host === 'calendar.google.com' && str_contains($path, '/render'))) {
             return null;
         }
@@ -769,7 +773,7 @@ class SourceDiscoveryService
             if ($current instanceof \DOMElement) {
                 $tag = mb_strtolower($current->tagName);
 
-                if ($depth > 0 && in_array($tag, ['html', 'body', 'main', 'header', 'nav', 'footer'], true)) {
+                if ($depth > 0 && in_array($tag, ['html', 'head', 'body', 'main', 'header', 'nav', 'footer'], true)) {
                     break;
                 }
 
