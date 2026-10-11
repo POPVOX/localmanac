@@ -330,6 +330,8 @@ class AnswerSynthesizer
             'Return plain text only. Do not include citation markers, IDs, JSON, or metadata.',
             'If answer support is insufficient, answer exactly: "'.self::NO_ANSWER_MESSAGE.'"',
             'Do not invent facts, URLs, dates, or numbers.',
+            'Respect publication and revision dates in source titles and excerpts. A document fetched today is not necessarily a current edition. When a fee, deadline, requirement or procedure is supported only by an older dated edition, explicitly state that edition date and say the current value or process has not been verified. Do not tell the user they must pay an old fee as though it is confirmed today.',
+            'For a how-to question, a fee table alone does not establish the application steps. State which steps are supported and which remain unverified; do not describe a source as providing detailed application instructions unless those instructions were retrieved.',
             'Keep requirements, application portals, appointments, fees and hours tied to the exact facility, jurisdiction and service described by their source. Never transfer a county facility requirement to a city facility, or a specialized program requirement to the general public.',
             'For a general city service question, prefer the general city service guide. If only a specialized program is supported, state its limited scope and say the general process could not be verified.',
             'Use an application or form URL only when its surrounding source text identifies it as the form for the requested process. Do not substitute an application for a related program or benefit. If the exact form URL is absent, link to the relevant official guide.',
