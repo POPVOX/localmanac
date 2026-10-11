@@ -3,12 +3,12 @@
 namespace App\Services\Ingestion;
 
 use App\Enums\ArticlePublishedPrecision;
-use App\Jobs\EnrichArticle;
 use App\Models\Article;
 use App\Models\ArticleBody;
 use App\Models\ArticleSource;
 use App\Models\City;
 use App\Services\Articles\ArticleTextService;
+use App\Services\Extraction\EnrichmentDispatcher;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -135,7 +135,7 @@ class ArticleWriter
                     }
 
                     if ($shouldAnalyze && config('enrichment.enabled', true)) {
-                        EnrichArticle::dispatch($article->id);
+                        app(EnrichmentDispatcher::class)->dispatch($article->id);
                     }
                 });
             }

@@ -44,6 +44,43 @@ class EmbeddingClient
             return [];
         }
 
+        // UTF-8 bytes are a conservative upper bound for byte-level tokens.
+        // Keep headroom below the provider's 300,000-token / 2,048-input limits
+        // without assuming English text or adding a network tokenizer call.
+        $maxBytes = max(1, min(200000, (int) config('chat.embedding_batch_max_bytes', 200000)));
+        $maxInputs = max(1, min(128, (int) config('chat.embedding_batch_max_inputs', 128)));
+        $batches = [];
+        $batch = [];
+        $bytes = 0;
+
+        foreach ($inputs as $input) {
+            $length = strlen($input);
+            if ($length > 8000 || $length > $maxBytes) {
+                throw new RuntimeException('Embedding input exceeds the safe byte limit; split the source into smaller chunks.');
+            }
+
+            if ($batch !== [] && ($bytes + $length > $maxBytes || count($batch) >= $maxInputs)) {
+                $batches[] = $batch;
+                $batch = [];
+                $bytes = 0;
+            }
+            $batch[] = $input;
+            $bytes += $length;
+        }
+        $batches[] = $batch;
+
+        $vectors = [];
+        foreach ($batches as $batch) {
+            // A failed later batch must throw, never return a partial index.
+            array_push($vectors, ...$this->embedBatch($batch));
+        }
+
+        return $vectors;
+    }
+
+    /** @return array<int, array<int, float>> */
+    private function embedBatch(array $inputs): array
+    {
         $dimensions = (int) config('chat.embedding_dimensions', 1536);
         $model = (string) config('chat.embedding_model', 'text-embedding-3-small');
         $request = Embeddings::for($inputs)->dimensions($dimensions);

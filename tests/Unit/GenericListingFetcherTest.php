@@ -410,7 +410,7 @@ it('passes configured playwright options to page fetcher', function () {
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/alpha', 'playwright', $expectedOptions)
+        ->with('https://example.com/stories/alpha', 'playwright', array_replace($expectedOptions, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/alpha',
             'status_code' => 200,
@@ -426,7 +426,7 @@ it('passes configured playwright options to page fetcher', function () {
         ->and($items[0]['title'])->toBe('Council meets on zoning');
 });
 
-it('applies auto-scroll options to listing fetch only', function () {
+it('uses article content readiness instead of the listing selector and scroll options', function () {
     $city = makeGenericListingCity();
     $scraper = makeGenericListingScraper($city, maxLinks: 1);
     $scraper->update([
@@ -486,7 +486,7 @@ it('applies auto-scroll options to listing fetch only', function () {
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/alpha', 'playwright', $articleOptions)
+        ->with('https://example.com/stories/alpha', 'playwright', array_replace($articleOptions, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/alpha',
             'status_code' => 200,
@@ -598,7 +598,7 @@ it('collects links across paginated listing pages when configured', function () 
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/alpha', 'playwright', $options)
+        ->with('https://example.com/stories/alpha', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/alpha',
             'status_code' => 200,
@@ -608,7 +608,7 @@ it('collects links across paginated listing pages when configured', function () 
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/beta', 'playwright', $options)
+        ->with('https://example.com/stories/beta', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/beta',
             'status_code' => 200,
@@ -618,7 +618,7 @@ it('collects links across paginated listing pages when configured', function () 
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/gamma', 'playwright', $options)
+        ->with('https://example.com/stories/gamma', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/gamma',
             'status_code' => 200,
@@ -715,7 +715,7 @@ it('discovers pagination URLs embedded in script payloads when anchors are absen
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/alpha', 'playwright', $options)
+        ->with('https://example.com/stories/alpha', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/alpha',
             'status_code' => 200,
@@ -725,7 +725,7 @@ it('discovers pagination URLs embedded in script payloads when anchors are absen
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/beta', 'playwright', $options)
+        ->with('https://example.com/stories/beta', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/beta',
             'status_code' => 200,
@@ -854,7 +854,7 @@ it('follows chained script-discovered pagination paths across listing pages', fu
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/alpha', 'playwright', $options)
+        ->with('https://example.com/stories/alpha', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/alpha',
             'status_code' => 200,
@@ -864,7 +864,7 @@ it('follows chained script-discovered pagination paths across listing pages', fu
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/beta', 'playwright', $options)
+        ->with('https://example.com/stories/beta', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/beta',
             'status_code' => 200,
@@ -874,7 +874,7 @@ it('follows chained script-discovered pagination paths across listing pages', fu
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/gamma', 'playwright', $options)
+        ->with('https://example.com/stories/gamma', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/gamma',
             'status_code' => 200,
@@ -983,4 +983,38 @@ it('surfaces anti-bot blocking when article pages remain in javascript challenge
 
     expect(fn () => $fetcher->fetch($scraper))
         ->toThrow(InvalidArgumentException::class, 'Article pages are blocked by anti-bot protection.');
+});
+
+it('can skip unavailable HTTP articles without starting expensive browser fallbacks', function () {
+    $scraper = makeGenericListingScraper(makeGenericListingCity());
+    $config = $scraper->config;
+    $config['fetch'] = ['renderer' => 'http', 'browser_fallback' => false];
+    $config['article']['title_selector'] = '.notice-title';
+    $scraper->config = $config;
+    $fetcher = Mockery::mock(PageFetcher::class);
+    $fetcher->shouldReceive('fetch')->once()->with($scraper->source_url, 'http')->andReturn([
+        'body' => '<div class="listing"><a class="story-link" href="/missing">Missing</a>'
+            .'<a class="story-link" href="/notice">Notice</a></div>',
+    ]);
+    $fetcher->shouldReceive('fetch')->once()->with('https://example.com/missing', 'http')->andReturnNull();
+    $fetcher->shouldReceive('fetch')->once()->with('https://example.com/notice', 'http')->andReturn([
+        'body' => '<meta property="og:title" content="City homepage">'
+            .'<h1 class="notice-title">Budget hearing on Tuesday</h1>'
+            .'<div class="article-content">The budget committee meets Tuesday at city hall.</div>',
+    ]);
+    $items = (new GenericListingFetcher($fetcher))->fetch($scraper);
+    expect($items)->toHaveCount(1)
+        ->and($items[0]['title'])->toBe('Budget hearing on Tuesday')
+        ->and($items[0]['body']['cleaned_text'])->toContain('budget committee');
+});
+
+it('reports an unavailable listing without a browser retry when fallback is disabled', function () {
+    $scraper = makeGenericListingScraper(makeGenericListingCity());
+    $config = $scraper->config;
+    $config['fetch'] = ['renderer' => 'http', 'browser_fallback' => false];
+    $scraper->config = $config;
+    $fetcher = Mockery::mock(PageFetcher::class);
+    $fetcher->shouldReceive('fetch')->once()->with($scraper->source_url, 'http')->andReturnNull();
+    expect(fn () => (new GenericListingFetcher($fetcher))->fetch($scraper))
+        ->toThrow(InvalidArgumentException::class, 'Failed to fetch listing page');
 });

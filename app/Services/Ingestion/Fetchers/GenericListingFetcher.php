@@ -71,10 +71,11 @@ class GenericListingFetcher
 
         $bestEffort = (bool) Arr::get($config, 'best_effort', true);
         $renderer = $this->resolveRenderer(Arr::get($config, 'fetch.renderer'));
+        $browserFallback = (bool) Arr::get($config, 'fetch.browser_fallback', true);
         $listingPlaywrightOptions = $this->resolvePlaywrightOptions($config);
-        $articlePlaywrightOptions = $this->resolveArticlePlaywrightOptions($listingPlaywrightOptions);
+        $articlePlaywrightOptions = $this->resolveArticlePlaywrightOptions($listingPlaywrightOptions, $contentSelector);
 
-        $listingHtml = $this->fetchPageHtml($sourceUrl, $renderer, true, $listingPlaywrightOptions);
+        $listingHtml = $this->fetchPageHtml($sourceUrl, $renderer, true, $listingPlaywrightOptions, browserFallback: $browserFallback);
         $maxPages = max(1, (int) Arr::get($listConfig, 'max_pages', 1));
         $paginationSelector = Arr::get($listConfig, 'pagination_selector');
         $paginationAttr = Arr::get($listConfig, 'pagination_attr', 'href');
@@ -92,6 +93,7 @@ class GenericListingFetcher
             paginationSelector: is_string($paginationSelector) ? $paginationSelector : null,
             paginationAttr: is_string($paginationAttr) && trim($paginationAttr) !== '' ? $paginationAttr : 'href',
             allowedHosts: $allowedHosts,
+            browserFallback: $browserFallback,
         );
 
         $items = [];
@@ -120,7 +122,7 @@ class GenericListingFetcher
             }
 
             try {
-                $articleHtml = $this->fetchPageHtml($url, $renderer, false, $articlePlaywrightOptions, true);
+                $articleHtml = $this->fetchPageHtml($url, $renderer, false, $articlePlaywrightOptions, true, $browserFallback);
             } catch (InvalidArgumentException $exception) {
                 if ($this->isAntiBotException($exception)) {
                     $blockedArticleCount++;
@@ -143,7 +145,11 @@ class GenericListingFetcher
                 continue;
             }
 
-            $title = $this->extractTitle($crawler);
+            $titleSelector = Arr::get($articleConfig, 'title_selector');
+            $title = is_string($titleSelector) && trim($titleSelector) !== ''
+                ? $this->firstText($crawler, $titleSelector)
+                : null;
+            $title = $title ?: $this->extractTitle($crawler);
             $title = $title ?: ($titleHint ?: $canonicalUrl);
             $publishedAtData = $this->extractPublishedAt($crawler, $timezone);
             $metaDescription = $this->extractMetaDescription($crawler);
@@ -293,6 +299,7 @@ class GenericListingFetcher
         ?string $paginationSelector,
         string $paginationAttr,
         array $allowedHosts = [],
+        bool $browserFallback = true,
     ): array {
         $pages = [
             ['url' => $listingUrl, 'html' => $listingHtml],
@@ -354,7 +361,7 @@ class GenericListingFetcher
                 }
 
                 try {
-                    $pageHtml = $this->fetchPageHtml($paginationUrl, $renderer, false, $playwrightOptions, true);
+                    $pageHtml = $this->fetchPageHtml($paginationUrl, $renderer, false, $playwrightOptions, true, $browserFallback);
                 } catch (InvalidArgumentException $exception) {
                     if ($this->isAntiBotException($exception)) {
                         continue;
@@ -959,7 +966,7 @@ class GenericListingFetcher
     /**
      * @param  array<string, mixed>  $playwrightOptions
      */
-    private function fetchPageHtml(string $url, string $renderer, bool $required, array $playwrightOptions, bool $throwOnBlocked = false): ?string
+    private function fetchPageHtml(string $url, string $renderer, bool $required, array $playwrightOptions, bool $throwOnBlocked = false, bool $browserFallback = true): ?string
     {
         $result = $playwrightOptions === []
             ? $this->pageFetcher->fetch($url, $renderer)
@@ -971,7 +978,7 @@ class GenericListingFetcher
             return $html;
         }
 
-        if ($renderer !== 'playwright') {
+        if ($renderer !== 'playwright' && $browserFallback) {
             $playwrightResult = $playwrightOptions === []
                 ? $this->pageFetcher->fetch($url, 'playwright')
                 : $this->pageFetcher->fetch($url, 'playwright', $playwrightOptions);
@@ -1125,9 +1132,15 @@ class GenericListingFetcher
      * @param  array<string, mixed>  $listingPlaywrightOptions
      * @return array<string, mixed>
      */
-    private function resolveArticlePlaywrightOptions(array $listingPlaywrightOptions): array
+    private function resolveArticlePlaywrightOptions(array $listingPlaywrightOptions, string $contentSelector): array
     {
         unset($listingPlaywrightOptions['auto_scroll'], $listingPlaywrightOptions['max_scroll_steps'], $listingPlaywrightOptions['scroll_pause_ms']);
+
+        // A listing's feed container need not exist on an individual story.
+        // Waiting for it on every article can consume the entire job timeout.
+        if (isset($listingPlaywrightOptions['wait_selector'])) {
+            $listingPlaywrightOptions['wait_selector'] = $contentSelector;
+        }
 
         return $listingPlaywrightOptions;
     }

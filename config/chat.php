@@ -28,6 +28,8 @@ return [
     'retrieval_context_token_budget' => (int) env('CHAT_RETRIEVAL_CONTEXT_TOKEN_BUDGET', 5000),
     'retrieval_max_evidence_per_source' => (int) env('CHAT_RETRIEVAL_MAX_EVIDENCE_PER_SOURCE', 3),
     'vector_enabled' => (bool) env('CHAT_VECTOR_ENABLED', true),
+    'embedding_batch_max_bytes' => (int) env('CHAT_EMBEDDING_BATCH_MAX_BYTES', 200000),
+    'embedding_batch_max_inputs' => (int) env('CHAT_EMBEDDING_BATCH_MAX_INPUTS', 128),
     // Keep generating stored embeddings in the background, but do not make a
     // live answer wait for query embedding unless an installation opts in.
     'interactive_vector_enabled' => (bool) env('CHAT_INTERACTIVE_VECTOR_ENABLED', false),
