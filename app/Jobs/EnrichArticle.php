@@ -52,11 +52,15 @@ class EnrichArticle implements ShouldBeUniqueUntilProcessing, ShouldQueue
         return [60, 300, 900];
     }
 
+    // A default keeps already-serialized jobs compatible with this release.
+    public ?string $pendingOwner = null;
+
     /**
      * Create a new job instance.
      */
-    public function __construct(public int $articleId)
+    public function __construct(public int $articleId, ?string $pendingOwner = null)
     {
+        $this->pendingOwner = $pendingOwner;
         $queue = trim((string) config('enrichment.queue', 'analysis'));
 
         $this->onQueue($queue !== '' ? $queue : 'analysis');
@@ -91,6 +95,8 @@ class EnrichArticle implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
                 return;
             }
+
+            $this->releasePendingReservation();
 
             $article = Article::query()
                 ->with(['body', 'city', 'scraper.organization', 'analysis'])
@@ -158,6 +164,18 @@ class EnrichArticle implements ShouldBeUniqueUntilProcessing, ShouldQueue
             throw $exception;
         } finally {
             $lock->release();
+        }
+    }
+
+    public function failed(?\Throwable $exception): void
+    {
+        $this->releasePendingReservation();
+    }
+
+    public function releasePendingReservation(): void
+    {
+        if ($this->pendingOwner !== null) {
+            $this->uniqueVia()->restoreLock('enrichment-pending:'.$this->articleId, $this->pendingOwner)->release();
         }
     }
 

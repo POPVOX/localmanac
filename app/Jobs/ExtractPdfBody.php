@@ -6,6 +6,7 @@ use App\Models\Article;
 use App\Models\ArticleBody;
 use App\Models\Scraper;
 use App\Services\Articles\ArticleTextService;
+use App\Services\Extraction\EnrichmentDispatcher;
 use App\Services\Ingestion\DownloadPolicy;
 use App\Services\Ingestion\DownloadRejected;
 use Illuminate\Bus\Queueable;
@@ -590,6 +591,6 @@ class ExtractPdfBody implements ShouldQueue
             return;
         }
 
-        EnrichArticle::dispatch($article->id);
+        app(EnrichmentDispatcher::class)->dispatch($article->id);
     }
 }

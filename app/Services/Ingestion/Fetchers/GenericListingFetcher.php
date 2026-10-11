@@ -72,7 +72,7 @@ class GenericListingFetcher
         $bestEffort = (bool) Arr::get($config, 'best_effort', true);
         $renderer = $this->resolveRenderer(Arr::get($config, 'fetch.renderer'));
         $listingPlaywrightOptions = $this->resolvePlaywrightOptions($config);
-        $articlePlaywrightOptions = $this->resolveArticlePlaywrightOptions($listingPlaywrightOptions);
+        $articlePlaywrightOptions = $this->resolveArticlePlaywrightOptions($listingPlaywrightOptions, $contentSelector);
 
         $listingHtml = $this->fetchPageHtml($sourceUrl, $renderer, true, $listingPlaywrightOptions);
         $maxPages = max(1, (int) Arr::get($listConfig, 'max_pages', 1));
@@ -1125,9 +1125,15 @@ class GenericListingFetcher
      * @param  array<string, mixed>  $listingPlaywrightOptions
      * @return array<string, mixed>
      */
-    private function resolveArticlePlaywrightOptions(array $listingPlaywrightOptions): array
+    private function resolveArticlePlaywrightOptions(array $listingPlaywrightOptions, string $contentSelector): array
     {
         unset($listingPlaywrightOptions['auto_scroll'], $listingPlaywrightOptions['max_scroll_steps'], $listingPlaywrightOptions['scroll_pause_ms']);
+
+        // A listing's feed container need not exist on an individual story.
+        // Waiting for it on every article can consume the entire job timeout.
+        if (isset($listingPlaywrightOptions['wait_selector'])) {
+            $listingPlaywrightOptions['wait_selector'] = $contentSelector;
+        }
 
         return $listingPlaywrightOptions;
     }

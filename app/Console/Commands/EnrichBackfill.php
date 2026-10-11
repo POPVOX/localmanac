@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\EnrichArticle;
 use App\Models\Article;
+use App\Services\Extraction\EnrichmentDispatcher;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -51,21 +51,18 @@ class EnrichBackfill extends Command
                 ->get();
 
             foreach ($articles as $article) {
-                EnrichArticle::dispatch($article->id);
-                $queued++;
+                $queued += (int) app(EnrichmentDispatcher::class)->dispatch($article->id);
             }
         } elseif ($limit !== null) {
             $articles = $query->limit((int) $limit)->get();
 
             foreach ($articles as $article) {
-                EnrichArticle::dispatch($article->id);
-                $queued++;
+                $queued += (int) app(EnrichmentDispatcher::class)->dispatch($article->id);
             }
         } else {
             $query->chunkById(100, function ($articles) use (&$queued): void {
                 foreach ($articles as $article) {
-                    EnrichArticle::dispatch($article->id);
-                    $queued++;
+                    $queued += (int) app(EnrichmentDispatcher::class)->dispatch($article->id);
                 }
             });
         }

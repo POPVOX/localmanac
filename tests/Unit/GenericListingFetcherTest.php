@@ -410,7 +410,7 @@ it('passes configured playwright options to page fetcher', function () {
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/alpha', 'playwright', $expectedOptions)
+        ->with('https://example.com/stories/alpha', 'playwright', array_replace($expectedOptions, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/alpha',
             'status_code' => 200,
@@ -426,7 +426,7 @@ it('passes configured playwright options to page fetcher', function () {
         ->and($items[0]['title'])->toBe('Council meets on zoning');
 });
 
-it('applies auto-scroll options to listing fetch only', function () {
+it('uses article content readiness instead of the listing selector and scroll options', function () {
     $city = makeGenericListingCity();
     $scraper = makeGenericListingScraper($city, maxLinks: 1);
     $scraper->update([
@@ -486,7 +486,7 @@ it('applies auto-scroll options to listing fetch only', function () {
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/alpha', 'playwright', $articleOptions)
+        ->with('https://example.com/stories/alpha', 'playwright', array_replace($articleOptions, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/alpha',
             'status_code' => 200,
@@ -598,7 +598,7 @@ it('collects links across paginated listing pages when configured', function () 
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/alpha', 'playwright', $options)
+        ->with('https://example.com/stories/alpha', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/alpha',
             'status_code' => 200,
@@ -608,7 +608,7 @@ it('collects links across paginated listing pages when configured', function () 
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/beta', 'playwright', $options)
+        ->with('https://example.com/stories/beta', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/beta',
             'status_code' => 200,
@@ -618,7 +618,7 @@ it('collects links across paginated listing pages when configured', function () 
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/gamma', 'playwright', $options)
+        ->with('https://example.com/stories/gamma', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/gamma',
             'status_code' => 200,
@@ -715,7 +715,7 @@ it('discovers pagination URLs embedded in script payloads when anchors are absen
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/alpha', 'playwright', $options)
+        ->with('https://example.com/stories/alpha', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/alpha',
             'status_code' => 200,
@@ -725,7 +725,7 @@ it('discovers pagination URLs embedded in script payloads when anchors are absen
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/beta', 'playwright', $options)
+        ->with('https://example.com/stories/beta', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/beta',
             'status_code' => 200,
@@ -854,7 +854,7 @@ it('follows chained script-discovered pagination paths across listing pages', fu
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/alpha', 'playwright', $options)
+        ->with('https://example.com/stories/alpha', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/alpha',
             'status_code' => 200,
@@ -864,7 +864,7 @@ it('follows chained script-discovered pagination paths across listing pages', fu
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/beta', 'playwright', $options)
+        ->with('https://example.com/stories/beta', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/beta',
             'status_code' => 200,
@@ -874,7 +874,7 @@ it('follows chained script-discovered pagination paths across listing pages', fu
         ]);
     $pageFetcher->shouldReceive('fetch')
         ->once()
-        ->with('https://example.com/stories/gamma', 'playwright', $options)
+        ->with('https://example.com/stories/gamma', 'playwright', array_replace($options, ['wait_selector' => '.article-content']))
         ->andReturn([
             'url' => 'https://example.com/stories/gamma',
             'status_code' => 200,

@@ -106,3 +106,39 @@ it('returns the first embedding for query embedding', function () {
 
     expect($client->embedQuery('question'))->toBe([0.5, 0.6]);
 });
+
+it('bounds multilingual batches by bytes and preserves vector order', function () {
+    config(['chat.vector_enabled' => true, 'chat.embedding_dimensions' => 2,
+        'chat.embedding_cache' => false, 'chat.embedding_batch_max_bytes' => 12,
+        'chat.embedding_batch_max_inputs' => 128]);
+    Embeddings::fake([[[1, 0], [2, 0]], [[3, 0]]]);
+    expect((new EmbeddingClient)->embedOrFail(['城市', '居民', '服務']))
+        ->toBe([[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]);
+    Embeddings::assertGenerated(fn ($prompt) => $prompt->count() === 2);
+    Embeddings::assertGenerated(fn ($prompt) => $prompt->count() === 1);
+});
+
+it('bounds batches by input count even for very short chunks', function () {
+    config(['chat.vector_enabled' => true, 'chat.embedding_dimensions' => 2,
+        'chat.embedding_cache' => false, 'chat.embedding_batch_max_inputs' => 2]);
+    Embeddings::fake([[[1, 0], [2, 0]], [[3, 0]]]);
+    expect((new EmbeddingClient)->embedOrFail(['a', 'b', 'c']))->toHaveCount(3);
+    Embeddings::assertGenerated(fn ($prompt) => $prompt->count() === 2);
+    Embeddings::assertGenerated(fn ($prompt) => $prompt->count() === 1);
+});
+
+it('rejects a later failed batch without returning partial vectors', function () {
+    config(['chat.vector_enabled' => true, 'chat.embedding_dimensions' => 2,
+        'chat.embedding_cache' => false, 'chat.embedding_batch_max_inputs' => 1]);
+    Embeddings::fake([[[1, 0]], fn () => throw new RuntimeException('Second batch failed')]);
+    expect(fn () => (new EmbeddingClient)->embedOrFail(['a', 'b']))
+        ->toThrow(RuntimeException::class, 'Second batch failed');
+});
+
+it('rejects oversized individual inputs without truncating their text', function () {
+    config(['chat.vector_enabled' => true]);
+    Embeddings::fake();
+    expect(fn () => (new EmbeddingClient)->embedOrFail([str_repeat('字', 3000)]))
+        ->toThrow(RuntimeException::class, 'split the source into smaller chunks');
+    Embeddings::assertNothingGenerated();
+});

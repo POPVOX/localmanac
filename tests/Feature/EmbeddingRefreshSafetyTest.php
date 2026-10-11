@@ -96,3 +96,13 @@ it('atomically replaces chat source chunks after a complete embedding response',
         ->and($chunk->embedding_model)->toBe('test-embedding-model')
         ->and($chunk->embedding)->toBe('[0.1,0.2]');
 });
+
+it('keeps the old index when a later replacement batch fails', function () {
+    config(['chat.embedding_batch_max_inputs' => 1]);
+    $page = ChatSourcePage::factory()->create(['content_text' => str_repeat('New civic facts. ', 40)]);
+    $old = ChatSourceChunk::factory()->create(['chat_source_page_id' => $page->id, 'content' => 'Known good content']);
+    Embeddings::fake([[[0.1, 0.2]], fn () => throw new RuntimeException('Later batch failed')]);
+    expect(fn () => app(ChatSourcePageEmbedder::class)->embed($page))->toThrow(RuntimeException::class);
+    expect($old->fresh()->content)->toBe('Known good content')
+        ->and(ChatSourceChunk::where('chat_source_page_id', $page->id)->count())->toBe(1);
+});
