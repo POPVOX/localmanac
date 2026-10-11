@@ -17,6 +17,22 @@ afterEach(function () {
     Carbon::setTestNow();
 });
 
+it('discovers and verifies Tockify feeds embedded in publisher calendars', function () {
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://publisher.example/events' => Http::response('<html><title>Community Calendar</title><div data-tockify-calendar="community.events"></div></html>', 200, ['Content-Type' => 'text/html']),
+        'https://tockify.com/api/feeds/ics/community.events' => Http::response("BEGIN:VCALENDAR\nX-WR-CALNAME:Community Events\nBEGIN:VEVENT\nSUMMARY:Meetup\nDTSTART:20261012T170000Z\nEND:VEVENT\nEND:VCALENDAR", 200, ['Content-Type' => 'text/calendar']),
+    ]);
+
+    $result = app(SourceDiscoveryService::class)->discover('https://publisher.example/events', 'event');
+    expect($result['kind'])->toBe('event')
+        ->and($result['type'])->toBe('ics')
+        ->and($result['source_url'])->toBe('https://tockify.com/api/feeds/ics/community.events')
+        ->and($result['config']['max_items'])->toBe(500)
+        ->and($result['config']['past_days'])->toBe(0);
+    Http::assertSent(fn ($request) => $request->url() === 'https://tockify.com/api/feeds/ics/community.events');
+});
+
 it('discovers an article feed from a public news page', function () {
     Http::fake([
         'https://lawrence.example.gov/news' => Http::response(<<<'HTML'

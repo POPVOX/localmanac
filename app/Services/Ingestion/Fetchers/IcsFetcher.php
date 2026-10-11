@@ -41,7 +41,24 @@ class IcsFetcher implements EventSourceFetcher
 
         $timezone = Arr::get($source->config, 'timezone') ?? $source->city?->timezone ?? 'UTC';
 
-        return $this->parseIcs($response->body(), $timezone, $sourceUrl);
+        $items = collect($this->parseIcs($response->body(), $timezone, $sourceUrl));
+        $config = $source->config ?? [];
+
+        if (isset($config['past_days']) || isset($config['future_days'])) {
+            $today = Carbon::now($timezone)->startOfDay();
+            $earliest = $today->copy()->subDays(min(365, max(0, (int) ($config['past_days'] ?? 0))));
+            $latest = $today->copy()->addDays(min(730, max(1, (int) ($config['future_days'] ?? 90))))->endOfDay();
+            $items = $items->filter(fn (EventDTO $event): bool => $event->startsAt
+                && $event->startsAt->lessThanOrEqualTo($latest)
+                && ($event->endsAt ?? $event->startsAt)->greaterThanOrEqualTo($earliest));
+        }
+
+        if (isset($config['max_items'])) {
+            $items = $items->sortBy(fn (EventDTO $event): int => $event->startsAt?->getTimestamp() ?? PHP_INT_MAX)
+                ->take(min(1000, max(1, (int) $config['max_items'])));
+        }
+
+        return $items->values()->all();
     }
 
     /**
@@ -111,6 +128,10 @@ class IcsFetcher implements EventSourceFetcher
      */
     private function mapEvent(array $event, string $timezone, string $baseUrl): ?EventDTO
     {
+        if (strtoupper((string) $this->firstValue($event['STATUS'] ?? [])) === 'CANCELLED') {
+            return null;
+        }
+
         $summary = $this->firstValue($event['SUMMARY'] ?? []);
         $dtStart = $this->firstEntry($event['DTSTART'] ?? []);
 
@@ -141,7 +162,9 @@ class IcsFetcher implements EventSourceFetcher
 
         $startsAt = $startResult['starts_at'];
         $endsAt = $endResult['starts_at'] ?? null;
-        $allDay = $allDay || ($endResult['all_day'] ?? false);
+        if ($endsAt && $endsAt->lessThanOrEqualTo($startsAt)) {
+            $endsAt = null;
+        }
 
         [$eventUrl, $description] = $this->resolveEventUrl($url, $description, $baseUrl);
         [$location, $description] = $this->normalizeLocation($location, $description);
