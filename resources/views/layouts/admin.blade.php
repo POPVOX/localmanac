@@ -31,7 +31,7 @@
                 >
                     <option value="">{{ __('All locations') }}</option>
                     @foreach ($adminCities as $adminCity)
-                        <option value="{{ $adminCity->id }}" @selected($adminCityScope?->id === $adminCity->id)>{{ $adminCity->name }}{{ $adminCity->state ? ', '.$adminCity->state : '' }}</option>
+                        <option value="{{ $adminCity->id }}" @selected($adminCityScope?->id === $adminCity->id)>{{ $adminCity->displayName() }}</option>
                     @endforeach
                 </select>
                 @if ($adminCityScope)

@@ -31,7 +31,7 @@
             <flux:select name="cityId" :label="__('Filter dashboard by location')" onchange="this.form.submit()">
                 <option value="">{{ __('All locations') }}</option>
                 @foreach ($cities as $city)
-                    <option value="{{ $city->id }}" @selected($cityId === $city->id)>{{ $city->name }}{{ $city->state ? ', '.$city->state : '' }}</option>
+                    <option value="{{ $city->id }}" @selected($cityId === $city->id)>{{ $city->displayName() }}</option>
                 @endforeach
             </flux:select>
         </form>
@@ -97,8 +97,7 @@
                     <div class="flex items-start justify-between gap-4">
                         <div>
                             <div class="flex items-center gap-2">
-                                <flux:heading size="lg">{{ $city->name }}</flux:heading>
-                                @if ($city->state)<span class="text-xs font-semibold uppercase tracking-wide text-[#87968f]">{{ $city->state }}</span>@endif
+                                <flux:heading size="lg">{{ $city->displayName() }}</flux:heading>
                             </div>
                             <div class="mt-1 text-xs text-[#718078]">{{ trans_choice(':count organization|:count organizations', $city->organizations_count, ['count' => $city->organizations_count]) }}</div>
                         </div>
