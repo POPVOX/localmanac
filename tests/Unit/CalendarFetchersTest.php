@@ -17,6 +17,41 @@ use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
 
+it('bounds calendar feeds after filtering old and canceled occurrences', function () {
+    $this->travelTo(Carbon::parse('2026-10-11 12:00:00', 'America/Chicago'));
+    $ics = "BEGIN:VCALENDAR\n";
+    foreach ([
+        ['Distant future', '20270101T120000', '20270101T130000', ''],
+        ['Past', '20260101T120000', '20260101T130000', ''],
+        ['Canceled', '20261011T120000', '20261011T130000', 'STATUS:CANCELLED'],
+        ['Later', '20261020T120000', '20261020T130000', ''],
+        ['Upcoming', '20261012T120000', '20261012T130000', ''],
+        ['Ongoing', '20261001T120000', '20261015T130000', ''],
+    ] as [$title, $start, $end, $status]) {
+        $ics .= "BEGIN:VEVENT\nSUMMARY:$title\nDTSTART:$start\nDTEND:$end\n$status\nEND:VEVENT\n";
+    }
+    $ics .= 'END:VCALENDAR';
+    Http::fake(['https://example.com/calendar.ics' => Http::response($ics)]);
+    $source = new EventSource([
+        'source_type' => 'ics', 'source_url' => 'https://example.com/calendar.ics',
+        'config' => ['timezone' => 'America/Chicago', 'past_days' => 0, 'future_days' => 30, 'max_items' => 2],
+    ]);
+
+    $events = app(IcsFetcher::class)->fetch($source);
+    expect(array_map(fn ($event) => $event->title, $events))->toBe(['Ongoing', 'Upcoming']);
+});
+
+it('does not turn a timed ICS event into all-day when its end is an invalid date-only value', function () {
+    Http::fake(['https://example.com/calendar.ics' => Http::response("BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Meeting\nDTSTART:20261012T170000Z\nDTEND;VALUE=DATE:20261012\nEND:VEVENT\nEND:VCALENDAR")]);
+    $events = app(IcsFetcher::class)->fetch(new EventSource([
+        'source_type' => 'ics', 'source_url' => 'https://example.com/calendar.ics',
+        'config' => ['timezone' => 'America/Chicago'],
+    ]));
+    expect($events)->toHaveCount(1)
+        ->and($events[0]->allDay)->toBeFalse()
+        ->and($events[0]->endsAt)->toBeNull();
+});
+
 it('parses ics feeds into event dtos', function () {
     $ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:abc-123\r\nSUMMARY:Test Event\r\nDTSTART:20260115T190000\r\nDTEND:20260115T200000\r\nLOCATION:City Hall\r\nDESCRIPTION:Planning meeting\r\nURL:https://example.com/event\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 

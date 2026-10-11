@@ -479,6 +479,15 @@ class SourceDiscoveryService
 
         $endpoints = [];
 
+        foreach ($crawler->filter('[data-tockify-calendar]') as $node) {
+            $calendar = trim($node->getAttribute('data-tockify-calendar'));
+            if (! preg_match('/^[a-zA-Z0-9_.-]{1,100}$/', $calendar)) {
+                continue;
+            }
+            $url = 'https://tockify.com/api/feeds/ics/'.$calendar;
+            $endpoints['ics|'.$url] = ['url' => $url, 'type' => 'ics', 'label' => 'Tockify calendar feed'];
+        }
+
         $attributes = ['href', 'src', 'data-feed', 'data-feed-url', 'data-events-url', 'data-calendar-url', 'data-api-url', 'data-json-url', 'data-url'];
 
         foreach ($crawler->filter('link[href], a[href], iframe[src], script[src], [data-feed], [data-feed-url], [data-events-url], [data-calendar-url], [data-api-url], [data-json-url], [data-url]') as $node) {
