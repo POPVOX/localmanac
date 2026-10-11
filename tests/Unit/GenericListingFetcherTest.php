@@ -984,3 +984,37 @@ it('surfaces anti-bot blocking when article pages remain in javascript challenge
     expect(fn () => $fetcher->fetch($scraper))
         ->toThrow(InvalidArgumentException::class, 'Article pages are blocked by anti-bot protection.');
 });
+
+it('can skip unavailable HTTP articles without starting expensive browser fallbacks', function () {
+    $scraper = makeGenericListingScraper(makeGenericListingCity());
+    $config = $scraper->config;
+    $config['fetch'] = ['renderer' => 'http', 'browser_fallback' => false];
+    $config['article']['title_selector'] = '.notice-title';
+    $scraper->config = $config;
+    $fetcher = Mockery::mock(PageFetcher::class);
+    $fetcher->shouldReceive('fetch')->once()->with($scraper->source_url, 'http')->andReturn([
+        'body' => '<div class="listing"><a class="story-link" href="/missing">Missing</a>'
+            .'<a class="story-link" href="/notice">Notice</a></div>',
+    ]);
+    $fetcher->shouldReceive('fetch')->once()->with('https://example.com/missing', 'http')->andReturnNull();
+    $fetcher->shouldReceive('fetch')->once()->with('https://example.com/notice', 'http')->andReturn([
+        'body' => '<meta property="og:title" content="City homepage">'
+            .'<h1 class="notice-title">Budget hearing on Tuesday</h1>'
+            .'<div class="article-content">The budget committee meets Tuesday at city hall.</div>',
+    ]);
+    $items = (new GenericListingFetcher($fetcher))->fetch($scraper);
+    expect($items)->toHaveCount(1)
+        ->and($items[0]['title'])->toBe('Budget hearing on Tuesday')
+        ->and($items[0]['body']['cleaned_text'])->toContain('budget committee');
+});
+
+it('reports an unavailable listing without a browser retry when fallback is disabled', function () {
+    $scraper = makeGenericListingScraper(makeGenericListingCity());
+    $config = $scraper->config;
+    $config['fetch'] = ['renderer' => 'http', 'browser_fallback' => false];
+    $scraper->config = $config;
+    $fetcher = Mockery::mock(PageFetcher::class);
+    $fetcher->shouldReceive('fetch')->once()->with($scraper->source_url, 'http')->andReturnNull();
+    expect(fn () => (new GenericListingFetcher($fetcher))->fetch($scraper))
+        ->toThrow(InvalidArgumentException::class, 'Failed to fetch listing page');
+});
