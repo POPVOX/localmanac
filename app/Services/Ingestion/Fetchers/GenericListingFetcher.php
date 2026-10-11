@@ -624,7 +624,18 @@ class GenericListingFetcher
             }
         }
 
+        // CivicLive notices can use the event date in their header. Prefer an
+        // explicitly labelled publication date in the notice body when present.
+        $noticeBody = $this->firstText($crawler, '#news_content_body');
+        if ($noticeBody && preg_match('/\bPublished\s+on\s+(\d{1,2}\/\d{1,2}\/(?:\d{4}|\d{2}))\b/i', $noticeBody, $matches) === 1) {
+            $date = $this->parseDate($matches[1], $timezone);
+            if ($date !== null) {
+                return $date;
+            }
+        }
+
         $textSelectors = [
+            '#news_content_date',
             '.sno-story-byline .time-wrapper',
             '.byline-inner-container .time-wrapper',
             '.sno-story-byline',
@@ -919,6 +930,7 @@ class GenericListingFetcher
     private function extractDateFromText(string $value, string $timezone): ?array
     {
         $patterns = [
+            '/\b\d{1,2}\/\d{1,2}\/\d{4}\b/',
             '/\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2},\s+\d{4}(?:\s+\d{1,2}:\d{2}(?:\s?[AP]M)?)?/i',
         ];
 

@@ -750,3 +750,17 @@ it('uses retrieval v2 fusion and source diversity as one integrated pipeline', f
         ->and($result['evidence'][1]['source_url'])->toBe('https://city.test/services')
         ->and($result['evidence'][2]['source_url'])->toBe('https://parks.test/two');
 });
+
+it('retrieves historic designation guidance without requiring city names and incidental property wording in each excerpt', function (bool $v2) {
+    config(['scout.driver' => 'collection', 'chat.vector_enabled' => false, 'chat.fts_enabled' => true, 'chat.retrieval_v2_enabled' => $v2, 'chat.reranking_enabled' => false]);
+    $city = City::factory()->create(['name' => 'Jackson, TN', 'state' => 'Tennessee', 'country' => 'US']);
+    $local = ChatSource::factory()->create(['city_id' => $city->id, 'is_active' => true]);
+    $foreign = ChatSource::factory()->create(['is_active' => true]);
+    $disabled = ChatSource::factory()->create(['city_id' => $city->id, 'is_active' => false]);
+    foreach ([$local, $foreign, $disabled] as $source) {
+        $page = ChatSourcePage::factory()->create(['chat_source_id' => $source->id, 'title' => 'City services FAQ', 'url' => 'https://example.gov/faq/'.$source->id, 'canonical_url' => null]);
+        ChatSourceChunk::factory()->create(['chat_source_page_id' => $page->id, 'chunk_index' => 0, 'content' => 'Some sites may be designated as historic locations to protect them from demolition or alteration. For more information, contact the Planning Department.']);
+    }
+    $result = app(ChatSourceRetriever::class)->retrieve(collect([$local]), 'How do I get historic designation for my property in Jackson, Tennessee?', $city->id);
+    expect(array_column($result['evidence'], 'source_url'))->toBe(['https://example.gov/faq/'.$local->id]);
+})->with([false, true]);

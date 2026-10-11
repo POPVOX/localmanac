@@ -72,3 +72,19 @@ it('keeps an empty city empty instead of using another city news', function () {
         ->and($result['citations'])->toBe([]);
     StreamingChatAnswerAgent::assertNeverPrompted();
 });
+
+it('cites the calendar events named in a model answer instead of unrelated news', function () {
+    config(['chat.vector_enabled' => false, 'chat.tools.web_search.enabled' => false, 'chat.tools.similarity.enabled' => false, 'chat.answer_quality_enabled' => false]);
+    $city = City::factory()->create(['name' => 'Jackson', 'slug' => 'jackson-tn', 'timezone' => 'America/Chicago']);
+    $event = Event::factory()->create([
+        'city_id' => $city->id, 'title' => 'Jackson Symphony',
+        'description' => 'An evening of classical music.', 'starts_at' => now()->addDays(2),
+        'event_url' => 'https://example.gov/jackson/symphony',
+    ]);
+    Event::factory()->create(['city_id' => $city->id, 'title' => 'Other Local Festival', 'starts_at' => now()->addDays(3), 'event_url' => 'https://example.gov/jackson/other']);
+    Article::factory()->create(['city_id' => $city->id, 'title' => 'Jackson festival last month', 'summary' => 'News about past Jackson events.', 'canonical_url' => 'https://example.gov/jackson/old-festival']);
+    StreamingChatAnswerAgent::fake(['Enjoy Jackson Symphony, an evening of classical music.']);
+    $result = app(AskService::class)->answerStreamingForUser('What events are coming up in Jackson in the next 14 days?', $city->id, User::factory()->create(), null, fn () => null);
+    expect($result['answer'])->toContain('Jackson Symphony')
+        ->and(collect($result['citations'])->pluck('source_url')->all())->toBe([$event->event_url]);
+});

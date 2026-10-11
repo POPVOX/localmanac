@@ -256,6 +256,22 @@ class AnswerSynthesizer
             $sourceMode = $citations === []
                 ? 'none'
                 : $this->detectSourceModeFromCitations($citations, $sources, $city);
+        } elseif ($eventContext['intent'] ?? false) {
+            // Calendar answers must cite the events they name, rather than
+            // unrelated news retrieved as additional context for the model.
+            $normalizedAnswer = $this->normalizeSupportText($answer);
+            $mentionedEvents = collect($eventContext['local_events'] ?? [])
+                ->filter(function (array $event) use ($normalizedAnswer): bool {
+                    $title = $this->normalizeSupportText((string) ($event['title'] ?? ''));
+
+                    return $title !== '' && str_contains($normalizedAnswer, $title);
+                })->values()->all();
+            $mentionedCitations = $this->citationsFromLocalEvents($mentionedEvents);
+            if ($mentionedCitations !== []) {
+                $citations = $mentionedCitations;
+                $alignedEvidence = [];
+                $sourceMode = $this->detectSourceModeFromCitations($citations, $sources, $city);
+            }
         }
 
         if ($this->isRefusalMessage($answer)) {

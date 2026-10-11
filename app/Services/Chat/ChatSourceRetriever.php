@@ -5,6 +5,7 @@ namespace App\Services\Chat;
 use App\Models\ArticleChunk;
 use App\Models\ChatSource;
 use App\Models\ChatSourceChunk;
+use App\Models\City;
 use App\Services\Chat\Event\EventIntentDetector;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder;
@@ -53,6 +54,12 @@ class ChatSourceRetriever
         $proceduralFocusTerms = $this->isProceduralQuestion($question)
             ? $this->proceduralFocusTerms($question)
             : [];
+        if ($proceduralFocusTerms !== [] && $cityId !== null && ($city = City::find($cityId))) {
+            // The database already enforces city scope. Requiring location names
+            // in every excerpt excludes useful pages that say TN instead of Tennessee.
+            $locationTerms = $this->keywordTerms($city->name.' '.$city->state.' '.$city->country);
+            $proceduralFocusTerms = array_values(array_diff($proceduralFocusTerms, $locationTerms));
+        }
         // Preserve the requested service, not merely an incidental subject word.
         if ($proceduralFocusTerms !== []) {
             foreach (['permit', 'licens'] as $service) {
@@ -977,6 +984,7 @@ class ChatSourceRetriever
             'license', 'licenses', 'process', 'procedure', 'steps', 'step', 'city',
             'dispose', 'disposal',
             'much', 'cost', 'costs', 'per',
+            'property', 'properties',
         ];
 
         $terms = $this->keywordTerms($question);
@@ -984,6 +992,7 @@ class ChatSourceRetriever
         return collect($terms)
             ->reject(fn (string $term): bool => in_array($term, $ignored, true))
             ->reject(fn (string $term): bool => str_ends_with($term, 's') && in_array(mb_substr($term, 0, -1), $terms, true))
+            ->map(fn (string $term): string => in_array($term, ['designation', 'designated', 'designate'], true) ? 'designat' : $term)
             ->values()
             ->all();
     }
