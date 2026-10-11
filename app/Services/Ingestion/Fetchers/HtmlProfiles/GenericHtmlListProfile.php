@@ -75,8 +75,19 @@ class GenericHtmlListProfile extends AbstractHtmlProfile
                 ? $this->dateParser->parseIso($datetime, $timezone)
                 : $this->dateParser->parse($dateText, $timeText, $timezone);
 
+            if ($dateResult) {
+                if ($this->textFor($itemCrawler, Arr::get($listConfig, 'all_day_selector')) !== '') {
+                    $dateResult['all_day'] = true;
+                }
+
+                $endDatetime = $this->attrFor($itemCrawler, Arr::get($listConfig, 'end_datetime_selector'), Arr::get($listConfig, 'datetime_attr', 'datetime'));
+                if ($endDatetime !== '') {
+                    $dateResult['ends_at'] = $this->dateParser->parseIso($endDatetime, $timezone)['starts_at'] ?? null;
+                }
+            }
+
             $detailPayload = [];
-            $description = null;
+            $description = $this->textFor($itemCrawler, Arr::get($listConfig, 'description_selector')) ?: null;
 
             if ($detailEnabled && $eventUrl && $detailFetches < $maxDetailFetches) {
                 $detail = $this->fetchDetail($eventUrl, $detailConfig, $timezone);
@@ -97,6 +108,10 @@ class GenericHtmlListProfile extends AbstractHtmlProfile
 
             if (! $dateResult || ! $dateResult['starts_at']) {
                 continue;
+            }
+
+            if (($dateResult['ends_at'] ?? null)?->lessThanOrEqualTo($dateResult['starts_at'])) {
+                $dateResult['ends_at'] = null;
             }
 
             $items[] = new EventDTO(

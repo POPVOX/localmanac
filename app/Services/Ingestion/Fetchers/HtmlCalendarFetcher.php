@@ -6,6 +6,7 @@ use App\Models\EventSource;
 use App\Services\Ingestion\CalendarDateParser;
 use App\Services\Ingestion\EventDTO;
 use App\Services\Ingestion\EventNormalizer;
+use App\Services\Ingestion\Fetchers\HtmlProfiles\FullCalendarInlineProfile;
 use App\Services\Ingestion\Fetchers\HtmlProfiles\GenericHtmlListProfile;
 use App\Services\Ingestion\Fetchers\HtmlProfiles\HtmlProfileRegistry;
 use App\Services\Ingestion\Fetchers\HtmlProfiles\JsonLdEventsProfile;
@@ -52,6 +53,7 @@ class HtmlCalendarFetcher implements EventSourceFetcher
             [
                 new WichitaChamberEventsProfile($this->dateParser, $this->normalizer),
                 new JsonLdEventsProfile($this->dateParser, $this->normalizer),
+                new FullCalendarInlineProfile($this->dateParser, $this->normalizer),
             ],
             new GenericHtmlListProfile($this->dateParser, $this->normalizer),
         );

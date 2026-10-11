@@ -57,6 +57,10 @@ class JsonLdEventsProfile extends AbstractHtmlProfile
             }
 
             $endResult = $this->dateParser->parseIso($this->scalarValue($record['endDate'] ?? null), $timezone);
+            $endsAt = $endResult['starts_at'] ?? null;
+            if ($endsAt && $endsAt->lessThanOrEqualTo($startResult['starts_at'])) {
+                $endsAt = null;
+            }
             [$locationName, $locationAddress] = $this->location($record['location'] ?? null);
             $eventUrl = $this->normalizer->normalizeUrl(
                 $this->scalarValue($record['url'] ?? ($record['@id'] ?? null)),
@@ -69,7 +73,7 @@ class JsonLdEventsProfile extends AbstractHtmlProfile
             $events[] = new EventDTO(
                 title: $title !== '' ? $title : 'Untitled event',
                 startsAt: $startResult['starts_at'],
-                endsAt: $endResult['starts_at'] ?? null,
+                endsAt: $endsAt,
                 allDay: $startResult['all_day'],
                 locationName: $locationName,
                 locationAddress: $locationAddress,

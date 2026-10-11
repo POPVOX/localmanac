@@ -297,7 +297,18 @@ class EventSourceConfigDrafter
             ];
         }
 
+        foreach ($crawler->filter('script') as $script) {
+            if (str_contains($script->textContent, '.fullCalendar(') && preg_match('/\bevents\s*:\s*\[/', $script->textContent)) {
+                return [
+                    'config' => ['profile' => 'fullcalendar_inline', 'timezone' => null, 'max_items' => 100],
+                    'confidence' => 0.88,
+                    'warnings' => ['Confirm the dates in the preview. Inline calendars include only events already present in the page.'],
+                ];
+            }
+        }
+
         $itemSelector = $this->firstSelectorWithCount($crawler, [
+            '.fsCalendar article',
             '[itemtype*="schema.org/Event"]',
             '[itemtype*="Event"]',
             '.event-list .event',
@@ -311,6 +322,7 @@ class EventSourceConfigDrafter
 
         $firstItem = $this->firstNode($crawler, $itemSelector);
         $titleSelector = $this->firstSelectorWithCount($firstItem, [
+            '.fsTitle a',
             '[itemprop="name"]',
             '.event-title a',
             '.event-title',
@@ -337,12 +349,14 @@ class EventSourceConfigDrafter
             'time',
         ], 1);
         $locationSelector = $this->firstSelectorWithCount($firstItem, [
+            '.fsLocation',
             '[itemprop="location"]',
             '.event-location',
             '.location',
             '.venue',
         ], 1);
         $linkSelector = $this->firstSelectorWithCount($firstItem, [
+            '.fsTitle a[href]',
             '.event-title a[href]',
             'h2 a[href]',
             'h3 a[href]',
@@ -359,6 +373,7 @@ class EventSourceConfigDrafter
             'link_attr' => 'href',
             'datetime_selector' => $datetimeSelector,
             'datetime_attr' => $datetimeSelector ? ($this->selectorUsesContent($datetimeSelector) ? 'content' : ($this->selectorUsesDataStart($datetimeSelector) ? 'data-start' : 'datetime')) : null,
+            'all_day_selector' => $itemSelector === '.fsCalendar article' ? '.fsAllDay' : null,
             'max_items' => 50,
         ], fn (mixed $value): bool => $value !== null && $value !== '');
 
