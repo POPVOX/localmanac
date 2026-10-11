@@ -372,3 +372,24 @@ it('chooses the direct calendar feed rather than a subscription UI or embed meta
         ->and($result['endpoints'])->toHaveCount(1);
     Http::assertNotSent(fn ($request) => str_contains($request->url(), 'oembed') || str_contains($request->url(), 'calendar.google.com'));
 });
+
+it('keeps calendar discovery on the event page instead of global news feeds and page metadata', function (?string $preferredKind) {
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://example.org/calendar' => Http::response(<<<'HTML'
+            <html><head><title>Community events calendar</title>
+            <link rel="alternate" type="application/rss+xml" title="Site news feed" href="/feed/">
+            <link rel="alternate" type="application/json" title="Calendar" href="/wp-json/wp/v2/pages/21012">
+            </head><body><main><h1>Upcoming events</h1>
+            <article class="event"><h2><a href="/event/concert">Community concert</a></h2><time datetime="2026-10-20T18:00:00-05:00">October 20</time></article>
+            </main></body></html>
+            HTML, 200, ['Content-Type' => 'text/html']),
+    ]);
+
+    $result = app(SourceDiscoveryService::class)->discover('https://example.org/calendar', $preferredKind);
+
+    expect($result['kind'])->toBe('event')
+        ->and($result['type'])->toBe('html')
+        ->and($result['source_url'])->toBe('https://example.org/calendar');
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), '/feed/') || str_contains($request->url(), '/wp-json/'));
+})->with(['explicit events' => ['event'], 'automatic calendar detection' => [null]]);
