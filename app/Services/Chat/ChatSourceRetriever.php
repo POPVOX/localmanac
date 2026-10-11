@@ -54,7 +54,8 @@ class ChatSourceRetriever
         $proceduralFocusTerms = $this->isProceduralQuestion($question)
             ? $this->proceduralFocusTerms($question)
             : [];
-        if ($proceduralFocusTerms !== [] && $cityId !== null && ($city = City::find($cityId))) {
+        $locationTerms = [];
+        if ($cityId !== null && ($city = City::find($cityId))) {
             // The database already enforces city scope. Requiring location names
             // in every excerpt excludes useful pages that say TN instead of Tennessee.
             $locationTerms = $this->keywordTerms($city->name.' '.$city->state.' '.$city->country);
@@ -69,10 +70,22 @@ class ChatSourceRetriever
             }
         }
 
+        // Location is already enforced by the database. Including it in a
+        // relaxed OR search ranks almost every page in larger city indexes.
+        // How-to searches should likewise rank the service, not generic verbs.
+        $lexicalTerms = $proceduralFocusTerms !== []
+            ? array_map(fn (string $term): string => match ($term) {
+                'designat' => 'designation',
+                'licens' => 'license',
+                default => $term,
+            }, $proceduralFocusTerms)
+            : array_values(array_diff($this->keywordTerms($question), $locationTerms));
+        $lexicalQuestion = implode(' ', array_unique($lexicalTerms));
+
         $focusedRows = $this->proceduralFocusSearch($sourceIds, $proceduralFocusTerms, $limit);
         $vectorRows = $this->vectorSearch($sourceIds, $question, $limit);
         $ftsLimit = max($limit, (int) config('chat.retrieval_fts_limit', $limit));
-        $ftsRows = $this->ftsSearch($sourceIds, $question, $ftsLimit);
+        $ftsRows = $this->ftsSearch($sourceIds, $lexicalQuestion, $ftsLimit);
 
         // Procedural title boosts and full-text ranks have different scales.
         // Fuse their positions so a focused keyword match cannot drown out a
@@ -144,7 +157,7 @@ class ChatSourceRetriever
                 ->values();
 
             $articleFtsLimit = (int) config('chat.retrieval_fts_limit', 6);
-            $articleFtsEvidence = collect($this->articleFtsSearch($cityId, $question, $articleFtsLimit))
+            $articleFtsEvidence = collect($this->articleFtsSearch($cityId, $lexicalQuestion, $articleFtsLimit))
                 ->filter(fn (array $item) => $item['snippet'] !== '')
                 ->values();
         }
