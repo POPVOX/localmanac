@@ -2,6 +2,25 @@
 
 use App\Services\Chat\HtmlTextExtractor;
 
+it('keeps application URLs beside their labels without changing crawl links', function () {
+    $html = '<body><nav><a href="/unrelated">Unrelated menu</a></nav><main>'
+        .'<p>Download the <a href="docs/designation.pdf">Designation Application Form</a>.</p>'
+        .'<p>For a separate tax benefit, use <a href="/tax.pdf">Tax Exemption Application</a>.</p>'
+        .'<p><a href="#top">Top</a> <a href="javascript:alert(1)">Toggle</a> '
+        .'<a href="mailto:help@example.gov">Email us</a></p>'
+        .'<p><a href="https://example.gov/permits">https://example.gov/permits</a></p>'
+        .'</main></body>';
+
+    $result = (new HtmlTextExtractor)->extract($html, 'https://example.gov/planning/landmarks.html');
+
+    expect($result['text'])
+        ->toContain('Designation Application Form (https://example.gov/planning/docs/designation.pdf)')
+        ->toContain('Tax Exemption Application (https://example.gov/tax.pdf)')
+        ->not->toContain('javascript:', 'mailto:', '(#top)', '/unrelated')
+        ->and(substr_count($result['text'], 'https://example.gov/permits'))->toBe(1)
+        ->and($result['content_links'][0])->toBe(['href' => 'docs/designation.pdf', 'text' => 'Designation Application Form']);
+});
+
 it('extracts block text as paragraphs', function () {
     $html = <<<'HTML'
     <html>
