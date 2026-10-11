@@ -2,6 +2,10 @@
 
 use App\Models\City;
 use App\Services\Chat\AnswerSynthesizer;
+use Illuminate\Support\Carbon;
+use Tests\TestCase;
+
+uses(TestCase::class);
 
 it('grounds referred entities within sentence and paragraph boundaries', function (string $answer, bool $grounded) {
     $synthesizer = app(AnswerSynthesizer::class);
@@ -32,3 +36,57 @@ it('grounds referred entities within sentence and paragraph boundaries', functio
     'curly possessive organization name' => ['Visit the Houston Permitting Center’s website.', true],
     'unsupported possessive organization' => ["Visit the Fictional Permit Agency's website.", false],
 ]);
+
+it('requires older edition fees to name their date and disclose that the current fee is unverified', function (string $answer, bool $grounded) {
+    Carbon::setTestNow('2026-10-11 12:00:00');
+
+    try {
+        $method = new ReflectionMethod(AnswerSynthesizer::class, 'isAnswerGrounded');
+        expect($method->invoke(app(AnswerSynthesizer::class), 'What is the demolition permit fee?', $answer,
+            new City(['name' => 'Jackson', 'timezone' => 'America/Chicago']), [[
+                'title' => 'Jackson Construction Guide (January 2022 edition)',
+                'snippet' => 'Residential building demolition permit fee: $50.00.',
+            ]], []))->toBe($grounded);
+    } finally {
+        Carbon::setTestNow();
+    }
+})->with([
+    'production failure' => ['You will need to pay a fee of $50.00 for a residential building demolition. The application steps are not verified.', false],
+    'date without uncertainty' => ['The 2022 guide lists a $50 residential demolition fee.', false],
+    'uncertainty without edition' => ['The guide lists $50; I have not verified the current fee.', false],
+    'dated and qualified' => ['The January 2022 guide lists $50; I have not verified the current fee.', true],
+    'reverse qualification' => ['The 2022 edition lists $50.00. The current demolition permit fee has not been confirmed.', true],
+    'unrelated caveat' => ['The 2022 guide lists $50. The current application process is unverified.', false],
+    'no-answer phrase cannot bypass check' => ['The fee is $50.00. I could not find the application steps.', false],
+    'different amount is not supported' => ['The 2022 guide lists $5; I have not verified the current fee.', false],
+]);
+
+it('does not treat current or undated support as an older edition', function (string $title) {
+    Carbon::setTestNow('2026-10-11 12:00:00');
+
+    try {
+        $method = new ReflectionMethod(AnswerSynthesizer::class, 'isAnswerGrounded');
+        expect($method->invoke(app(AnswerSynthesizer::class), 'What is the fee?', 'The fee is $50.00.',
+            new City(['name' => 'Jackson', 'timezone' => 'America/Chicago']), [[
+                'title' => $title,
+                'snippet' => 'The fee is $50.',
+            ]], []))->toBeTrue();
+    } finally {
+        Carbon::setTestNow();
+    }
+})->with(['2026 edition', 'Fee schedule', 'History of the 2022 festival']);
+
+it('allows a fee corroborated by a current edition', function () {
+    Carbon::setTestNow('2026-10-11 12:00:00');
+
+    try {
+        $method = new ReflectionMethod(AnswerSynthesizer::class, 'isAnswerGrounded');
+        expect($method->invoke(app(AnswerSynthesizer::class), 'What is the fee?', 'The fee is $50.',
+            new City(['name' => 'Jackson']), [
+                ['title' => '2022 edition', 'snippet' => 'The fee is $50.00.'],
+                ['title' => 'Revised January 2026', 'snippet' => 'The fee is $50.'],
+            ], []))->toBeTrue();
+    } finally {
+        Carbon::setTestNow();
+    }
+});

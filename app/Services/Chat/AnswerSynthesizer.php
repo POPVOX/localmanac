@@ -167,8 +167,6 @@ class AnswerSynthesizer
         }
 
         if ($answer !== ''
-            && ! $this->isNoAnswerMessage($answer)
-            && ! $this->isRefusalMessage($answer)
             && ! $this->isAnswerGrounded($question, $answer, $city, $seedEvidence, $citations)
         ) {
             $answer = self::NO_ANSWER_MESSAGE;
@@ -1586,6 +1584,10 @@ class AnswerSynthesizer
      */
     private function isAnswerGrounded(string $question, string $answer, City $city, array $seedEvidence, array $citations): bool
     {
+        if (! $this->datedCurrencyClaimsAreQualified($answer, $city, $seedEvidence)) {
+            return false;
+        }
+
         if ($answer === '' || $this->isNoAnswerMessage($answer) || $this->isRefusalMessage($answer)) {
             return true;
         }
@@ -1610,8 +1612,9 @@ class AnswerSynthesizer
             }
         }
 
-        foreach ($this->extractAnswerCurrencyValues($answer) as $value) {
-            if (! str_contains($supportHaystack, $this->normalizeSupportText($value))) {
+        $supportedCurrencyValues = $this->normalizedCurrencyValues($supportText);
+        foreach ($this->normalizedCurrencyValues($answer) as $value) {
+            if (! in_array($value, $supportedCurrencyValues, true)) {
                 return false;
             }
         }
@@ -1633,6 +1636,69 @@ class AnswerSynthesizer
         }
 
         return true;
+    }
+
+    /**
+     * Enforce the edition qualifier even when the model overlooks the prompt.
+     * Only explicit edition/revision labels qualify: a year in a historical
+     * event title alone does not make the source an outdated edition.
+     *
+     * @param  array<int, array<string, mixed>>  $evidence
+     */
+    private function datedCurrencyClaimsAreQualified(string $answer, City $city, array $evidence): bool
+    {
+        $currentYear = Carbon::now($city->timezone ?: config('app.timezone', 'UTC'))->year;
+
+        foreach ($this->normalizedCurrencyValues($answer) as $value) {
+            $support = array_values(array_filter($evidence, fn (array $item): bool => in_array(
+                $value,
+                $this->normalizedCurrencyValues((string) ($item['snippet'] ?? '')),
+                true,
+            )));
+            $years = [];
+
+            foreach ($support as $item) {
+                $title = (string) ($item['title'] ?? '');
+                if (preg_match('/\b(?:edition|revised|revision|published|updated)\b[^\n()]{0,35}\b((?:19|20)\d{2})\b|\b((?:19|20)\d{2})\b[^\n()]{0,35}\b(?:edition|revision)\b/i', $title, $matches) !== 1) {
+                    continue 2;
+                }
+
+                $year = (int) ($matches[1] ?: ($matches[2] ?? 0));
+                if ($year >= $currentYear) {
+                    continue 2;
+                }
+                $years[] = $year;
+            }
+
+            if ($years === []) {
+                continue;
+            }
+
+            $namesEdition = false;
+            foreach (array_unique($years) as $year) {
+                $namesEdition = $namesEdition || preg_match('/\b'.$year.'\b/', $answer) === 1;
+            }
+            // Require the uncertainty to concern the current fee, rather than
+            // accepting an unrelated caveat about application instructions.
+            $currentFee = '(?:current|today[’\x27]?s)\s+(?:[\w-]+\s+){0,3}(?:fee|fees|amount|rate|rates|cost|costs|price|prices)';
+            $unverified = '(?:(?:not|never)\s+(?:been\s+)?(?:verified|confirmed)|unverified|unconfirmed|unknown|cannot\s+(?:verify|confirm)|can[’\x27]t\s+(?:verify|confirm))';
+            $qualifiesFee = preg_match('/'.$currentFee.'[^.!?\n]{0,70}'.$unverified.'|'.$unverified.'[^.!?\n]{0,70}'.$currentFee.'/iu', $answer) === 1;
+
+            if (! $namesEdition || ! $qualifiesFee) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** @return array<int, string> */
+    private function normalizedCurrencyValues(string $text): array
+    {
+        return array_values(array_unique(array_map(
+            fn (string $value): string => number_format((float) str_replace(['$', ','], '', $value), 2, '.', ''),
+            $this->extractAnswerCurrencyValues($text),
+        )));
     }
 
     /**
