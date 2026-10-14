@@ -82,6 +82,10 @@ class EventWriter
         ?string $locationAddress,
     ): Event {
         return DB::transaction(function () use ($source, $event, $cityId, $title, $sourceHash, $eventUrl, $sourceUrl, $locationName, $locationAddress) {
+            if ($source->source_type === 'rss' && ($event->rawPayload['date_basis'] ?? null) === 'publication_date'
+                && ! Event::where('source_hash', $sourceHash)->exists()) {
+                $this->legacyPublicationDateEvent($source, $event)?->forceFill(['source_hash' => $sourceHash])->save();
+            }
             $model = Event::updateOrCreate(
                 ['source_hash' => $sourceHash],
                 [
@@ -112,6 +116,38 @@ class EventWriter
 
             return $model;
         });
+    }
+
+    /** Repair the known UTC-midnight RSS fallback without creating a second listing. */
+    private function legacyPublicationDateEvent(EventSource $source, EventDTO $event): ?Event
+    {
+        $payload = $event->rawPayload;
+        if ($source->source_type !== 'rss' || ! $event->externalId || ($payload['date_basis'] ?? null) !== 'publication_date') {
+            return null;
+        }
+        $items = EventSourceItem::where('event_source_id', $source->id)
+            ->where('external_id', $event->externalId)->with('event')->limit(2)->get();
+        if ($items->count() !== 1) {
+            return null;
+        }
+        $item = $items->first();
+        $model = $item->event;
+        $old = $item->raw_payload ?? [];
+        if (! $model || ! $model->all_day || $model->ends_at || isset($old['date_basis'])
+            || ! empty($old['event_dates']) || ! empty($old['event_times'])
+            || array_filter($old['structured_event_fields'] ?? []) !== []
+            || ! empty($source->config['date_extraction']) || ! empty($source->config['date'])
+            || ($old['pub_date'] ?? null) !== ($payload['pub_date'] ?? null)
+            || $this->normalizer->normalizeTitle($model->title) !== $this->normalizer->normalizeTitle($event->title)) {
+            return null;
+        }
+        try {
+            $legacyStart = \Illuminate\Support\Carbon::parse($old['pub_date'])->startOfDay()->utc();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $model->starts_at?->equalTo($legacyStart) ? $model : null;
     }
 
     private function isRecoverablePrimaryKeyViolation(UniqueConstraintViolationException $exception): bool

@@ -178,6 +178,37 @@ it('parses rss feeds into event dtos', function () {
         ->and($events[0]->allDay)->toBeTrue();
 });
 
+it('keeps RSS dates local and only repairs proven legacy fallback rows', function (array $extraPayload, bool $repairable) {
+    $pubDate = 'Sat, 17 Oct 2026 15:00:00 +0000';
+    $url = 'https://example.com/arbooretum';
+    $rss = '<rss version="2.0"><channel><item><title>ArBOOretum</title><link>'.$url.'</link><guid>arbooretum-id</guid><pubDate>'.$pubDate.'</pubDate></item></channel></rss>';
+    Http::fake(['https://example.com/events.rss' => Http::response($rss, 200)]);
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $source = EventSource::factory()->create(['city_id' => $city->id, 'source_type' => 'rss', 'source_url' => 'https://example.com/events.rss', 'config' => []]);
+    $legacy = \App\Models\Event::factory()->create([
+        'city_id' => $city->id, 'title' => 'ArBOOretum', 'starts_at' => \Illuminate\Support\Carbon::parse('2026-10-17 00:00:00', 'UTC'), 'ends_at' => null, 'all_day' => true,
+    ]);
+    \App\Models\EventSourceItem::factory()->create([
+        'event_id' => $legacy->id, 'event_source_id' => $source->id, 'external_id' => 'arbooretum-id', 'source_url' => $url,
+        'raw_payload' => array_merge(['pub_date' => $pubDate], $extraPayload),
+    ]);
+    $events = (new RssEventsFetcher(new CalendarDateParser, new EventNormalizer))->fetch($source);
+    expect($events[0]->startsAt->copy()->setTimezone($city->timezone)->format('Y-m-d H:i'))->toBe('2026-10-17 00:00')
+        ->and($events[0]->rawPayload['date_basis'])->toBe('publication_date');
+    $writer = app(\App\Services\Ingestion\EventWriter::class);
+    $updated = $writer->write($source, $events[0]);
+    $again = $writer->write($source, $events[0]);
+    expect($updated->id === $legacy->id)->toBe($repairable)
+        ->and($again->id)->toBe($updated->id)
+        ->and(\App\Models\Event::count())->toBe($repairable ? 1 : 2)
+        ->and(\App\Models\EventSourceItem::count())->toBe($repairable ? 1 : 2)
+        ->and($updated->starts_at->copy()->setTimezone($city->timezone)->format('Y-m-d H:i'))->toBe('2026-10-17 00:00');
+})->with([
+    'legacy fallback' => [[], true],
+    'explicit event date' => [['event_dates' => 'October 17, 2026'], false],
+    'structured date provenance' => [['date_basis' => 'event_fields'], false],
+]);
+
 it('parses every CivicPlus RSS item using event dates times and locations', function () {
     $rss = <<<'XML'
         <?xml version="1.0"?><rss version="2.0" xmlns:calendarEvent="https://madisoncountytn.gov/Calendar.aspx"><channel>

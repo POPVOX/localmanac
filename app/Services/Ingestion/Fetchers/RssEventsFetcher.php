@@ -62,6 +62,7 @@ class RssEventsFetcher implements EventSourceFetcher
             $calendarTime = $this->calendarEventField($item, 'EventTimes');
             $calendarLocation = $this->normalizeCalendarText($this->calendarEventField($item, 'Location'));
             $structured = $this->structuredEventFields($item);
+            $dateBasis = 'event_fields';
 
             $dateResult = $this->extractDateFromConfig($dateConfig, $title, $description, $timezone);
 
@@ -79,6 +80,7 @@ class RssEventsFetcher implements EventSourceFetcher
 
             if (! $dateResult && $pubDate !== '') {
                 $dateResult = $this->fallbackPubDate($pubDate, $timezone);
+                $dateBasis = 'publication_date';
             }
 
             if (! $dateResult || ! $dateResult['starts_at']) {
@@ -106,6 +108,7 @@ class RssEventsFetcher implements EventSourceFetcher
                     'link' => $link,
                     'description' => $description,
                     'pub_date' => $pubDate,
+                    'date_basis' => $dateBasis,
                     'guid' => $guid,
                     'event_dates' => $calendarDate,
                     'event_times' => $calendarTime,
@@ -378,7 +381,7 @@ class RssEventsFetcher implements EventSourceFetcher
     private function fallbackPubDate(string $value, string $timezone): ?array
     {
         try {
-            $parsed = Carbon::parse($value, $timezone);
+            $parsed = Carbon::parse($value, $timezone)->setTimezone($timezone);
         } catch (Throwable) {
             return null;
         }
