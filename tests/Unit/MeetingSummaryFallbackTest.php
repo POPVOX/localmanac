@@ -2,6 +2,16 @@
 
 use App\Services\Articles\MeetingSummaryFallback;
 
+it('retains specific consequences when another sentence contains generic context', function () {
+    $result = (new MeetingSummaryFallback)->narrative(
+        title: 'City Council water rate hearing',
+        cleanedText: 'The City Council approved a water rate increase of 5% beginning November 1.',
+        whyItMatters: 'Residents should stay informed about local governance. Water bills will increase by 5% beginning November 1.',
+    );
+
+    expect($result['why_it_matters'])->toBe('Water bills will increase by 5% beginning November 1.');
+});
+
 it('replaces a generic council recap explainer with specific meeting items', function () {
     $text = implode("\n\n", [
         'Yesterday at the City Council meeting, the Council heard the following items:',

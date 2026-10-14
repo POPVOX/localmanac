@@ -13,6 +13,7 @@ use App\Services\Chat\Event\EventIntentDetector;
 use App\Services\Chat\Event\EventSearchService;
 use App\Services\Chat\Event\EventWindowResolver;
 use App\Services\Chat\Tools\EventSearchTool;
+use App\Support\ContactLinks;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -358,6 +359,7 @@ class AnswerSynthesizer
             $lines[] = 'Use EventSearchTool for local calendar events relevant to the question.';
             $lines[] = 'For mixed questions, answer both event and civic parts in a single response.';
             $lines[] = 'For event-only questions, use a warm conversational tone and highlight the most relevant 3-5 options.';
+            $lines[] = 'Keep recommendations inside the resolved city-local date window and preserve audience constraints such as families or children. Do not treat a multi-day listing as proof of a specific daily occurrence: show its full date range and tell the user to check individual dates and hours. Never present only an old series start date as this weekend. Include available event detail links, map links and phone numbers without inventing missing details.';
             $lines[] = 'If no events are available in the requested window, clearly say so and suggest the next 7 days or next weekend.';
 
             if (is_array($eventWindow)) {
@@ -1004,7 +1006,13 @@ class AnswerSynthesizer
             || $this->isNoAnswerMessage($answer)
             || trim($answer) === '';
 
-        return collect(array_merge($seedCitations, $metaCitations, $toolCitations, $modelCitations))
+        $namedEventCitations = array_filter($eventCitations, function (array $citation) use ($answer): bool {
+            $title = $this->normalizeSupportText((string) ($citation['title'] ?? ''));
+
+            return $title !== '' && str_contains($this->normalizeSupportText($answer), $title);
+        });
+
+        return collect(array_merge($seedCitations, $metaCitations, $toolCitations, $modelCitations, $namedEventCitations))
             ->filter(function (array $citation) use ($supportedUrls, $keepGenericFallback): bool {
                 $url = trim((string) ($citation['source_url'] ?? ''));
 
@@ -1338,6 +1346,10 @@ class AnswerSynthesizer
             return false;
         }
 
+        if ($this->eventSearchService->isFamilyQuery($question)) {
+            return true;
+        }
+
         $question = mb_strtolower($question);
 
         foreach ([
@@ -1414,7 +1426,7 @@ class AnswerSynthesizer
     }
 
     /**
-     * Meeting answers are already resolved from the city-scoped event table. Do
+     * Meeting and family answers are resolved from the city-scoped event table. Do
      * not spend a second network round trip asking a model (and optional web
      * search) for an answer that the finalization step would overwrite anyway.
      *
@@ -1438,7 +1450,7 @@ class AnswerSynthesizer
         string $originalQuestion,
     ): array {
         $events = is_array($eventContext['local_events'] ?? null)
-            ? $eventContext['local_events']
+            ? array_slice($eventContext['local_events'], 0, max(1, (int) config('chat.events.response_max_highlights', 5)))
             : [];
         $hasEvents = (int) ($eventContext['local_total'] ?? 0) > 0 && $events !== [];
         $answer = $hasEvents
@@ -1505,12 +1517,29 @@ class AnswerSynthesizer
             ->filter(fn (array $event): bool => trim((string) ($event['title'] ?? '')) !== '')
             ->take($maxHighlights)
             ->map(function (array $event) use ($city): string {
-                $title = trim((string) ($event['title'] ?? 'Event'));
+                $title = ContactLinks::markdownLabel(trim((string) ($event['title'] ?? 'Event')));
+                $url = trim((string) ($event['source_url'] ?? ''));
+                if (filter_var($url, FILTER_VALIDATE_URL) && in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
+                    $title = '['.$title.'](<'.str_replace(['<', '>'], ['%3C', '%3E'], $url).'>)';
+                }
                 $when = trim((string) ($event['starts_at'] ?? ''));
                 $location = trim((string) ($event['location_name'] ?? ''));
+                $address = trim((string) ($event['location_address'] ?? ''));
+                if (in_array(mb_strtolower($location), ['tx', 'tn', 'ks', 'us', 'usa', 'united states', mb_strtolower((string) $city->state)], true)) {
+                    $location = '';
+                }
+                $place = $address !== '' && ! str_contains(mb_strtolower($location), mb_strtolower($address))
+                    ? trim($location.', '.$address, ', ') : $location;
+                $suffix = $place !== ''
+                    ? ' at ['.ContactLinks::markdownLabel($place).']('.ContactLinks::mapUrl($address !== '' ? $address : $place).')'
+                    : '';
+                $phone = $event['phones'][0] ?? null;
+                if (is_array($phone) && preg_match('/^tel:\+\d+(?:;ext=\d+)?$/', (string) ($phone['url'] ?? '')) === 1) {
+                    $suffix .= ' · ['.ContactLinks::markdownLabel((string) $phone['label']).']('.$phone['url'].')';
+                }
 
                 if ($when === '') {
-                    return $location !== '' ? "{$title} ({$location})" : $title;
+                    return $title.$suffix;
                 }
 
                 try {
@@ -1518,15 +1547,22 @@ class AnswerSynthesizer
                     $formatted = (bool) ($event['all_day'] ?? false)
                         ? $start->format('D, M j')
                         : $start->format('D, M j g:i A');
+                    $end = ! empty($event['ends_at']) ? Carbon::parse($event['ends_at'])->setTimezone($start->timezone) : null;
+                    if ($end && $end->greaterThan($start)) {
+                        if (($event['all_day'] ?? false) && $end->isStartOfDay()) {
+                            $end->subSecond();
+                        }
+                        if (! $end->isSameDay($start)) {
+                            $formatted = $start->format('M j').'–'.$end->format('M j, Y').' (multi-day listing; check individual dates and hours)';
+                        } elseif (! ($event['all_day'] ?? false)) {
+                            $formatted .= '–'.$end->format('g:i A');
+                        }
+                    }
                 } catch (\Throwable) {
                     $formatted = $when;
                 }
 
-                if ($location !== '') {
-                    return "{$title} - {$formatted} at {$location}";
-                }
-
-                return "{$title} - {$formatted}";
+                return "{$title} - {$formatted}{$suffix}";
             })
             ->values();
 
@@ -1534,7 +1570,10 @@ class AnswerSynthesizer
             return "I found events in {$city->name} for {$windowLabel}, but I could not format them reliably.";
         }
 
-        return "Top events in {$city->name} for {$windowLabel}:\n- ".$lines->implode("\n- ");
+        $dates = is_array($window) && ($window['start_at'] ?? null) instanceof Carbon && ($window['end_at'] ?? null) instanceof Carbon
+            ? ' ('.$window['start_at']->format('M j').'–'.$window['end_at']->format('M j, Y').')' : '';
+
+        return "Events in {$city->name} for {$windowLabel}{$dates}:\n\n- ".$lines->implode("\n- ");
     }
 
     /**
@@ -2693,6 +2732,11 @@ class AnswerSynthesizer
      */
     private function noEventsFoundMessage(City $city, ?array $window, string $question = ''): string
     {
+        if ($this->eventSearchService->isFamilyQuery($question)) {
+            $label = $window['label'] ?? 'that time period';
+
+            return "I could not verify any family-friendly events in the available {$city->name} calendar sources for {$label}. Try the next 7 days or check the city calendar for more listings.";
+        }
         if ($this->isMeetingFocusedEventQuery($question)) {
             return "No upcoming city council or public meetings are currently listed in the available {$city->name} sources.";
         }

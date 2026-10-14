@@ -5,7 +5,9 @@ namespace App\Services\Chat\Event;
 use App\Models\City;
 use App\Models\Event;
 use App\Models\EventSourceItem;
+use App\Support\ContactLinks;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 class EventSearchService
 {
@@ -50,12 +52,19 @@ class EventSearchService
         $limit = max(1, min(20, $limit ?? (int) config('chat.events.max_results', 8)));
         $windowStart = $resolvedWindow['start_at']->copy()->utc();
         $windowEnd = $resolvedWindow['end_at']->copy()->utc();
-        $terms = $this->keywordTerms($question);
+        $familyFocused = $this->isFamilyQuery($question);
+        $terms = $this->keywordTerms($question, $city, $familyFocused);
         $meetingFocused = $this->isMeetingFocusedQuery($question);
+        $now = Carbon::now($timezone)->utc();
+        $effectiveStart = ! $resolvedWindow['is_explicit'] && $now->between($windowStart, $windowEnd)
+            ? $now : $windowStart;
 
         $events = Event::query()
             ->where('city_id', $city->id)
             ->whereNotNull('starts_at')
+            ->where('starts_at', '<=', $windowEnd)
+            ->where(fn ($query) => $query->where('starts_at', '>=', $windowStart)
+                ->orWhere('ends_at', '>=', $windowStart))
             ->with([
                 'sourceItems' => fn ($builder) => $builder
                     ->with('eventSource')
@@ -65,17 +74,26 @@ class EventSearchService
             ->get();
 
         $filtered = $events
-            ->filter(function (Event $event) use ($windowStart, $windowEnd): bool {
+            ->filter(function (Event $event) use ($effectiveStart, $windowEnd, $timezone): bool {
                 $eventStart = $event->starts_at?->copy()->utc();
-                $eventEnd = ($event->ends_at ?? $event->starts_at)?->copy()->utc();
+                $eventEnd = $event->ends_at?->copy()->utc();
+                if (! $eventEnd || ($eventStart && $eventEnd->lessThanOrEqualTo($eventStart))) {
+                    $eventEnd = $event->all_day
+                        ? $eventStart?->copy()->setTimezone($timezone)->endOfDay()->utc()
+                        : $eventStart;
+                }
 
                 if (! $eventStart || ! $eventEnd) {
                     return false;
                 }
 
-                return $eventStart->lessThanOrEqualTo($windowEnd)
-                    && $eventEnd->greaterThanOrEqualTo($windowStart);
+                $hasRemainingTime = $eventEnd->greaterThan($eventStart)
+                    ? $eventEnd->greaterThan($effectiveStart)
+                    : $eventStart->greaterThanOrEqualTo($effectiveStart);
+
+                return $eventStart->lessThanOrEqualTo($windowEnd) && $hasRemainingTime;
             })
+            ->filter(fn (Event $event): bool => ! $familyFocused || $this->hasFamilyAudience($event))
             ->filter(function (Event $event) use ($terms, $meetingFocused): bool {
                 return $this->matchesKeywordTerms($event, $terms, $meetingFocused);
             })
@@ -87,6 +105,13 @@ class EventSearchService
                 ->values();
         }
 
+        $filtered = $this->distinctEvents($filtered, $city)
+            // Specific upcoming occurrences precede long-running listings.
+            ->sortBy(fn (Event $event): array => [
+                $event->starts_at->lessThan($effectiveStart) ? 1 : 0,
+                $event->starts_at->getTimestamp(),
+                $event->id,
+            ])->values();
         $total = $filtered->count();
         $events = $filtered->take($limit);
 
@@ -148,7 +173,7 @@ class EventSearchService
     /**
      * @return array<int, string>
      */
-    private function keywordTerms(string $question): array
+    private function keywordTerms(string $question, City $city, bool $familyFocused): array
     {
         $stopWords = [
             'what',
@@ -174,7 +199,32 @@ class EventSearchService
             'activity',
             'activities',
             'city',
+            'for',
+            'with',
+            'happening',
+            'happen',
+            'coming',
+            'upcoming',
+            'days',
+            'day',
+            'things',
+            'can',
+            'could',
+            'please',
+            'find',
+            'show',
+            'some',
+            'any',
         ];
+
+        $question = str_replace(['’', '‘'], "'", mb_strtolower($question));
+        $cityName = trim(explode(',', $city->name)[0]);
+        if ($cityName !== '') {
+            $question = preg_replace('/\b'.preg_quote($cityName, '/').'\b/iu', '', $question) ?? $question;
+        }
+        if ($familyFocused) {
+            $question = preg_replace('/\b(?:families|family(?:[ -]friendly)?|kids?|children|child(?:[ -]friendly)?|all[ -]ages)\b/iu', '', $question) ?? $question;
+        }
 
         return collect(preg_split('/\s+/', mb_strtolower($question)) ?: [])
             ->map(fn (string $term): string => trim($term, " \t\n\r\0\x0B.,!?;:\"'`()[]{}"))
@@ -191,6 +241,50 @@ class EventSearchService
             ->take(6)
             ->values()
             ->all();
+    }
+
+    public function isFamilyQuery(string $question): bool
+    {
+        return preg_match('/\b(?:families|family|kids?|children|child[ -]friendly|all[ -]ages)\b/iu', $question) === 1;
+    }
+
+    private function hasFamilyAudience(Event $event): bool
+    {
+        $text = mb_strtolower(html_entity_decode(strip_tags($event->title.' '.$event->description), ENT_QUOTES | ENT_HTML5));
+        // Require affirmative audience evidence; a generic event is not a family recommendation.
+        if (preg_match('/\b(?:adults?[ -]only|ages?\s*(?:18|21)\s*(?:and|or)\s*(?:up|over)|not (?:suitable|recommended) for (?:kids|children)|drunk|burlesque|striptease|adult children of)\b/iu', $text) === 1 || preg_match('/(?<!\d)(?:18|21)\s*\+/', $text) === 1) {
+            return false;
+        }
+
+        return preg_match('/\b(?:family[ -]friendly|family (?:fun|day|night|event|activities|activity|festival|program|workshop)|(?:whole|entire) family|families|kids?|children|all[ -]ages|story[ -]?time|toddlers?|preschool(?:ers)?)\b/iu', $text) === 1;
+    }
+
+    /** Collapse equivalent listings in results without deleting source records. */
+    private function distinctEvents(Collection $events, City $city): Collection
+    {
+        $groups = [];
+        $normalize = fn (string $value): string => trim(preg_replace('/[^\pL\pN]+/u', ' ', mb_strtolower(html_entity_decode($value, ENT_QUOTES | ENT_HTML5))) ?? '');
+        $location = function (Event $event) use ($normalize, $city): string {
+            $value = $normalize(trim((string) $event->location_name.' '.(string) $event->location_address));
+
+            return in_array($value, ['', 'tx', 'tn', 'ks', 'us', 'usa', 'united states', $normalize((string) $city->state)], true) ? '' : $value;
+        };
+
+        foreach ($events->sortByDesc(fn (Event $event): int => strlen((string) $event->location_address) + strlen((string) $event->description)) as $event) {
+            $key = $normalize($event->title).'|'.$event->starts_at->getTimestamp().'|'.(int) $event->all_day;
+            $place = $location($event);
+            $duplicates = collect($groups[$key] ?? [])->contains(function (Event $other) use ($event, $place, $location): bool {
+                $otherPlace = $location($other);
+
+                return $place === $otherPlace
+                    || (($place === '' || $otherPlace === '') && $event->publicUrl() && $event->publicUrl() === $other->publicUrl());
+            });
+            if (! $duplicates) {
+                $groups[$key][] = $event;
+            }
+        }
+
+        return collect($groups)->flatten(1);
     }
 
     private function isMeetingFocusedQuery(string $question): bool
@@ -292,6 +386,8 @@ class EventSearchService
             'ends_at' => $event->ends_at?->copy()->setTimezone($timezone)->toIso8601String(),
             'all_day' => (bool) $event->all_day,
             'location_name' => $event->location_name ? trim((string) $event->location_name) : null,
+            'location_address' => $event->location_address ? trim((string) $event->location_address) : null,
+            'phones' => ContactLinks::phones((string) $event->description),
             'summary' => $summary,
             'source_url' => $sourceUrl,
             'source_name' => $sourceName,

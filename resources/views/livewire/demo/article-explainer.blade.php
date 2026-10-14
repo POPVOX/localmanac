@@ -55,7 +55,7 @@
                             {{ __("What's happening") }}
                         </flux:text>
                         <flux:text class="leading-relaxed text-zinc-900 dark:text-zinc-100">
-                            {{ $whatsHappening ?? (\Illuminate\Support\Str::limit($bodyText, 600) ?: __('Summary unavailable.')) }}
+                            {{ \App\Support\ContactLinks::html($whatsHappening ?? (\Illuminate\Support\Str::limit($bodyText, 600) ?: __('Summary unavailable.'))) }}
                         </flux:text>
                     </div>
 
@@ -65,7 +65,7 @@
                                 {{ __('Why it matters') }}
                             </flux:text>
                             <flux:text class="leading-relaxed text-zinc-900 dark:text-zinc-100">
-                                {{ $whyItMatters }}
+                                {{ \App\Support\ContactLinks::html($whyItMatters) }}
                             </flux:text>
                         </div>
                     @endif
@@ -205,7 +205,7 @@
                                         <div class="flex flex-col gap-1">
                                             @foreach ($action['meta'] as $line)
                                                 <flux:text variant="subtle" class="text-zinc-600 dark:text-zinc-300">
-                                                    {{ $line }}
+                                                    {{ \App\Support\ContactLinks::html($line) }}
                                                 </flux:text>
                                             @endforeach
                                         </div>
@@ -254,7 +254,13 @@
                                     @foreach ($entities as $entity)
                                         <div class="flex items-start justify-between gap-3">
                                             <div class="flex flex-col gap-1">
-                                                <flux:text>{{ $entity['name'] }}</flux:text>
+                                                @if ($entity['type'] === 'location')
+                                                    <flux:link :href="\App\Support\ContactLinks::mapUrl($entity['name'])" target="_blank" rel="noopener noreferrer">
+                                                        {{ $entity['name'] }}
+                                                    </flux:link>
+                                                @else
+                                                    <flux:text>{{ $entity['name'] }}</flux:text>
+                                                @endif
                                                 @if ($entity['secondary'])
                                                     <flux:text variant="subtle">{{ $entity['secondary'] }}</flux:text>
                                                 @endif

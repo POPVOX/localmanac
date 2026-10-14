@@ -2,6 +2,19 @@
 
 use Symfony\Component\DomCrawler\Crawler;
 
+test('article details link provided phone numbers and street addresses safely', function () {
+    $html = view('components.article-explainer-lists', [
+        'keyDetails' => [
+            ['label' => 'Contact', 'value' => 'Call 713-555-0123 or visit 901 Bagby Street.', 'text' => null],
+        ],
+        'whatToWatch' => [],
+    ])->render();
+    $crawler = new Crawler($html);
+
+    expect($crawler->filter('a[href="tel:+17135550123"]')->count())->toBe(1)
+        ->and($crawler->filter('a[href="https://www.google.com/maps/search/?api=1&query=901%20Bagby%20Street"]')->count())->toBe(1);
+});
+
 test('key details render as a semantic list without an empty second column', function () {
     $html = view('components.article-explainer-lists', [
         'keyDetails' => [
