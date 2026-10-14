@@ -1,5 +1,5 @@
 <meta charset="utf-8" />
-<meta name="localmanac-code-version" content="2026-10-14-family-weekend-events" />
+<meta name="localmanac-code-version" content="2026-10-14-family-weekend-rss-dates" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
 <title>{{ $title ?? config('app.name') }}</title>
