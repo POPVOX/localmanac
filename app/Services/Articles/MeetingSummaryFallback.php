@@ -30,7 +30,11 @@ class MeetingSummaryFallback
         }
 
         if ($this->shouldReplaceWhyItMatters($whyItMatters)) {
-            $whyItMatters = $this->deriveWhyItMatters($cleanedText);
+            // A generic sentence must not erase specific context elsewhere in the explanation.
+            $sentences = preg_split('/(?<=[.!?])\s+/u', $whyItMatters ?? '') ?: [];
+            $specificSentences = array_filter($sentences, fn (string $sentence): bool => ! $this->shouldReplaceWhyItMatters($sentence));
+            $whyItMatters = $this->stringValue(implode(' ', $specificSentences))
+                ?? $this->deriveWhyItMatters($cleanedText);
         }
 
         return [

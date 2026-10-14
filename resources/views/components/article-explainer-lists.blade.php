@@ -23,9 +23,9 @@
                         <div class="min-w-0 text-sm leading-6 text-zinc-700 dark:text-zinc-200">
                             @if ($detail['label'] && $detail['value'])
                                 <span class="font-semibold text-zinc-900 dark:text-zinc-100">{{ $detail['label'] }}</span>
-                                <span>{{ $detail['value'] }}</span>
+                                <span>{{ \App\Support\ContactLinks::html($detail['value']) }}</span>
                             @elseif ($detail['text'])
-                                {{ $detail['text'] }}
+                                {{ \App\Support\ContactLinks::html($detail['text']) }}
                             @endif
                         </div>
                     </li>
@@ -46,9 +46,9 @@
                         <div class="min-w-0 text-sm leading-6 text-zinc-700 dark:text-zinc-200">
                             @if ($detail['label'] && $detail['value'])
                                 <span class="font-semibold text-zinc-900 dark:text-zinc-100">{{ $detail['label'] }}</span>
-                                <span>{{ $detail['value'] }}</span>
+                                <span>{{ \App\Support\ContactLinks::html($detail['value']) }}</span>
                             @elseif ($detail['text'])
-                                {{ $detail['text'] }}
+                                {{ \App\Support\ContactLinks::html($detail['text']) }}
                             @endif
                         </div>
                     </li>

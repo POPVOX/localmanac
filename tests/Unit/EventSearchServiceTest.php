@@ -11,7 +11,22 @@ use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
 
-it('includes overlapping events in the window and orders results by start time', function () {
+it('excludes listings ending exactly when the requested window begins', function () {
+    $city = City::factory()->create(['timezone' => 'America/Chicago']);
+    $start = Carbon::parse('2026-10-16 00:00', $city->timezone);
+    foreach ([
+        ['title' => 'Thursday all day', 'starts_at' => $start->copy()->subDay(), 'ends_at' => $start, 'all_day' => true],
+        ['title' => 'Midnight show', 'starts_at' => $start, 'ends_at' => null, 'all_day' => false],
+    ] as $record) {
+        Event::factory()->create(array_merge($record, ['city_id' => $city->id]));
+    }
+    $window = ['start_at' => $start, 'end_at' => $start->copy()->addDays(2)->endOfDay(), 'label' => 'October 16–18', 'is_explicit' => true, 'parse_confidence' => 1.0];
+    $result = app(EventSearchService::class)->search($city, $window);
+
+    expect(collect($result['events'])->pluck('title')->all())->toBe(['Midnight show']);
+});
+
+it('includes overlapping events but prioritizes specific upcoming occurrences', function () {
     $city = City::factory()->create([
         'timezone' => 'America/Chicago',
     ]);
@@ -68,7 +83,7 @@ it('includes overlapping events in the window and orders results by start time',
     expect($result['total'])->toBe(2)
         ->and($result['has_more'])->toBeFalse()
         ->and(collect($result['events'])->pluck('title')->all())
-        ->toBe(['Friday kickoff', 'Saturday market']);
+        ->toBe(['Saturday market', 'Friday kickoff']);
 });
 
 it('enforces default max results and has_more when more events are available', function () {
@@ -465,4 +480,43 @@ it('uses citation url fallback chain from event to source item to source home', 
         ->and($byTitle['Event with item URL']['source_url'])->toBe('https://example.com/event-item')
         ->and($byTitle['Event with source home']['source_url'])->toBe('https://events.wichita.gov')
         ->and($byTitle['Event with source home']['source_name'])->toBe('Wichita Events Calendar');
+});
+
+it('excludes elapsed weekend occurrences while retaining all-day and ongoing events', function () {
+    Carbon::setTestNow(Carbon::parse('2026-10-18 12:00:00', 'America/Chicago')->utc());
+    try {
+        $city = City::factory()->create(['timezone' => 'America/Chicago']);
+        $window = app(\App\Services\Chat\Event\EventWindowResolver::class)->resolve('events this weekend', $city->timezone);
+        foreach ([
+            ['title' => 'Friday show', 'starts_at' => '2026-10-16 19:00', 'ends_at' => '2026-10-16 21:00', 'all_day' => false],
+            ['title' => 'Sunday market', 'starts_at' => '2026-10-18 00:00', 'ends_at' => null, 'all_day' => true],
+            ['title' => 'Sunday afternoon', 'starts_at' => '2026-10-18 14:00', 'ends_at' => '2026-10-18 16:00', 'all_day' => false],
+        ] as $record) {
+            Event::factory()->create(array_merge($record, [
+                'city_id' => $city->id,
+                'starts_at' => Carbon::parse($record['starts_at'], $city->timezone),
+                'ends_at' => $record['ends_at'] ? Carbon::parse($record['ends_at'], $city->timezone) : null,
+            ]));
+        }
+        $result = app(EventSearchService::class)->search($city, $window, 'events this weekend');
+        expect(collect($result['events'])->pluck('title')->all())->toEqualCanonicalizing(['Sunday market', 'Sunday afternoon']);
+        $window['is_explicit'] = true;
+        expect(app(EventSearchService::class)->search($city, $window, 'events')['total'])->toBe(3);
+    } finally {
+        Carbon::setTestNow();
+    }
+});
+
+it('preserves separate venues and showtimes while removing equivalent region-only listings', function () {
+    $city = City::factory()->create(['name' => 'Houston', 'state' => 'Texas', 'timezone' => 'America/Chicago']);
+    foreach (['TX', null, 'Library A', 'Library B'] as $index => $place) {
+        Event::factory()->create([
+            'city_id' => $city->id, 'title' => 'Family fun', 'description' => 'Family-friendly activities.',
+            'starts_at' => now()->addDay()->startOfHour(), 'ends_at' => now()->addDay()->startOfHour()->addHour(),
+            'all_day' => false, 'location_name' => $place, 'location_address' => null,
+            'event_url' => 'https://example.org/event-'.$index,
+        ]);
+    }
+    $result = app(EventSearchService::class)->search($city, null, 'What’s happening for families in Houston?', 20);
+    expect($result['total'])->toBe(3);
 });
