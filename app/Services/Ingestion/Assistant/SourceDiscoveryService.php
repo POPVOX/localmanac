@@ -50,7 +50,9 @@ class SourceDiscoveryService
             $probe = $this->renderedProbe($url);
 
             if ($probe === null) {
-                throw new InvalidArgumentException('The source could not be inspected automatically. The page may block automated requests; try again or add it as a Chat source and select the browser renderer.');
+                throw new InvalidArgumentException($preferredKind === 'event'
+                    ? 'The calendar could not be read automatically. The site may block automated access or be temporarily unavailable. Try again, or paste its public iCalendar/ICS feed URL.'
+                    : 'The source could not be inspected automatically. The page may block automated requests; try again or add it as a Chat source and select the browser renderer.');
             }
 
             $warnings[] = 'The site blocked or returned no content to a direct request, so discovery used a browser-rendered fallback.';
@@ -152,6 +154,17 @@ class SourceDiscoveryService
                 $warnings = array_merge($warnings, $rendered['warnings']);
             } catch (\Throwable $exception) {
                 $warnings[] = 'The page appears to rely on JavaScript and could not be fully rendered during discovery.';
+            }
+        }
+
+        if ($preferredKind !== 'article') {
+            $listing = $this->discoverLibraryCalendarListing($body, $sourceUrl);
+
+            if ($listing !== null) {
+                $body = $listing['body'];
+                $sourceUrl = $listing['url'];
+                $renderer = $listing['renderer'];
+                $warnings[] = 'Using the calendar’s Upcoming view so event dates can be read automatically.';
             }
         }
 
@@ -323,6 +336,43 @@ class SourceDiscoveryService
         }
 
         return $probe;
+    }
+
+    /**
+     * LibraryCalendar month/week views load events separately. Follow only the
+     * published, same-origin Upcoming link, and verify its listing before use.
+     *
+     * @return array{url: string, status_code: int, content_type: string|null, body: string, renderer: string}|null
+     */
+    private function discoverLibraryCalendarListing(string $body, string $baseUrl): ?array
+    {
+        $crawler = new Crawler($body, $baseUrl);
+
+        if ($crawler->filter('article.node--type-lc-event .lc-date-icon')->count() > 0
+            || $crawler->filter('.js-calendar__data, .calendar--month, .calendar--week, .calendar--day')->count() === 0) {
+            return null;
+        }
+
+        foreach ($crawler->filter('a[data-drupal-link-system-path="events/upcoming"][href]') as $node) {
+            $url = $this->resolveUrl($node->getAttribute('href'), $baseUrl);
+
+            if ($url === null || ! $this->hasSameOrigin($url, $baseUrl)
+                || $this->withoutFragment($url) === $this->withoutFragment($baseUrl)) {
+                continue;
+            }
+
+            $probe = $this->probeEndpoint($url);
+
+            if ($probe !== null && $this->hasSameOrigin($probe['url'], $baseUrl)
+                && (new Crawler($probe['body']))->filter('article.node--type-lc-event .lc-date-icon')->count() > 0) {
+                return $probe;
+            }
+
+            // One linked view is enough; do not crawl alternate calendars.
+            return null;
+        }
+
+        return null;
     }
 
     /**
