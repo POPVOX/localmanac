@@ -112,6 +112,8 @@ it('routes chat knowledge to the chat source form with the city and url preserve
 });
 
 it('discovers previews and creates an event source from the same wizard', function () {
+    $this->travelTo(now()->setDate(2026, 9, 1)->startOfDay());
+
     $user = User::factory()->create();
     $city = City::factory()->create(['timezone' => 'America/Chicago']);
     $ics = "BEGIN:VCALENDAR\r\nX-WR-CALNAME:Lawrence Meetings\r\nBEGIN:VEVENT\r\nUID:council-1\r\nSUMMARY:City Council\r\nDTSTART:20260910T180000\r\nLOCATION:City Hall\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
