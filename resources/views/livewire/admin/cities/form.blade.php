@@ -47,14 +47,32 @@
                 />
             </div>
 
-            <flux:input
+            <flux:select
                 wire:model="timezone"
                 :label="__('Timezone')"
-                type="text"
                 required
-                placeholder="America/Chicago"
-                helper="{{ __('Use an IANA timezone, such as America/Chicago or America/New_York.') }}"
-            />
+                :description="__('Choose the city’s local time. For Eastern Time, select America/New_York. Daylight saving changes are handled automatically.')"
+            >
+                <option value="">{{ __('Select a timezone') }}</option>
+                <optgroup label="{{ __('Common US timezones') }}">
+                    @foreach ($commonTimezones as $identifier => $label)
+                        <option value="{{ $identifier }}">{{ $label }} — {{ $identifier }}</option>
+                    @endforeach
+                </optgroup>
+                <optgroup label="{{ __('Other timezones') }}">
+                    @foreach ($timezones as $identifier)
+                        @unless (isset($commonTimezones[$identifier]))
+                            <option value="{{ $identifier }}">{{ $identifier }}</option>
+                        @endunless
+                    @endforeach
+                </optgroup>
+            </flux:select>
+
+            @if ($city)
+                <flux:text size="sm" variant="subtle">
+                    {{ __('Changing the timezone updates local date and time displays. Events previously imported with the wrong timezone may need to be imported again.') }}
+                </flux:text>
+            @endif
 
             <section class="rounded-xl border border-[#d9d7ce] bg-[#f8f7f2] p-5">
                 <div class="flex flex-wrap items-center justify-between gap-4">
