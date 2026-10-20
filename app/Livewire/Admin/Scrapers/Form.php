@@ -188,6 +188,11 @@ class Form extends Component
         $this->invalidateAssistantPreview();
     }
 
+    public function updatedConfig(): void
+    {
+        $this->invalidateAssistantPreview();
+    }
+
     public function updatedAssistantInputMode(string $value): void
     {
         if (! in_array($value, ['url', 'paste'], true)) {
@@ -254,7 +259,13 @@ class Form extends Component
     public function previewGeneratedConfig(ScraperConfigPreviewer $previewer): void
     {
         try {
-            $draftConfig = $this->assistantDraftConfig;
+            $draftConfig = $this->isSuperAdmin ? $this->decodeConfig() : $this->assistantDraftConfig;
+
+            if ($this->isSuperAdmin) {
+                $this->assistantDraftConfig = $draftConfig;
+                $this->assistantDraftProfile = is_string($draftConfig['profile'] ?? null) ? $draftConfig['profile'] : null;
+                $this->assistantHasDraft = $draftConfig !== [];
+            }
 
             if ($draftConfig === []) {
                 throw ValidationException::withMessages([

@@ -9,6 +9,8 @@ use App\Services\Ingestion\DownloadRejected;
 
 class PageFetcher
 {
+    public ?string $lastFailure = null;
+
     public function __construct(
         private readonly HttpPageFetcher $httpFetcher,
         private readonly PlaywrightPageFetcher $playwrightFetcher,
@@ -20,25 +22,40 @@ class PageFetcher
      */
     public function fetch(string $url, ?string $rendererOverride = null, array $playwrightOptions = [], bool $allowPdf = false): ?array
     {
+        $this->lastFailure = null;
+        $this->httpFetcher->lastFailure = null;
+        $this->playwrightFetcher->lastFailure = null;
+
         if (app(DownloadPolicy::class)->isMediaUrl($url)) {
+            $this->lastFailure = 'The source points to a media file rather than a readable page.';
+
             return null;
         }
 
         try {
             $result = $this->fetchPage($url, $rendererOverride, $playwrightOptions, $allowPdf);
             if ($result === null || ($result['status_code'] ?? 0) < 200 || ($result['status_code'] ?? 0) >= 300) {
+                $this->lastFailure = implode(' ', array_filter([
+                    $this->httpFetcher->lastFailure,
+                    $this->playwrightFetcher->lastFailure,
+                ])) ?: 'The source returned no usable page response.';
+
                 return null;
             }
 
             if (! str_starts_with(ltrim($result['body']), '%PDF-')) {
                 $page = $this->htmlTextExtractor->extract($result['body'], $result['url'] ?? $url);
                 if (app(ChatSourceGuard::class)->isBlockedPage($url, $page['canonical_url'] ?? null, $page['title'] ?? null, $page['text'] ?? '')) {
+                    $this->lastFailure = 'The site returned an access-check or blocked page instead of the requested content.';
+
                     return null;
                 }
             }
 
             return $result;
         } catch (DownloadRejected) {
+            $this->lastFailure = 'The download was rejected by the file-type or size limits.';
+
             // Do not retry a rejected download using a browser.
             return null;
         }

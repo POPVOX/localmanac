@@ -13,6 +13,8 @@ use Illuminate\Support\Str;
 
 class ChatSourceCrawler
 {
+    public ?string $lastFailure = null;
+
     public function __construct(
         private readonly PageFetcher $fetcher,
         private readonly HtmlTextExtractor $htmlTextExtractor,
@@ -26,6 +28,7 @@ class ChatSourceCrawler
      */
     public function crawl(ChatSource $source): array
     {
+        $this->lastFailure = null;
         $maxPages = max(1, (int) config('chat.crawl_max_pages', 250));
         $maxDepth = $source->link_follow_mode === 'none' ? 0 : (int) config('chat.crawl_max_depth', 3);
         $allowExternal = (bool) config('chat.crawl_allow_external', false);
@@ -55,6 +58,8 @@ class ChatSourceCrawler
             $fetchDurationMs = (int) round((microtime(true) - $fetchStartedAt) * 1000);
 
             if ($result === null || ($result['status_code'] ?? 200) >= 400) {
+                $this->lastFailure ??= $this->fetcher->lastFailure;
+
                 continue;
             }
 

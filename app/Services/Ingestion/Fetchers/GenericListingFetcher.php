@@ -151,7 +151,10 @@ class GenericListingFetcher
                 : null;
             $title = $title ?: $this->extractTitle($crawler);
             $title = $title ?: ($titleHint ?: $canonicalUrl);
-            $publishedAtData = $this->extractPublishedAt($crawler, $timezone);
+            $publishedAtData = isset($link['published_at_hint'])
+                ? $this->parseDate($link['published_at_hint'], $timezone)
+                : null;
+            $publishedAtData ??= $this->extractPublishedAt($crawler, $timezone);
             $metaDescription = $this->extractMetaDescription($crawler);
 
             [$bodyHtml, $cleanedText] = $this->extractBody($crawler, $contentSelector, $removeSelectors);
@@ -221,9 +224,16 @@ class GenericListingFetcher
                 return null;
             }
 
+            $publishedAtHint = null;
+            if (in_array('fsPostLink', preg_split('/\s+/', $node->attr('class') ?? '') ?: [], true)) {
+                $post = $node->closest('article[data-post-id]');
+                $publishedAtHint = $this->firstAttr($post, '.fsDateTime time[datetime]', 'datetime');
+            }
+
             return [
                 'url' => $resolved,
                 'title' => $this->normalizeWhitespace($node->text('')),
+                'published_at_hint' => $publishedAtHint,
             ];
         });
 
@@ -622,6 +632,12 @@ class GenericListingFetcher
                     return $date;
                 }
             }
+        }
+
+        // Finalsite detail pages also contain dated related posts. Only the
+        // selected article can supply its publication date.
+        if ($crawler->filter('.fsPostElement.fsPost')->count() > 0) {
+            $crawler = $crawler->filter('.fsPostElement.fsPost')->first();
         }
 
         // CivicLive notices can use the event date in their header. Prefer an

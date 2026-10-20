@@ -10,6 +10,29 @@ use App\Services\Ingestion\Assistant\ScraperConfigPreviewer;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
+it('previews the current raw config instead of an older assistant draft', function () {
+    $user = User::factory()->superAdmin()->create();
+    $city = City::factory()->create();
+    $config = ['profile' => 'generic_listing', 'list' => ['link_selector' => '.fsPostLink']];
+    $previewer = Mockery::mock(ScraperConfigPreviewer::class);
+    $previewer->shouldReceive('preview')->once()
+        ->with($city->id, null, 'html', 'https://school.example/', $config, null)
+        ->andReturn(['items' => [['title' => 'School news', 'source_url' => 'https://school.example/news']],
+            'warnings' => [], 'valid' => true]);
+    app()->instance(ScraperConfigPreviewer::class, $previewer);
+
+    Livewire::actingAs($user)->test(ScraperForm::class)
+        ->set('cityId', $city->id)->set('type', 'html')->set('sourceUrl', 'https://school.example/')
+        ->set('assistantDraftConfig', ['profile' => 'documenters'])
+        ->set('assistantPreviewValid', true)
+        ->set('config', json_encode($config))
+        ->assertSet('assistantPreviewValid', false)
+        ->call('previewGeneratedConfig')
+        ->assertSet('assistantDraftProfile', 'generic_listing')
+        ->assertSet('assistantPreviewValid', true)
+        ->assertSet('assistantPreviewItems.0.title', 'School news');
+});
+
 it('initializes with assistant mode and restricted raw config for non super admins', function () {
     $user = User::factory()->create();
     City::create(['name' => 'Test City', 'slug' => 'test-city']);

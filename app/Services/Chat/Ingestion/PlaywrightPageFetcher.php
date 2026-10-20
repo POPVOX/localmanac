@@ -8,21 +8,27 @@ use Symfony\Component\Process\Process;
 
 class PlaywrightPageFetcher
 {
+    public ?string $lastFailure = null;
+
     /**
      * @param  array<string, mixed>  $options
      * @return array{url: string, status_code: int, content_type: string|null, body: string, renderer: string}|null
      */
     public function fetch(string $url, array $options = []): ?array
     {
+        $this->lastFailure = null;
         $script = (string) config('chat.playwright_script');
 
         if ($script === '' || ! file_exists($script)) {
+            $this->lastFailure = 'The browser renderer script is missing on this worker.';
+
             return null;
         }
 
         $nodeBinary = $this->resolveNodeBinary();
 
         if ($nodeBinary === null) {
+            $this->lastFailure = 'The browser renderer cannot start because Node.js is unavailable on this worker.';
             Log::warning('Playwright fetch skipped because Node.js binary could not be resolved.', [
                 'url' => $url,
                 'configured_node_binary' => (string) config('chat.playwright_node_binary', 'node'),
@@ -97,6 +103,7 @@ class PlaywrightPageFetcher
         try {
             $process->run();
         } catch (ProcessTimedOutException $exception) {
+            $this->lastFailure = 'The browser renderer timed out while loading the page.';
             Log::warning('Playwright fetch process timed out.', [
                 'url' => $url,
                 'node_binary' => $nodeBinary,
@@ -112,6 +119,7 @@ class PlaywrightPageFetcher
         }
 
         if (! $process->isSuccessful()) {
+            $this->lastFailure = 'The browser renderer failed to run. Check the worker’s Playwright installation and renderer logs.';
             Log::warning('Playwright fetch process failed.', [
                 'url' => $url,
                 'node_binary' => $nodeBinary,
@@ -129,6 +137,7 @@ class PlaywrightPageFetcher
         $output = trim($process->getOutput());
 
         if ($output === '') {
+            $this->lastFailure = 'The browser renderer returned no output.';
             Log::warning('Playwright fetch process returned empty output.', [
                 'url' => $url,
                 'node_binary' => $nodeBinary,
@@ -140,6 +149,7 @@ class PlaywrightPageFetcher
         $payload = json_decode($output, true);
 
         if (! is_array($payload) || empty($payload['html'])) {
+            $this->lastFailure = 'The browser renderer returned no readable page content.';
             Log::warning('Playwright fetch process returned invalid payload.', [
                 'url' => $url,
                 'node_binary' => $nodeBinary,
@@ -150,6 +160,8 @@ class PlaywrightPageFetcher
 
         $status = (int) ($payload['status_code'] ?? 0);
         if ($status < 200 || $status >= 300) {
+            $this->lastFailure = "The browser request returned HTTP {$status}.";
+
             return null;
         }
 

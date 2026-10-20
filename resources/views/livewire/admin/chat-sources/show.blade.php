@@ -240,6 +240,13 @@
             <flux:callout variant="danger" icon="x-circle" :heading="__('Ingestion failed')">
                 <pre class="whitespace-pre-wrap text-sm">{{ $latestRun->error_message }}</pre>
             </flux:callout>
+        @elseif ($latestStatus === 'queued' && $latestRun)
+            <flux:callout variant="warning" icon="clock" :heading="__('Waiting for ingestion')">
+                {{ __('The source is saved, but this run has not started fetching or indexing content yet.') }}
+                @if ($latestRun->created_at?->lt(now()->subMinutes(15)))
+                    <p class="mt-2">{{ __('This run has waited more than 15 minutes. Check the ingestion worker and queue backlog before retrying.') }}</p>
+                @endif
+            </flux:callout>
         @elseif ($latestStatus === 'success' && $latestRun)
             <flux:callout variant="success" icon="check-circle" :heading="__('Last run completed successfully')">
                 <flux:text variant="subtle">

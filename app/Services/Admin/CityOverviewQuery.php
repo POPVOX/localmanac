@@ -25,6 +25,9 @@ class CityOverviewQuery
                 'eventSources as unhealthy_event_sources_count' => fn (Builder $query) => $query->where('health_status', 'unhealthy'),
                 'chatSources as chat_sources_count',
                 'chatSources as active_chat_sources_count' => fn (Builder $query) => $query->where('is_active', true),
+                'chatSources as unhealthy_chat_sources_count' => fn (Builder $query) => $query
+                    ->where('is_active', true)
+                    ->whereHas('latestRun', fn (Builder $run) => $run->where('status', 'failed')),
                 'articles as recent_articles_count' => fn (Builder $query) => $query->where('created_at', '>=', now()->subDays(7)),
                 'events as upcoming_events_count' => fn (Builder $query) => $query
                     ->whereNotNull('starts_at')

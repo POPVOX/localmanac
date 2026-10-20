@@ -75,13 +75,35 @@ class ScraperConfigHeuristicGenerator
             ];
         }
 
-        if ($this->looksLikeDocumentersProfile($html)) {
+        $crawler = new Crawler($html, $sourceUrl);
+        if ($crawler->filter('.fsPostElement .fsTitle a.fsPostLink[href]')->count() > 0) {
+            return [
+                'profile' => 'generic_listing',
+                'config' => [
+                    'profile' => 'generic_listing',
+                    'list' => [
+                        'link_selector' => '.fsPostElement .fsTitle a.fsPostLink[href]',
+                        'link_attr' => 'href',
+                        'max_links' => 25,
+                    ],
+                    'article' => [
+                        'title_selector' => '.fsPostElement.fsPost .fsTitle',
+                        'content_selector' => '.fsPostElement.fsPost .fsBody',
+                        'remove_selectors' => ['script', 'style', 'nav', 'footer'],
+                    ],
+                ],
+                'warnings' => [],
+                'confidence' => 0.95,
+            ];
+        }
+
+        if ($this->looksLikeDocumentersProfile($sourceUrl, $crawler)) {
             return [
                 'profile' => 'documenters',
                 'config' => [
                     'profile' => 'documenters',
                     'list' => [
-                        'link_selector' => 'a[href*="docs.google.com"]',
+                        'link_selector' => 'a[href*="docs.google.com/document/"]',
                         'link_attr' => 'href',
                         'max_links' => 25,
                     ],
@@ -110,9 +132,12 @@ class ScraperConfigHeuristicGenerator
         return str_contains($htmlLower, 'summary="archive details"');
     }
 
-    private function looksLikeDocumentersProfile(string $html): bool
+    private function looksLikeDocumentersProfile(string $sourceUrl, Crawler $crawler): bool
     {
-        return str_contains(mb_strtolower($html), 'docs.google.com');
+        $hasDocs = $crawler->filter('a[href*="docs.google.com/document/"]')->count() > 0;
+        $identity = $sourceUrl.' '.$crawler->filter('title, h1')->text('');
+
+        return $hasDocs && preg_match('/\bdocumenters\b/i', $identity) === 1;
     }
 
     private function looksLikeWixBlogProfile(string $html): bool
