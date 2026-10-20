@@ -1022,6 +1022,11 @@ class ChatSourceRetriever
             return false;
         }
 
+        if ($this->eventIntentDetector->isCivicReferenceIntent($normalized)
+            && preg_match('/\b(how|where)\b[^?;.!]*\b(speak|testify|participate|comment)\b/u', $normalized) === 1) {
+            return true;
+        }
+
         if (preg_match('/\b(how do i|how to|what do i need|where do i apply|where can i apply|steps?|step by step|process|procedure)\b/u', $normalized) === 1) {
             return true;
         }
