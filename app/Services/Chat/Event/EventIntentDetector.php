@@ -60,7 +60,7 @@ class EventIntentDetector
     {
         $normalized = $this->normalize($question);
 
-        if ($normalized === '') {
+        if ($normalized === '' || $this->isCivicReferenceIntent($normalized)) {
             return false;
         }
 
@@ -80,6 +80,25 @@ class EventIntentDetector
         }
 
         return $this->containsActivityPrompt($normalized);
+    }
+
+    public function isCivicReferenceIntent(string $question): bool
+    {
+        $question = $this->normalize($question);
+
+        if (preg_match('/\b(council|boards?|commissions?|meetings?|agendas?|minutes)\b/u', $question) !== 1) {
+            return false;
+        }
+
+        // Keep mixed questions that explicitly ask for a meeting schedule on the event path.
+        if (preg_match('/\b(when|what time)\b[^?;.!]*\b(meets?|meetings?|hearings?|council|board|commission)\b/u', $question) === 1
+            || preg_match('/\b(what|which|list|show)\b[^?;.!]*\b(meetings|hearings|events|concerts|festivals)\b/u', $question) === 1) {
+            return false;
+        }
+
+        return preg_match('/\b(contact|phone|telephone|e-?mail)\b/u', $question) === 1
+            || preg_match('/\b(where|how)\b[^?;.!]*\b(find|read|view|download|access|obtain|get)\b[^?;.!]*\b(agendas?|minutes|records|recordings)\b/u', $question) === 1
+            || preg_match('/\bwhere\b[^?;.!]*\b(agendas?|minutes|records|recordings)\b[^?;.!]*\b(posted|published|available)\b/u', $question) === 1;
     }
 
     private function containsExplicitDate(string $question): bool

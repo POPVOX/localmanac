@@ -12,3 +12,10 @@ it('classifies reference, events, and updates questions using lightweight heuris
         ->and($classifier->classify('Whats new this week?'))->toBe(ChatEvidenceModeClassifier::UPDATES)
         ->and($classifier->classify('What active service alerts or disruptions should residents in Wichita know about right now? Focus on roads, utilities, water, trash, and public services.'))->toBe(ChatEvidenceModeClassifier::UPDATES);
 });
+
+it('classifies municipal contact and agenda access as reference questions', function () {
+    $classifier = app(ChatEvidenceModeClassifier::class);
+
+    expect($classifier->classify("How can I contact Stamford's Board of Representatives, and where can I find its meeting agendas?"))->toBe(ChatEvidenceModeClassifier::REFERENCE)
+        ->and($classifier->classify('Where are the city council meeting minutes posted?'))->toBe(ChatEvidenceModeClassifier::REFERENCE);
+});

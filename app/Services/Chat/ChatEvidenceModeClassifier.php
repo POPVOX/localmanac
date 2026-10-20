@@ -20,7 +20,7 @@ class ChatEvidenceModeClassifier
     {
         $normalizedQuestion = $this->normalize($question);
 
-        if ($normalizedQuestion === '') {
+        if ($normalizedQuestion === '' || $this->eventIntentDetector->isCivicReferenceIntent($normalizedQuestion)) {
             return self::REFERENCE;
         }
 
