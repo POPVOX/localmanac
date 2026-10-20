@@ -17,5 +17,7 @@ it('classifies municipal contact and agenda access as reference questions', func
     $classifier = app(ChatEvidenceModeClassifier::class);
 
     expect($classifier->classify("How can I contact Stamford's Board of Representatives, and where can I find its meeting agendas?"))->toBe(ChatEvidenceModeClassifier::REFERENCE)
-        ->and($classifier->classify('Where are the city council meeting minutes posted?'))->toBe(ChatEvidenceModeClassifier::REFERENCE);
+        ->and($classifier->classify('Where are the city council meeting minutes posted?'))->toBe(ChatEvidenceModeClassifier::REFERENCE)
+        ->and($classifier->classify('How can I speak at a Stamford Board of Education meeting?'))->toBe(ChatEvidenceModeClassifier::REFERENCE)
+        ->and($classifier->classify('When is the next board meeting, and how can I speak at it?'))->toBe(ChatEvidenceModeClassifier::EVENTS);
 });
