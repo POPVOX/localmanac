@@ -11,11 +11,54 @@ use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
 
+it('retrieves participation instructions when the board name is only in page metadata', function (bool $v2) {
+    config([
+        'scout.driver' => 'collection', 'chat.vector_enabled' => false,
+        // Exercise the title-aware procedural fallback used when full-text
+        // search misses a name split from its instructions across chunks.
+        'chat.fts_enabled' => false, 'chat.reranking_enabled' => false,
+        'chat.retrieval_v2_enabled' => $v2, 'chat.retrieval_neighbor_window' => 0,
+    ]);
+    $city = City::factory()->create(['name' => 'Stamford']);
+    $source = ChatSource::factory()->create(['city_id' => $city->id, 'is_active' => true]);
+    $page = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id,
+        'title' => 'Board of Education - Stamford Public Schools',
+        'url' => 'https://www.stamfordpublicschools.org/board-of-education',
+        'canonical_url' => null,
+    ]);
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $page->id, 'chunk_index' => 0,
+        'content' => 'The BOE oversees the schools and appoints the superintendent.',
+    ]);
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $page->id, 'chunk_index' => 1,
+        'content' => 'To speak during a regular monthly board meeting, email the Board Secretary at least 1 hour before the start. Speakers have up to three minutes.',
+    ]);
+    $unrelated = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id, 'title' => 'Family handbook',
+        'url' => 'https://example.org/handbook', 'canonical_url' => null,
+    ]);
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $unrelated->id,
+        'content' => 'Families speak many languages. Public education programs support students.',
+    ]);
+
+    $result = app(ChatSourceRetriever::class)->retrieve(collect([$source]),
+        'How can I speak at a Stamford Board of Education meeting?', $city->id);
+
+    expect($result['evidence'])->toHaveCount(1)
+        ->and($result['evidence'][0]['source_url'])->toBe($page->url)
+        ->and($result['evidence'][0]['snippet'])->toContain('at least 1 hour');
+})->with([false, true]);
+
 it('finds city content outside the metadata shortlist without including inactive or other-city sources', function (bool $v2) {
     config(['scout.driver' => 'collection', 'chat.vector_enabled' => false, 'chat.fts_enabled' => true,
         'chat.retrieval_v2_enabled' => $v2, 'chat.reranking_enabled' => false]);
     $city = City::factory()->create();
-    ChatSource::factory()->count(12)->create([
+    ChatSource::factory()->count(12)->sequence(fn ($sequence) => [
+        'source_url' => 'https://example.gov/community/'.$sequence->index,
+    ])->create([
         'city_id' => $city->id, 'name' => 'Community information', 'description' => null, 'tags' => [],
         'priority' => 100, 'is_active' => true,
     ]);

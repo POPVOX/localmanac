@@ -26,6 +26,8 @@ it('isProceduralQuestion returns true for how-to questions', function (string $q
     expect($result)->toBeTrue();
 })->with([
     'How do I apply for a building permit?',
+    'How can I apply for a building permit?',
+    'How can I speak at a Stamford Board of Education meeting?',
     'How to renew my business license?',
     'What do I need to get a garage sale permit?',
     'Where do I apply for a dog license?',
@@ -52,6 +54,8 @@ it('isProceduralQuestion returns false for non-procedural questions', function (
     'What are the city council meeting hours?',
     'Who is the mayor?',
     'What is the population of the city?',
+    'How can I find upcoming Board of Education meetings?',
+    "How can I contact Stamford's Board of Representatives, and where can I find its meeting agendas?",
     '',
 ]);
 
