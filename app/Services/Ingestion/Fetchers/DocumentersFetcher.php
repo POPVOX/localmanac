@@ -123,7 +123,13 @@ class DocumentersFetcher
         });
 
         $links = array_values(array_unique(array_filter($links, function (?string $url) {
-            return is_string($url) && Str::contains($url, 'docs.google.com');
+            if (! is_string($url)) {
+                return false;
+            }
+
+            return in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)
+                && strtolower((string) parse_url($url, PHP_URL_HOST)) === 'docs.google.com'
+                && preg_match('~^/document/(?:u/\d+/)?d/~', (string) parse_url($url, PHP_URL_PATH)) === 1;
         })));
 
         if ($maxLinks > 0) {

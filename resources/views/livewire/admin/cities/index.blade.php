@@ -17,7 +17,7 @@
             @php
                 $sourceCount = $city->article_sources_count + $city->event_sources_count + $city->chat_sources_count;
                 $activeSourceCount = $city->active_article_sources_count + $city->active_event_sources_count + $city->active_chat_sources_count;
-                $healthIssues = $city->unhealthy_article_sources_count + $city->unhealthy_event_sources_count;
+                $healthIssues = $city->unhealthy_article_sources_count + $city->unhealthy_event_sources_count + $city->unhealthy_chat_sources_count;
                 $accessCodeCount = $city->active_access_codes_count + ($city->hasLegacyChatAccessCode() ? 1 : 0);
             @endphp
             <article class="admin-location-card flex flex-col" wire:key="city-{{ $city->id }}">

@@ -29,6 +29,7 @@ class ScraperConfigDrafter
         $minimumConfidence = (float) config('scraper-assistant.ai.refine_min_confidence', 0.75);
 
         $shouldRefine = $refineEnabled
+            && Arr::get($heuristic, 'config.list.link_selector') !== '.fsPostElement .fsTitle a.fsPostLink[href]'
             && (
                 ($normalizedType === 'html' && $refineHtmlAlways)
                 || $heuristic['confidence'] < $minimumConfidence

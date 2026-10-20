@@ -30,7 +30,7 @@ it('detects the civicplus archive pdf list profile from archive html', function 
         ->and($draft['config']['list']['href_contains'])->toBe('Archive.aspx?ADID=');
 });
 
-it('detects the documenters profile from google docs links', function () {
+it('detects the documenters profile only with a documenters identity and document links', function () {
     config()->set('scraper-assistant.ai.refine_enabled', false);
 
     $html = <<<'HTML'
@@ -45,13 +45,13 @@ it('detects the documenters profile from google docs links', function () {
 
     $draft = app(ScraperConfigDrafter::class)->draft(
         'html',
-        'https://example.com/meetings',
+        'https://example.com/documenters/meetings',
         $html,
     );
 
     expect($draft['profile'])->toBe('documenters')
         ->and($draft['config']['profile'])->toBe('documenters')
-        ->and($draft['config']['list']['link_selector'])->toBe('a[href*="docs.google.com"]')
+        ->and($draft['config']['list']['link_selector'])->toBe('a[href*="docs.google.com/document/"]')
         ->and($draft['config']['fetch']['renderer'])->toBe('auto')
         ->and($draft['config']['fetch']['playwright']['storage_state_path'])->toBe('storage/app/playwright/example.com.json');
 });

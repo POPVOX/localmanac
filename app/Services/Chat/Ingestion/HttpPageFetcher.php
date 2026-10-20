@@ -8,11 +8,14 @@ use Illuminate\Support\Facades\Http;
 
 class HttpPageFetcher
 {
+    public ?string $lastFailure = null;
+
     /**
      * @return array{url: string, status_code: int, content_type: string|null, body: string, renderer: string}|null
      */
     public function fetch(string $url): ?array
     {
+        $this->lastFailure = null;
         $policy = app(DownloadPolicy::class);
         if ($policy->isMediaUrl($url)) {
             throw new DownloadRejected('Media URL skipped.');
@@ -32,10 +35,16 @@ class HttpPageFetcher
                 throw $rejection;
             }
 
+            $this->lastFailure = $exception instanceof \Illuminate\Http\Client\RequestException
+                ? $this->statusFailure($exception->response->status())
+                : 'The direct request failed or timed out before a response was received.';
+
             return null;
         }
 
         if (! $response->successful()) {
+            $this->lastFailure = $this->statusFailure($response->status());
+
             return null;
         }
 
@@ -49,5 +58,12 @@ class HttpPageFetcher
             'body' => (string) $response->body(),
             'renderer' => 'http',
         ];
+    }
+
+    private function statusFailure(int $status): string
+    {
+        return in_array($status, [401, 403, 429], true)
+            ? "The site denied or limited the direct request (HTTP {$status})."
+            : "The site returned HTTP {$status} to the direct request.";
     }
 }
