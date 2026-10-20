@@ -16,7 +16,10 @@ class EmbedChatSourcePage implements ShouldQueue
      */
     public function __construct(
         public int $chatSourcePageId,
-    ) {}
+    ) {
+        $this->onConnection((string) config('chat.queue_connection', 'redis'))
+            ->onQueue((string) config('chat.embedding_queue', 'embedding'));
+    }
 
     /**
      * Execute the job.

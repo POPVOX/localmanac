@@ -73,6 +73,7 @@ return [
     'crawl_max_depth' => (int) env('CHAT_CRAWL_MAX_DEPTH', 3),
     'crawl_allow_external' => (bool) env('CHAT_CRAWL_ALLOW_EXTERNAL', false),
     'crawl_max_chars_per_page' => (int) env('CHAT_CRAWL_MAX_CHARS_PER_PAGE', 0),
+    'queue_connection' => env('CHAT_QUEUE_CONNECTION', 'redis'),
     'crawl_queue' => env('CHAT_CRAWL_QUEUE', 'ingestion'),
     'embedding_queue' => env('CHAT_EMBEDDING_QUEUE', 'embedding'),
     'crawl_job_timeout' => (int) env('CHAT_CRAWL_JOB_TIMEOUT', 1200),

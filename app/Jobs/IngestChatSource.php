@@ -24,7 +24,8 @@ class IngestChatSource implements ShouldQueue
         public bool $allowInactive = false,
     ) {
         $this->timeout = (int) config('chat.crawl_job_timeout', 1200);
-        $this->onQueue((string) config('chat.crawl_queue', 'ingestion'));
+        $this->onConnection((string) config('chat.queue_connection', 'redis'))
+            ->onQueue((string) config('chat.crawl_queue', 'ingestion'));
     }
 
     /**
@@ -37,7 +38,7 @@ class IngestChatSource implements ShouldQueue
                 ->where('chat_source_id', $this->chatSourceId)
                 ->find($this->runId);
 
-            if (! $run) {
+            if (! $run || $run->status !== 'queued') {
                 return;
             }
 
