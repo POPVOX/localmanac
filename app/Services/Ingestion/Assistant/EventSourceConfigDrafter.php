@@ -14,7 +14,7 @@ class EventSourceConfigDrafter
     {
         return match ($type) {
             'ics' => [
-                'config' => ['timezone' => null, 'past_days' => 0, 'future_days' => 90, 'max_items' => 500],
+                'config' => ['timezone' => null, 'past_days' => 0, 'future_days' => 90, 'max_items' => 500, 'decode_text' => true],
                 'confidence' => 0.99,
                 'warnings' => [],
             ],

@@ -145,6 +145,26 @@ class SourceDiscoveryService
             );
         }
 
+        if ($preferredKind !== 'article') {
+            $timelyFeed = $this->discoverTimelyCalendarFeed($body, $sourceUrl);
+
+            if ($timelyFeed !== null) {
+                $draft = $this->eventDrafter->draft('ics', $timelyFeed['url'], $timelyFeed['body']);
+
+                return $this->result(
+                    kind: 'event',
+                    type: 'ics',
+                    sourceUrl: $timelyFeed['url'],
+                    name: $this->htmlName($body, $sourceUrl),
+                    draft: $draft,
+                    reasons: ['A public subscription feed was found for the embedded Timely calendar.'],
+                    endpoints: [['url' => $timelyFeed['url'], 'type' => 'ics', 'label' => 'Timely calendar feed']],
+                    renderer: $renderer,
+                    extraWarnings: $warnings,
+                );
+            }
+        }
+
         if ($this->looksLikeJavascriptShell($body)) {
             try {
                 $rendered = $this->renderedFetcher->fetch($sourceUrl);
@@ -431,6 +451,81 @@ class SourceDiscoveryService
             'endpoints' => $endpoints,
             'renderer' => $renderer,
         ];
+    }
+
+    /**
+     * Timely publishes the calendar ID in its server-rendered calendar element.
+     * Follow only an explicit provider embed, then verify its public ICS export.
+     *
+     * @return array{url: string, body: string}|null
+     */
+    private function discoverTimelyCalendarFeed(string $body, string $sourceUrl): ?array
+    {
+        $calendarUrl = $this->timelyCalendarUrl($sourceUrl);
+
+        if ($calendarUrl === null) {
+            $crawler = new Crawler($body, $sourceUrl);
+            $embeds = [];
+
+            foreach ($crawler->filter('script[data-src], iframe[src]') as $node) {
+                if ($node->nodeName === 'script' && $node->getAttribute('src') !== 'https://events.timely.fun/embed.js') {
+                    continue;
+                }
+
+                $url = $this->timelyCalendarUrl($node->getAttribute($node->nodeName === 'script' ? 'data-src' : 'src'));
+                if ($url !== null) {
+                    $embeds[$url] = true;
+                }
+            }
+
+            if (count($embeds) !== 1) {
+                return null;
+            }
+
+            $calendarUrl = array_key_first($embeds);
+            $probe = $this->probeEndpoint($calendarUrl);
+            if ($probe === null) {
+                return null;
+            }
+            $body = $probe['body'];
+        }
+
+        $crawler = new Crawler($body, $calendarUrl);
+        $element = $crawler->filter('timely-calendar[data-info]');
+        if ($element->count() !== 1) {
+            return null;
+        }
+
+        $info = json_decode(rawurldecode($element->attr('data-info')), true);
+        if (! is_array($info)) {
+            return null;
+        }
+        $id = $info['id'] ?? null;
+        if (! is_scalar($id) || ! preg_match('/^[1-9][0-9]{0,15}$/', (string) $id)
+            || $this->timelyCalendarUrl((string) ($info['calendar_url'] ?? '')) !== $calendarUrl) {
+            return null;
+        }
+
+        $url = 'https://timelyapp.time.ly/api/calendars/'.$id.'/export?format=ics&target=copy';
+        $probe = $this->probeEndpoint($url);
+        if ($probe === null || ! str_contains(mb_substr($probe['body'], 0, 500), 'BEGIN:VCALENDAR')) {
+            return null;
+        }
+
+        return ['url' => $url, 'body' => $probe['body']];
+    }
+
+    private function timelyCalendarUrl(string $url): ?string
+    {
+        $parts = parse_url($url);
+        if (! is_array($parts) || ($parts['scheme'] ?? '') !== 'https'
+            || strtolower($parts['host'] ?? '') !== 'events.timely.fun'
+            || isset($parts['user']) || isset($parts['pass']) || isset($parts['port']) || isset($parts['query'])
+            || ! preg_match('~^/([a-zA-Z0-9_-]{1,100})(?:/agenda)?/?$~', $parts['path'] ?? '', $match)) {
+            return null;
+        }
+
+        return 'https://events.timely.fun/'.$match[1];
     }
 
     private function looksLikeIcs(string $body, string $contentType, string $url): bool
