@@ -1668,8 +1668,10 @@ class AnswerSynthesizer
             return true;
         }
 
+        $entitySupport = $this->normalizeEntitySupportText($supportText);
+
         foreach ($this->extractReferredEntities($answer, $city) as $entity) {
-            if (! str_contains($supportHaystack, $this->normalizeSupportText($entity))) {
+            if (! str_contains($entitySupport, $this->normalizeEntitySupportText($entity))) {
                 return false;
             }
         }
@@ -2616,6 +2618,14 @@ class AnswerSynthesizer
         return trim($value);
     }
 
+    private function normalizeEntitySupportText(string $value): string
+    {
+        // Possessive wording can vary without changing the organization being named.
+        $value = preg_replace("/(?<=\\p{L})['’]s\\b/iu", '', $value) ?? $value;
+
+        return $this->normalizeSupportText($value);
+    }
+
     /**
      * @return array<int, string>
      */
@@ -2690,7 +2700,7 @@ class AnswerSynthesizer
     {
         // A sentence-ending period or paragraph break is not part of a name.
         // Keep dotted initials (U.S.) without consuming the next sentence's verb.
-        $nameWord = "(?:(?:[A-Z]\\.){2,}|[A-Z][A-Za-z&'-]*(?:\\.[A-Za-z][A-Za-z&'-]*)*)";
+        $nameWord = "(?:(?:[A-Z]\\.){2,}|[A-Z][A-Za-z&'’-]*(?:\\.[A-Za-z][A-Za-z&'’-]*)*)";
 
         preg_match_all(
             '/(?i:\b(?:call|contact|report(?:[\t ]+(?:it|them))?[\t ]+to|notify|visit|reach(?:[\t ]+out)?[\t ]+to|go to|through|via)[\t ]+(?:the[\t ]+)?)('.$nameWord.'(?:[\t ]+'.$nameWord.'){0,3})/',

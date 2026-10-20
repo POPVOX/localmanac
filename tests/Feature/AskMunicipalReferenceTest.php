@@ -43,7 +43,7 @@ it('answers municipal contact and agenda questions from indexed pages instead of
         'description' => 'School board meeting with agenda.',
         'starts_at' => now()->addDays(2),
     ]);
-    StreamingChatAnswerAgent::fake([$content]);
+    StreamingChatAnswerAgent::fake(["To contact Stamford's Board of Representatives, call 203-977-4024. Meeting agendas are available at https://boardofreps.org/."]);
 
     $result = app(AskService::class)->answerStreamingForUser(
         "How can I contact Stamford's Board of Representatives, and where can I find its meeting agendas?",
