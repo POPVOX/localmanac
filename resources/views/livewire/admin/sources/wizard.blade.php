@@ -241,6 +241,7 @@
                     <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-[#e7e5de]">
                         <div class="h-full rounded-full bg-[#1f654f]" style="width: {{ $confidence !== null ? max(4, $confidence * 100) : 0 }}%"></div>
                     </div>
+                    <p class="mt-2 text-xs text-[#667970]">{{ __('Confidence describes the detection match. A successful live preview enables Add source.') }}</p>
                 </div>
 
                 <div class="grid gap-2">
@@ -248,6 +249,9 @@
                         <span wire:loading.remove wire:target="save">{{ __('Add source') }}</span>
                         <span wire:loading wire:target="save">{{ __('Saving…') }}</span>
                     </flux:button>
+                    @if (! $previewValid)
+                        <p class="text-sm text-amber-800">{{ __('Add source is unavailable until the current settings pass a live test. Select Test again above.') }}</p>
+                    @endif
                     <flux:button type="button" variant="ghost" wire:click="startOver">{{ __('Start over') }}</flux:button>
                 </div>
             </aside>

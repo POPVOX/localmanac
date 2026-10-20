@@ -14,7 +14,7 @@ class EventSourceConfigDrafter
     {
         return match ($type) {
             'ics' => [
-                'config' => ['timezone' => null, 'past_days' => 0, 'future_days' => 90, 'max_items' => 500],
+                'config' => ['timezone' => null, 'past_days' => 0, 'future_days' => 90, 'max_items' => 500, 'decode_text' => true],
                 'confidence' => 0.99,
                 'warnings' => [],
             ],
@@ -316,7 +316,32 @@ class EventSourceConfigDrafter
             }
         }
 
-        $itemSelector = $this->firstSelectorWithCount($crawler, [
+        // LibraryCalendar uses date badges and time ranges rather than <time>
+        // elements. Match its platform markup, not a particular library host.
+        if ($this->selectorCount($crawler, 'article.node--type-lc-event') > 0) {
+            return [
+                'config' => [
+                    'profile' => 'generic_html_list',
+                    'timezone' => null,
+                    'list' => [
+                        'item_selector' => 'article.node--type-lc-event:not(.moderation-state--cancelled)',
+                        'title_selector' => '.lc-event__title a',
+                        'date_selector' => '.lc-date-icon',
+                        'time_selector' => '.lc-event-info-item--time',
+                        'location_selector' => '.lc-event__info .lc-event-info__item--colors',
+                        'description_selector' => '.lc-event__body',
+                        'link_selector' => '.lc-event__title a[href]',
+                        'link_attr' => 'href',
+                        'max_items' => 50,
+                    ],
+                    'detail' => ['enabled' => false],
+                ],
+                'confidence' => 0.94,
+                'warnings' => [],
+            ];
+        }
+
+        $itemSelectors = [
             '.fsCalendar article',
             '[itemtype*="schema.org/Event"]',
             '[itemtype*="Event"]',
@@ -327,7 +352,10 @@ class EventSourceConfigDrafter
             '.calendar-event',
             'article.event',
             '.event',
-        ], 2) ?? '.event';
+        ];
+        $itemSelector = $this->firstSelectorWithCount($crawler, $itemSelectors, 2)
+            ?? $this->firstSelectorWithCount($crawler, $itemSelectors, 1)
+            ?? '.event';
 
         $firstItem = $this->firstNode($crawler, $itemSelector);
         $titleSelector = $this->firstSelectorWithCount($firstItem, [
@@ -395,8 +423,8 @@ class EventSourceConfigDrafter
                 'list' => $list,
                 'detail' => ['enabled' => false],
             ],
-            'confidence' => $matchedItems >= 2 && ($datetimeSelector || $dateSelector !== 'time') ? 0.82 : 0.52,
-            'warnings' => $matchedItems >= 2
+            'confidence' => $matchedItems >= 1 && ($datetimeSelector || $dateSelector !== 'time') ? 0.82 : 0.52,
+            'warnings' => $matchedItems >= 1
                 ? []
                 : ['The calendar item wrapper was not obvious. Confirm the preview before saving.'],
         ];

@@ -50,7 +50,9 @@ class SourceDiscoveryService
             $probe = $this->renderedProbe($url);
 
             if ($probe === null) {
-                throw new InvalidArgumentException('The source could not be inspected automatically. The page may block automated requests; try again or add it as a Chat source and select the browser renderer.');
+                throw new InvalidArgumentException($preferredKind === 'event'
+                    ? 'The calendar could not be read automatically. The site may block automated access or be temporarily unavailable. Try again, or paste its public iCalendar/ICS feed URL.'
+                    : 'The source could not be inspected automatically. The page may block automated requests; try again or add it as a Chat source and select the browser renderer.');
             }
 
             $warnings[] = 'The site blocked or returned no content to a direct request, so discovery used a browser-rendered fallback.';
@@ -143,6 +145,26 @@ class SourceDiscoveryService
             );
         }
 
+        if ($preferredKind !== 'article') {
+            $timelyFeed = $this->discoverTimelyCalendarFeed($body, $sourceUrl);
+
+            if ($timelyFeed !== null) {
+                $draft = $this->eventDrafter->draft('ics', $timelyFeed['url'], $timelyFeed['body']);
+
+                return $this->result(
+                    kind: 'event',
+                    type: 'ics',
+                    sourceUrl: $timelyFeed['url'],
+                    name: $this->htmlName($body, $sourceUrl),
+                    draft: $draft,
+                    reasons: ['A public subscription feed was found for the embedded Timely calendar.'],
+                    endpoints: [['url' => $timelyFeed['url'], 'type' => 'ics', 'label' => 'Timely calendar feed']],
+                    renderer: $renderer,
+                    extraWarnings: $warnings,
+                );
+            }
+        }
+
         if ($this->looksLikeJavascriptShell($body)) {
             try {
                 $rendered = $this->renderedFetcher->fetch($sourceUrl);
@@ -152,6 +174,17 @@ class SourceDiscoveryService
                 $warnings = array_merge($warnings, $rendered['warnings']);
             } catch (\Throwable $exception) {
                 $warnings[] = 'The page appears to rely on JavaScript and could not be fully rendered during discovery.';
+            }
+        }
+
+        if ($preferredKind !== 'article') {
+            $listing = $this->discoverLibraryCalendarListing($body, $sourceUrl);
+
+            if ($listing !== null) {
+                $body = $listing['body'];
+                $sourceUrl = $listing['url'];
+                $renderer = $listing['renderer'];
+                $warnings[] = 'Using the calendar’s Upcoming view so event dates can be read automatically.';
             }
         }
 
@@ -326,6 +359,43 @@ class SourceDiscoveryService
     }
 
     /**
+     * LibraryCalendar month/week views load events separately. Follow only the
+     * published, same-origin Upcoming link, and verify its listing before use.
+     *
+     * @return array{url: string, status_code: int, content_type: string|null, body: string, renderer: string}|null
+     */
+    private function discoverLibraryCalendarListing(string $body, string $baseUrl): ?array
+    {
+        $crawler = new Crawler($body, $baseUrl);
+
+        if ($crawler->filter('article.node--type-lc-event .lc-date-icon')->count() > 0
+            || $crawler->filter('.js-calendar__data, .calendar--month, .calendar--week, .calendar--day')->count() === 0) {
+            return null;
+        }
+
+        foreach ($crawler->filter('a[data-drupal-link-system-path="events/upcoming"][href]') as $node) {
+            $url = $this->resolveUrl($node->getAttribute('href'), $baseUrl);
+
+            if ($url === null || ! $this->hasSameOrigin($url, $baseUrl)
+                || $this->withoutFragment($url) === $this->withoutFragment($baseUrl)) {
+                continue;
+            }
+
+            $probe = $this->probeEndpoint($url);
+
+            if ($probe !== null && $this->hasSameOrigin($probe['url'], $baseUrl)
+                && (new Crawler($probe['body']))->filter('article.node--type-lc-event .lc-date-icon')->count() > 0) {
+                return $probe;
+            }
+
+            // One linked view is enough; do not crawl alternate calendars.
+            return null;
+        }
+
+        return null;
+    }
+
+    /**
      * @return array{url: string, status_code: int, content_type: string|null, body: string, renderer: string}|null
      */
     private function renderedProbe(string $url): ?array
@@ -381,6 +451,81 @@ class SourceDiscoveryService
             'endpoints' => $endpoints,
             'renderer' => $renderer,
         ];
+    }
+
+    /**
+     * Timely publishes the calendar ID in its server-rendered calendar element.
+     * Follow only an explicit provider embed, then verify its public ICS export.
+     *
+     * @return array{url: string, body: string}|null
+     */
+    private function discoverTimelyCalendarFeed(string $body, string $sourceUrl): ?array
+    {
+        $calendarUrl = $this->timelyCalendarUrl($sourceUrl);
+
+        if ($calendarUrl === null) {
+            $crawler = new Crawler($body, $sourceUrl);
+            $embeds = [];
+
+            foreach ($crawler->filter('script[data-src], iframe[src]') as $node) {
+                if ($node->nodeName === 'script' && $node->getAttribute('src') !== 'https://events.timely.fun/embed.js') {
+                    continue;
+                }
+
+                $url = $this->timelyCalendarUrl($node->getAttribute($node->nodeName === 'script' ? 'data-src' : 'src'));
+                if ($url !== null) {
+                    $embeds[$url] = true;
+                }
+            }
+
+            if (count($embeds) !== 1) {
+                return null;
+            }
+
+            $calendarUrl = array_key_first($embeds);
+            $probe = $this->probeEndpoint($calendarUrl);
+            if ($probe === null) {
+                return null;
+            }
+            $body = $probe['body'];
+        }
+
+        $crawler = new Crawler($body, $calendarUrl);
+        $element = $crawler->filter('timely-calendar[data-info]');
+        if ($element->count() !== 1) {
+            return null;
+        }
+
+        $info = json_decode(rawurldecode($element->attr('data-info')), true);
+        if (! is_array($info)) {
+            return null;
+        }
+        $id = $info['id'] ?? null;
+        if (! is_scalar($id) || ! preg_match('/^[1-9][0-9]{0,15}$/', (string) $id)
+            || $this->timelyCalendarUrl((string) ($info['calendar_url'] ?? '')) !== $calendarUrl) {
+            return null;
+        }
+
+        $url = 'https://timelyapp.time.ly/api/calendars/'.$id.'/export?format=ics&target=copy';
+        $probe = $this->probeEndpoint($url);
+        if ($probe === null || ! str_contains(mb_substr($probe['body'], 0, 500), 'BEGIN:VCALENDAR')) {
+            return null;
+        }
+
+        return ['url' => $url, 'body' => $probe['body']];
+    }
+
+    private function timelyCalendarUrl(string $url): ?string
+    {
+        $parts = parse_url($url);
+        if (! is_array($parts) || ($parts['scheme'] ?? '') !== 'https'
+            || strtolower($parts['host'] ?? '') !== 'events.timely.fun'
+            || isset($parts['user']) || isset($parts['pass']) || isset($parts['port']) || isset($parts['query'])
+            || ! preg_match('~^/([a-zA-Z0-9_-]{1,100})(?:/agenda)?/?$~', $parts['path'] ?? '', $match)) {
+            return null;
+        }
+
+        return 'https://events.timely.fun/'.$match[1];
     }
 
     private function looksLikeIcs(string $body, string $contentType, string $url): bool

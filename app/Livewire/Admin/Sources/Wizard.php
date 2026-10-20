@@ -225,6 +225,8 @@ class Wizard extends Component
         ) {
             $this->previewValid = false;
             $this->previewHash = null;
+            $this->previewItems = [];
+            $this->previewWarnings = [__('Source settings changed. Select Test again to verify them and enable Add source.')];
             $this->step = 2;
         }
     }
