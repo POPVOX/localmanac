@@ -9,7 +9,7 @@ use App\Models\User;
 use App\Services\Chat\Agents\StreamingChatAnswerAgent;
 use App\Services\Chat\AskService;
 
-it('answers municipal contact and agenda questions from indexed pages instead of unrelated calendar meetings', function () {
+it('answers municipal reference questions from indexed pages instead of calendar listings', function (string $name, string $url, string $content, string $question, string $answer, string $expected) {
     config([
         'chat.vector_enabled' => false,
         'chat.tools.web_search.enabled' => false,
@@ -19,11 +19,10 @@ it('answers municipal contact and agenda questions from indexed pages instead of
     $city = City::factory()->create(['name' => 'Stamford', 'slug' => 'stamford', 'timezone' => 'America/New_York']);
     $source = ChatSource::factory()->create([
         'city_id' => $city->id,
-        'name' => 'Stamford Board of Representatives',
-        'source_url' => 'https://boardofreps.org/',
+        'name' => $name,
+        'source_url' => $url,
         'is_active' => true,
     ]);
-    $content = 'Contact Stamford Board of Representatives at 203-977-4024 or bdreps@stamfordct.gov. Meeting agendas are available on the Board of Representatives website.';
     $page = ChatSourcePage::factory()->create([
         'chat_source_id' => $source->id,
         'url' => $source->source_url,
@@ -43,13 +42,30 @@ it('answers municipal contact and agenda questions from indexed pages instead of
         'description' => 'School board meeting with agenda.',
         'starts_at' => now()->addDays(2),
     ]);
-    StreamingChatAnswerAgent::fake(["To contact Stamford's Board of Representatives, call 203-977-4024. Meeting agendas are available at https://boardofreps.org/."]);
+    StreamingChatAnswerAgent::fake([$answer]);
 
     $result = app(AskService::class)->answerStreamingForUser(
-        "How can I contact Stamford's Board of Representatives, and where can I find its meeting agendas?",
+        $question,
         $city->id, User::factory()->create(), null, fn () => null,
     );
 
-    expect($result['answer'])->toContain('203-977-4024')->not->toContain('School Board Committee Meeting')
+    expect($result['answer'])->toContain($expected)->not->toContain('School Board Committee Meeting')
         ->and(collect($result['citations'])->pluck('source_url')->all())->toContain($source->source_url);
-});
+})->with([
+    'contact and agendas' => [
+        'Stamford Board of Representatives',
+        'https://boardofreps.org/',
+        'Contact Stamford Board of Representatives at 203-977-4024 or bdreps@stamfordct.gov. Meeting agendas are available on the Board of Representatives website.',
+        "How can I contact Stamford's Board of Representatives, and where can I find its meeting agendas?",
+        "To contact Stamford's Board of Representatives, call 203-977-4024. Meeting agendas are available at https://boardofreps.org/.",
+        '203-977-4024',
+    ],
+    'public participation' => [
+        'Stamford Board of Education',
+        'https://www.stamfordpublicschools.org/board-of-education',
+        'Stamford Board of Education public participation: speakers must sign up before the meeting and have three minutes for public comment.',
+        'How can I speak at a Stamford Board of Education meeting?',
+        'To speak at a Stamford Board of Education meeting, sign up before the meeting. Speakers have three minutes for public comment.',
+        'sign up before the meeting',
+    ],
+]);

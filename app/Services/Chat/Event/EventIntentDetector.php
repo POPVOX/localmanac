@@ -86,17 +86,24 @@ class EventIntentDetector
     {
         $question = $this->normalize($question);
 
-        if (preg_match('/\b(council|boards?|commissions?|meetings?|agendas?|minutes)\b/u', $question) !== 1) {
+        if (preg_match('/\b(council|boards?|commissions?|meetings?|hearings?|agendas?|minutes)\b/u', $question) !== 1) {
             return false;
         }
+
+        $hasParticipationPolicy = preg_match('/\b(public[ -]comment|public participation|speakers?|speaking)\b/u', $question) === 1
+            && preg_match('/\b(rules?|polic(?:y|ies)|procedures?|guidelines?|time limits?|sign[ -]?up|registration)\b/u', $question) === 1;
 
         // Keep mixed questions that explicitly ask for a meeting schedule on the event path.
         if (preg_match('/\b(when|what time)\b[^?;.!]*\b(meets?|meetings?|hearings?|council|board|commission)\b/u', $question) === 1
-            || preg_match('/\b(what|which|list|show)\b[^?;.!]*\b(meetings|hearings|events|concerts|festivals)\b/u', $question) === 1) {
+            || preg_match('/\b(list|show)\b[^?;.!]*\b(meetings|hearings|events|concerts|festivals)\b/u', $question) === 1
+            || (! $hasParticipationPolicy && preg_match('/\b(what|which)\b[^?;.!]*\b(meetings|hearings|events|concerts|festivals)\b/u', $question) === 1)) {
             return false;
         }
 
-        return preg_match('/\b(contact|phone|telephone|e-?mail)\b/u', $question) === 1
+        return $hasParticipationPolicy
+            || preg_match('/\b(how|where)\b[^?;.!]*\b(speak|testify|participate|comment)\b/u', $question) === 1
+            || preg_match('/^(can|may)\s+(i|we|residents|the public)\s+(speak|testify|participate|comment)\b/u', $question) === 1
+            || preg_match('/\b(contact|phone|telephone|e-?mail)\b/u', $question) === 1
             || preg_match('/\b(where|how)\b[^?;.!]*\b(find|read|view|download|access|obtain|get)\b[^?;.!]*\b(agendas?|minutes|records|recordings)\b/u', $question) === 1
             || preg_match('/\bwhere\b[^?;.!]*\b(agendas?|minutes|records|recordings)\b[^?;.!]*\b(posted|published|available)\b/u', $question) === 1;
     }
