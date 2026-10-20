@@ -7,6 +7,29 @@ use Tests\TestCase;
 
 uses(TestCase::class);
 
+it('grounds possessives within civic organization names without accepting invented offices', function (string $answer, bool $grounded) {
+    $method = new ReflectionMethod(AnswerSynthesizer::class, 'isAnswerGrounded');
+
+    expect($method->invoke(app(AnswerSynthesizer::class),
+        "How can I contact Stamford's Board of Representatives?",
+        $answer,
+        new City(['name' => 'Stamford']),
+        [[
+            'title' => 'Stamford Board of Representatives',
+            'source_url' => 'https://boardofreps.org/home.aspx',
+            'snippet' => 'Contact the Stamford Board of Representatives at 203-977-4024. Meeting agendas are on its website. The Children\'s Advisory Council also maintains public records.',
+        ]], [],
+    ))->toBe($grounded);
+})->with([
+    'production city possessive' => ["To contact Stamford's Board of Representatives, visit https://boardofreps.org/home.aspx.", true],
+    'curly city possessive' => ['Contact Stamford’s Board of Representatives at 203-977-4024.', true],
+    'possessive in official name' => ["Contact the Children's Advisory Council.", true],
+    'unsupported office' => ["Contact Stamford's Fictional Office.", false],
+    'unsupported office with curly apostrophe' => ['Contact Stamford’s Fictional Office.', false],
+    'unsupported phone' => ["Contact Stamford's Board of Representatives at 203-555-0199.", false],
+    'unsupported URL' => ["Contact Stamford's Board of Representatives at https://invented.example/.", false],
+]);
+
 it('grounds referred entities within sentence and paragraph boundaries', function (string $answer, bool $grounded) {
     $synthesizer = app(AnswerSynthesizer::class);
     $method = new ReflectionMethod(AnswerSynthesizer::class, 'isAnswerGrounded');
