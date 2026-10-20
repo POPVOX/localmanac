@@ -23,6 +23,37 @@ it('uses the configured crawl job timeout', function () {
         ->and($job->queue)->toBe('ingestion');
 });
 
+it('routes Chat crawling and embedding to the configured workers instead of the web queue default', function () {
+    config()->set('queue.default', 'database');
+    config()->set('chat.queue_connection', 'redis');
+
+    $crawl = new IngestChatSource(123);
+    $embedding = new EmbedChatSourcePage(456);
+
+    expect($crawl->connection)->toBe('redis')
+        ->and($crawl->queue)->toBe('ingestion')
+        ->and($embedding->connection)->toBe('redis')
+        ->and($embedding->queue)->toBe('embedding');
+
+    config()->set('chat.queue_connection', 'database');
+    expect((new IngestChatSource(123))->connection)->toBe('database')
+        ->and((new EmbedChatSourcePage(456))->connection)->toBe('database');
+});
+
+it('does not replay a delayed job after its run has started or finished', function (string $status) {
+    $source = ChatSource::factory()->create();
+    $run = ChatSourceIngestionRun::factory()->create([
+        'chat_source_id' => $source->id,
+        'status' => $status,
+    ]);
+    $runner = Mockery::mock(\App\Services\Chat\Ingestion\ChatSourceIngestionRunner::class);
+    $runner->shouldNotReceive('runExisting');
+
+    (new IngestChatSource($source->id, false, $run->id))->handle($runner);
+
+    expect($run->fresh()->status)->toBe($status);
+})->with(['running', 'success', 'failed']);
+
 it('purges blocked infrastructure pages and their chunks during reingest', function () {
     Queue::fake();
 
