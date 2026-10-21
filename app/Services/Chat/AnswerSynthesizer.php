@@ -2562,6 +2562,15 @@ class AnswerSynthesizer
      */
     private function isGenericCitation(array $item): bool
     {
+        $path = rtrim(mb_strtolower((string) parse_url((string) ($item['source_url'] ?? ''), PHP_URL_PATH)), '/');
+        $title = mb_strtolower(trim((string) ($item['title'] ?? '')));
+        // A government landing page is generic; a department's service page
+        // beneath /government is often the most specific supporting citation.
+        if (in_array($path, ['/government', '/city-government'], true)
+            || preg_match('/^(?:city )?government(?:\s*[|–-].*)?$/u', $title) === 1) {
+            return true;
+        }
+
         $haystack = mb_strtolower(implode(' ', [
             (string) ($item['title'] ?? ''),
             (string) ($item['source_url'] ?? ''),
@@ -2571,12 +2580,9 @@ class AnswerSynthesizer
             'frequently asked questions',
             'faq',
             'quick links',
-            'government',
-            'city government',
             'all content',
             'boards and committees',
             '/faq',
-            '/government',
         ] as $signal) {
             if (str_contains($haystack, $signal)) {
                 return true;

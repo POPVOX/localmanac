@@ -7,6 +7,28 @@ use Tests\TestCase;
 
 uses(TestCase::class);
 
+it('keeps a specific municipal service citation beneath the government directory', function () {
+    $url = 'https://www.stamfordct.gov/government/public-safety-health-welfare/police-department/animal-control';
+    $result = (new ReflectionMethod(AnswerSynthesizer::class, 'finalizeCitations'))->invoke(
+        app(AnswerSynthesizer::class),
+        'What are Animal Control hours and phone number?',
+        'Animal Control is open daily from 8 a.m. to 4 p.m. Call 203-977-4437.',
+        [
+            ['title' => 'Animal Control | Stamford, CT', 'source_url' => $url, 'snippet' => 'Animal Control hours: daily 8 a.m. to 4 p.m. Phone 203-977-4437.', 'score' => 10],
+            ['title' => 'Museum programs', 'source_url' => 'https://example.org/museum', 'snippet' => 'Animal programs for schools.', 'score' => 2],
+        ], [],
+    );
+
+    expect($result['citations'][0]['source_url'])->toBe($url)
+        ->and(array_column($result['dropped'], 'source_url'))->not->toContain($url);
+});
+
+it('still identifies government landing pages as generic', function (string $url) {
+    expect((new ReflectionMethod(AnswerSynthesizer::class, 'isGenericCitation'))->invoke(
+        app(AnswerSynthesizer::class), ['title' => 'City information', 'source_url' => $url],
+    ))->toBeTrue();
+})->with(['https://example.gov/government', 'https://example.gov/government/']);
+
 it('grounds possessives within civic organization names without accepting invented offices', function (string $answer, bool $grounded) {
     $method = new ReflectionMethod(AnswerSynthesizer::class, 'isAnswerGrounded');
 
