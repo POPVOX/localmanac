@@ -114,6 +114,7 @@ class Show extends Component
         return view('livewire.admin.chat-sources.show', [
             'title' => $this->source->name ?: __('Chat Source :id', ['id' => $this->source->id]),
             'runs' => $runs,
+            'browserSnapshotAt' => $this->source->pages()->where('renderer', 'browser_snapshot')->max('fetched_at'),
         ])->layout('layouts.admin', [
             'title' => $this->source->name ?: __('Chat Source :id', ['id' => $this->source->id]),
         ]);
