@@ -236,6 +236,12 @@
             </flux:table.rows>
         </flux:table>
 
+        @if ($browserSnapshotAt)
+            <flux:callout variant="warning" icon="document-text" :heading="__('Browser snapshot available')">
+                {{ __('Content was captured in a browser on :date and imported for Chat. This does not confirm automatic refreshing; the crawl status below is separate.', ['date' => \Illuminate\Support\Carbon::parse($browserSnapshotAt)->tz($tz)->format('M j, Y g:i A')]) }}
+            </flux:callout>
+        @endif
+
         @if ($latestRun?->error_message)
             <flux:callout variant="danger" icon="x-circle" :heading="__('Ingestion failed')">
                 <pre class="whitespace-pre-wrap text-sm">{{ $latestRun->error_message }}</pre>

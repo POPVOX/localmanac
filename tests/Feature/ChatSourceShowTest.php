@@ -59,3 +59,20 @@ it('renders chat source run history and failure details', function () {
         ->assertSee('Crawler timed out.')
         ->assertSee('Pages changed / embedded');
 });
+
+it('distinguishes imported browser content from a failed automatic refresh', function () {
+    $source = ChatSource::factory()->create();
+    \App\Models\ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id, 'renderer' => 'browser_snapshot',
+        'fetched_at' => now()->subHour(),
+    ]);
+    ChatSourceIngestionRun::factory()->create([
+        'chat_source_id' => $source->id, 'status' => 'failed', 'error_message' => 'HTTP 403',
+    ]);
+
+    Livewire::actingAs(User::factory()->superAdmin()->create())
+        ->test(Show::class, ['source' => $source])
+        ->assertSee('Browser snapshot available')
+        ->assertSee('This does not confirm automatic refreshing')
+        ->assertSee('HTTP 403');
+});
