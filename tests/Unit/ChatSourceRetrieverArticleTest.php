@@ -5,6 +5,29 @@ use Tests\TestCase;
 
 uses(TestCase::class);
 
+it('keeps complete question coverage ahead of repeated incidental matches across source types', function (string $exactId, string $partialId) {
+    $items = collect([
+        ['id' => $partialId, 'title' => 'Police officer update', 'snippet' => str_repeat('Office news. ', 40), 'score' => 60],
+        ['id' => $exactId, 'title' => 'Office of Policy & Management', 'snippet' => 'OPM prepares and monitors the city budgets.', 'score' => 2],
+    ]);
+    $ranked = invokePrivateMethod(makeRetriever(), 'rankEvidenceByCoverage', [$items, ['office', 'policy', 'management']]);
+
+    expect($ranked->first()['id'])->toBe($exactId);
+})->with([
+    'exact chat source' => ['chunk_1', 'article_2'],
+    'exact news article' => ['article_1', 'chunk_2'],
+]);
+
+it('retains relevance ordering when query coverage ties or there are no query terms', function (array $terms) {
+    $items = collect([
+        ['id' => 'one', 'title' => 'Policy office', 'snippet' => '', 'score' => 2],
+        ['id' => 'two', 'title' => 'Policy office', 'snippet' => '', 'score' => 6],
+    ]);
+    $ranked = invokePrivateMethod(makeRetriever(), 'rankEvidenceByCoverage', [$items, $terms]);
+
+    expect($ranked->pluck('id')->values()->all())->toBe(['two', 'one']);
+})->with([[['policy', 'office']], [[]]]);
+
 /**
  * Helper to invoke a private method on ChatSourceRetriever.
  */
