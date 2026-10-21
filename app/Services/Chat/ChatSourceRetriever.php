@@ -185,7 +185,7 @@ class ChatSourceRetriever
                 ->concat($articleFtsEvidence)
                 ->unique('id')
                 ->pipe(fn (Collection $items): Collection => $this->deduplicateEvidence($items))
-                ->sortByDesc('score')
+                ->pipe(fn (Collection $items): Collection => $this->rankEvidenceByCoverage($items, $lexicalTerms))
                 ->take($maxEvidence)
                 ->values()
                 ->all();
@@ -208,6 +208,23 @@ class ChatSourceRetriever
                 'cache_hits' => 0,
             ],
         ];
+    }
+
+    /**
+     * A long article's relaxed OR rank can exceed a short page's exact rank.
+     * Keep evidence covering the question ahead of incidental term matches,
+     * regardless of whether it came from a news article or a chat source.
+     *
+     * @param  Collection<int, array<string, mixed>>  $items
+     * @param  array<int, string>  $terms
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function rankEvidenceByCoverage(Collection $items, array $terms): Collection
+    {
+        return $items->sortByDesc(fn (array $item): array => [
+            $this->countTermMatches(($item['title'] ?? '').' '.($item['snippet'] ?? ''), $terms),
+            (float) ($item['score'] ?? 0),
+        ]);
     }
 
     /**
