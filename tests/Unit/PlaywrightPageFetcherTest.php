@@ -5,6 +5,21 @@ use Illuminate\Support\Facades\Log;
 
 uses(Tests\TestCase::class);
 
+it('retains the website operator reference from a rendered access denial', function () {
+    $payload = json_encode([
+        'url' => 'https://example.gov/services',
+        'html' => '<h1>Access Denied</h1>Reference #18.bfaa3717.1792575948.14d5c860 https://errors.edgesuite.net/18.bfaa3717.1792575948.14d5c860',
+        'status_code' => 403,
+    ]);
+    $nodeStub = makeExecutableScript('node-akamai-denied.sh', "#!/bin/sh\necho '".$payload."'\n");
+    $scriptStub = makeExecutableScript('akamai-denied.mjs', '// Placeholder');
+    config(['chat.playwright_node_binary' => $nodeStub, 'chat.playwright_script' => $scriptStub]);
+    $fetcher = app(PlaywrightPageFetcher::class);
+
+    expect($fetcher->fetch('https://example.gov/services'))->toBeNull()
+        ->and($fetcher->lastFailure)->toContain('Akamai', '18.bfaa3717.1792575948.14d5c860');
+});
+
 it('rejects rendered HTTP errors and unknown response status', function (?int $status) {
     $payload = json_encode(['url' => 'https://example.com/missing', 'html' => '<html><body>Error page</body></html>', 'status_code' => $status]);
     $nodeStub = makeExecutableScript('node-error-'.($status ?? 'missing').'.sh', "#!/bin/sh\necho '".$payload."'\n");

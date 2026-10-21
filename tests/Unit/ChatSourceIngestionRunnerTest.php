@@ -17,10 +17,14 @@ it('records an empty or rejected crawl as a failure while preserving previous va
     $source = ChatSource::factory()->create();
     $page = ChatSourcePage::factory()->create(['chat_source_id' => $source->id, 'title' => 'Valid guide']);
     $crawler = Mockery::mock(ChatSourceCrawler::class);
+    $crawler->lastFailure = 'The source website’s Akamai security service denied the request (HTTP 403). Reference: 18.abc.123.def.';
     $crawler->shouldReceive('crawl')->once()->andReturn([]);
     app()->instance(ChatSourceCrawler::class, $crawler);
     $run = app(ChatSourceIngestionRunner::class)->run($source);
-    expect($run->status)->toBe('failed')->and($page->fresh())->not->toBeNull();
+    expect($run->status)->toBe('failed')
+        ->and($run->error_message)->toBe($crawler->lastFailure)
+        ->and($page->fresh())->not->toBeNull()
+        ->and($page->fresh()->title)->toBe('Valid guide');
     Queue::assertNothingPushed();
 });
 

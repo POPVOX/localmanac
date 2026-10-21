@@ -36,14 +36,14 @@ class HttpPageFetcher
             }
 
             $this->lastFailure = $exception instanceof \Illuminate\Http\Client\RequestException
-                ? $this->statusFailure($exception->response->status())
+                ? $this->statusFailure($exception->response->status(), $exception->response->body(), $exception->response->header('Server'))
                 : 'The direct request failed or timed out before a response was received.';
 
             return null;
         }
 
         if (! $response->successful()) {
-            $this->lastFailure = $this->statusFailure($response->status());
+            $this->lastFailure = $this->statusFailure($response->status(), $response->body(), $response->header('Server'));
 
             return null;
         }
@@ -60,8 +60,12 @@ class HttpPageFetcher
         ];
     }
 
-    private function statusFailure(int $status): string
+    private function statusFailure(int $status, string $body, ?string $server): string
     {
+        if ($denied = AccessDeniedResponse::describe($status, $body, $server)) {
+            return $denied;
+        }
+
         return in_array($status, [401, 403, 429], true)
             ? "The site denied or limited the direct request (HTTP {$status})."
             : "The site returned HTTP {$status} to the direct request.";

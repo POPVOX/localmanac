@@ -160,7 +160,8 @@ class PlaywrightPageFetcher
 
         $status = (int) ($payload['status_code'] ?? 0);
         if ($status < 200 || $status >= 300) {
-            $this->lastFailure = "The browser request returned HTTP {$status}.";
+            $this->lastFailure = AccessDeniedResponse::describe($status, (string) $payload['html'])
+                ?? "The browser request returned HTTP {$status}.";
 
             return null;
         }
