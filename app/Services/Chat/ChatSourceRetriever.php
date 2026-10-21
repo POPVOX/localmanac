@@ -1008,6 +1008,7 @@ class ChatSourceRetriever
             'submit', 'request', 'schedule', 'report', 'permit', 'permits',
             'license', 'licenses', 'process', 'procedure', 'steps', 'step', 'city',
             'dispose', 'disposal',
+            'problem', 'problems', 'issue', 'issues',
             'much', 'cost', 'costs', 'per',
             'property', 'properties',
         ];

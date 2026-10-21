@@ -11,6 +11,24 @@ use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
 
+it('finds complaint instructions when a user calls the issue a problem', function () {
+    config(['chat.vector_enabled' => false, 'chat.fts_enabled' => true, 'chat.reranking_enabled' => false]);
+    $city = City::factory()->create(['name' => 'Stamford']);
+    $source = ChatSource::factory()->create(['city_id' => $city->id, 'is_active' => true]);
+    $page = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id, 'title' => 'Stormwater Management | Stamford, CT',
+        'url' => 'https://example.gov/stormwater', 'canonical_url' => null,
+    ]);
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $page->id,
+        'content' => 'Report a Stormwater Complaint/Issue: https://example.gov/fixit',
+    ]);
+    $result = app(ChatSourceRetriever::class)->retrieve(collect([$source]),
+        'How do I report a stormwater problem in Stamford?', $city->id);
+
+    expect($result['evidence'][0]['snippet'] ?? '')->toContain('https://example.gov/fixit');
+});
+
 it('retrieves contact sections using the department title and excludes incidental animal mentions', function (bool $v2) {
     config([
         'scout.driver' => 'collection', 'chat.vector_enabled' => false,
