@@ -11,6 +11,43 @@ use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class);
 
+it('retrieves contact sections using the department title and excludes incidental animal mentions', function (bool $v2) {
+    config([
+        'scout.driver' => 'collection', 'chat.vector_enabled' => false,
+        'chat.fts_enabled' => true, 'chat.reranking_enabled' => false,
+        'chat.retrieval_v2_enabled' => $v2, 'chat.retrieval_neighbor_window' => 0,
+    ]);
+    $city = City::factory()->create(['name' => 'Stamford', 'state' => 'CT']);
+    $source = ChatSource::factory()->create(['city_id' => $city->id, 'is_active' => true]);
+    $page = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id, 'title' => 'Animal Control | Stamford, CT',
+        'url' => 'https://example.gov/animal-control', 'canonical_url' => null,
+    ]);
+    foreach ([
+        str_repeat('Animal Control department staff and animal control responsibilities. ', 10),
+        'Documents and forms. Dog license. Dog adoption form. Cat adoption form.',
+        "CONTACT\n201 Magee Avenue\nPhone (203) 977-4437\nHOURS\nDaily (7 Days)\n8:00 a.m. to 4:00 p.m.",
+    ] as $index => $content) {
+        ChatSourceChunk::factory()->create([
+            'chat_source_page_id' => $page->id, 'chunk_index' => $index, 'content' => $content,
+        ]);
+    }
+    $museum = ChatSourcePage::factory()->create([
+        'chat_source_id' => $source->id, 'title' => 'Museum animal programs',
+        'url' => 'https://example.org/museum', 'canonical_url' => null,
+    ]);
+    ChatSourceChunk::factory()->create([
+        'chat_source_page_id' => $museum->id,
+        'content' => str_repeat('Animals animal programs museum hours phone number. ', 30),
+    ]);
+
+    $result = app(ChatSourceRetriever::class)->retrieve(collect([$source]),
+        'What are Stamford Animal Control’s hours and phone number?', $city->id);
+
+    expect($result['evidence'][0]['snippet'])->toContain('Daily (7 Days)', '977-4437')
+        ->and(array_unique(array_column($result['evidence'], 'source_url')))->toBe([$page->url]);
+})->with([false, true]);
+
 it('retrieves participation instructions when the board name is only in page metadata', function (bool $v2) {
     config([
         'scout.driver' => 'collection', 'chat.vector_enabled' => false,

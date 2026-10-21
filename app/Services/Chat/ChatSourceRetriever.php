@@ -54,12 +54,15 @@ class ChatSourceRetriever
         $proceduralFocusTerms = $this->isProceduralQuestion($question)
             ? $this->proceduralFocusTerms($question)
             : [];
+        $contactFocus = $this->contactFocus($question);
+        $focusTerms = $proceduralFocusTerms ?: $contactFocus['subject'];
         $locationTerms = [];
         if ($cityId !== null && ($city = City::find($cityId))) {
             // The database already enforces city scope. Requiring location names
             // in every excerpt excludes useful pages that say TN instead of Tennessee.
             $locationTerms = $this->keywordTerms($city->name.' '.$city->state.' '.$city->country);
             $proceduralFocusTerms = array_values(array_diff($proceduralFocusTerms, $locationTerms));
+            $focusTerms = array_values(array_diff($focusTerms, $locationTerms));
         }
         // Preserve the requested service, not merely an incidental subject word.
         if ($proceduralFocusTerms !== []) {
@@ -82,7 +85,8 @@ class ChatSourceRetriever
             : array_values(array_diff($this->keywordTerms($question), $locationTerms));
         $lexicalQuestion = implode(' ', array_unique($lexicalTerms));
 
-        $focusedRows = $this->proceduralFocusSearch($sourceIds, $proceduralFocusTerms, $limit);
+        $focusTerms = $proceduralFocusTerms ?: $focusTerms;
+        $focusedRows = $this->focusedSearch($sourceIds, $focusTerms, $limit, $contactFocus['details']);
         $vectorRows = $this->vectorSearch($sourceIds, $question, $limit);
         $ftsLimit = max($limit, (int) config('chat.retrieval_fts_limit', $limit));
         $ftsRows = $this->ftsSearch($sourceIds, $lexicalQuestion, $ftsLimit);
@@ -90,7 +94,7 @@ class ChatSourceRetriever
         // Procedural title boosts and full-text ranks have different scales.
         // Fuse their positions so a focused keyword match cannot drown out a
         // full-text match for the actual question.
-        if (config('chat.retrieval_v2_enabled', false) || $proceduralFocusTerms !== []) {
+        if (config('chat.retrieval_v2_enabled', false) || $focusTerms !== []) {
             $rankedLists = array_map(fn (array $candidates): array => $this->deduplicateRows(collect($candidates))
                 ->map(function (array $row): array {
                     $row['retrieval_key'] = $this->rowIdentity($row);
@@ -139,7 +143,7 @@ class ChatSourceRetriever
             ->filter(fn (array $row): bool => ! $this->isBlockedRow($row))
             ->filter(fn (array $row): bool => $this->matchesTopic(
                 ($row['page_title'] ?? '').' '.($row['page_url'] ?? '').' '.($row['chunk'] ?? ''),
-                $proceduralFocusTerms
+                $focusTerms
             ))
             ->take((int) config('chat.retrieval_max_evidence', 24));
 
@@ -189,7 +193,7 @@ class ChatSourceRetriever
 
         $evidence = array_values(array_filter($evidence, fn (array $item): bool => $this->matchesTopic(
             ($item['title'] ?? '').' '.($item['source_url'] ?? '').' '.($item['snippet'] ?? ''),
-            $proceduralFocusTerms
+            $focusTerms
         )));
 
         $pagesUsed = collect($evidence)
@@ -211,7 +215,7 @@ class ChatSourceRetriever
      * @param  array<int, string>  $focusTerms
      * @return array<int, array<string, mixed>>
      */
-    private function proceduralFocusSearch(array $sourceIds, array $focusTerms, int $limit): array
+    private function focusedSearch(array $sourceIds, array $focusTerms, int $limit, array $detailTerms = []): array
     {
         if ($sourceIds === [] || $focusTerms === []) {
             return [];
@@ -227,6 +231,14 @@ class ChatSourceRetriever
                 $rank[] = "case when lower(coalesce({$column}, '')) like ? then {$weight} else 0 end";
                 $bindings[] = '%'.$term.'%';
             }
+        }
+
+        // Contact blocks often name only the requested detail; the department
+        // name lives in the page title. Rank those blocks ahead of navigation
+        // and staff lists that repeat the department name many times.
+        foreach ($detailTerms as $term) {
+            $rank[] = 'case when lower(chunks.content) like ? then 16 else 0 end';
+            $bindings[] = '%'.$term.'%';
         }
 
         $rankSql = '('.implode(' + ', $rank).')';
@@ -1008,6 +1020,41 @@ class ChatSourceRetriever
             ->map(fn (string $term): string => in_array($term, ['designation', 'designated', 'designate'], true) ? 'designat' : $term)
             ->values()
             ->all();
+    }
+
+    /** @return array{subject: array<int, string>, details: array<int, string>} */
+    private function contactFocus(string $question): array
+    {
+        $empty = ['subject' => [], 'details' => []];
+        if ($this->eventIntentDetector->isEventIntent($question)) {
+            return $empty;
+        }
+        $normalized = mb_strtolower($question);
+        $details = [];
+        foreach ([
+            '/\b(hours?|open|opening|closing|closed)\b/u' => ['hour', 'open', 'daily'],
+            '/\b(phone|telephone|contact|call|reach)\b/u' => ['phone', 'telephone', 'contact'],
+            '/\b(email|e-mail)\b/u' => ['email', '@'],
+            '/\b(address|located|location)\b/u' => ['address', 'contact', 'location'],
+        ] as $pattern => $terms) {
+            if (preg_match($pattern, $normalized) === 1) {
+                $details = array_merge($details, $terms);
+            }
+        }
+        if ($details === []) {
+            return $empty;
+        }
+        $ignored = [
+            'hour', 'hours', 'open', 'opening', 'closing', 'closed', 'phone', 'telephone',
+            'contact', 'call', 'reach', 'email', 'mail', 'address', 'located', 'location',
+            'number', 'numbers', 'time', 'times', 'tell', 'find', 'information', 'info',
+        ];
+        $terms = $this->keywordTerms($question);
+        $subject = array_values(array_filter($terms, fn (string $term): bool => ! in_array($term, $ignored, true)
+            && ! (str_ends_with($term, 's') && in_array(mb_substr($term, 0, -1), $terms, true))
+        ));
+
+        return ['subject' => $subject, 'details' => array_values(array_unique($details))];
     }
 
     private function isProceduralQuestion(string $question): bool
