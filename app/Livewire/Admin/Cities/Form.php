@@ -3,6 +3,7 @@
 namespace App\Livewire\Admin\Cities;
 
 use App\Models\City;
+use DateTimeZone;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Routing\Redirector;
@@ -24,15 +25,15 @@ class Form extends Component
 
     public string $country = 'US';
 
-    public string $timezone = 'America/Chicago';
+    public string $timezone = '';
 
     public bool $slugManuallySet = false;
 
     public function mount(?City $city = null): void
     {
-        $this->city = $city;
+        $this->city = $city?->exists ? $city : null;
 
-        if ($city) {
+        if ($this->city) {
             $this->name = $city->name;
             $this->slug = $city->slug;
             $this->state = (string) $city->state;
@@ -91,6 +92,16 @@ class Form extends Component
     {
         return view('livewire.admin.cities.form', [
             'title' => $this->city ? __('Edit City') : __('Create City'),
+            'commonTimezones' => [
+                'America/New_York' => __('Eastern Time'),
+                'America/Chicago' => __('Central Time'),
+                'America/Denver' => __('Mountain Time'),
+                'America/Phoenix' => __('Arizona Time'),
+                'America/Los_Angeles' => __('Pacific Time'),
+                'America/Anchorage' => __('Alaska Time'),
+                'Pacific/Honolulu' => __('Hawaii Time'),
+            ],
+            'timezones' => DateTimeZone::listIdentifiers(),
         ])->layout('layouts.admin', [
             'title' => $this->city ? __('Edit City') : __('Create City'),
         ]);
