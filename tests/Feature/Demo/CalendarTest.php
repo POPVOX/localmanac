@@ -129,13 +129,13 @@ test('shows empty state when no events exist for the selected date', function ()
         ->assertSee('No events scheduled for this day.');
 });
 
-test('authenticated users see dashboard link before calendar link in demo navigation', function () {
+test('authenticated users see news before calendar in public navigation', function () {
     $response = $this->actingAs(User::factory()->create())->get(route('demo.calendar'));
 
     $response
         ->assertSuccessful()
         ->assertSeeInOrder([
-            'Dashboard',
+            'News',
             'Calendar',
         ]);
 });

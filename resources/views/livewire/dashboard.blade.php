@@ -23,6 +23,7 @@
                 </p>
             </div>
 
+            @auth
             <button
                 type="button"
                 x-data=""
@@ -32,6 +33,7 @@
                 <flux:icon icon="chat-bubble-left-ellipsis" class="size-4" />
                 {{ __('Share feedback') }}
             </button>
+            @endauth
         </div>
     </section>
 
@@ -139,6 +141,7 @@
                     class="max-h-[320px] space-y-1 overflow-y-auto px-6 py-5"
                     x-on:chat-updated.window="hasMessages = true; pendingQuestion = ''; queueScrollToLatestAssistantStart()"
                     x-on:chat-reset.window="hasMessages = false; pendingQuestion = ''"
+                    x-on:chat-request-finished.window="pendingQuestion = ''"
                 >
                     @foreach ($messages as $index => $message)
                         @php
@@ -276,6 +279,10 @@
                                 </flux:button>
                             </x-slot>
                         </flux:composer>
+
+                        @error('question')
+                            <p role="alert" class="text-sm text-red-700">{{ $message }}</p>
+                        @enderror
 
                         <div class="flex flex-wrap gap-2">
                             @php

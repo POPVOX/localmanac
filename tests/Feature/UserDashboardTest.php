@@ -10,7 +10,7 @@ it('allows verified users to access the user dashboard', function () {
         ->assertOk();
 });
 
-it('redirects guests to login from the user dashboard', function () {
+it('allows guests to browse the user dashboard', function () {
     $this->get('/dashboard')
-        ->assertRedirect(route('login'));
+        ->assertOk();
 });

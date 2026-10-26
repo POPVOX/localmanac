@@ -23,8 +23,8 @@
 
                 <nav class="flex items-center gap-4 sm:gap-6" aria-label="{{ __('Primary navigation') }}">
                     @if ($cities->isNotEmpty())
-                        <a href="#cities" class="marketing-nav-link hidden sm:inline-flex">
-                            {{ __('Cities') }}
+                        <a href="#cities" class="marketing-nav-link">
+                            {{ __('Browse cities') }}
                         </a>
                     @endif
 
@@ -34,7 +34,7 @@
                                 {{ __('Log in') }}
                             </a>
                         @endif
-                        @if (Route::has('register'))
+                        @if (Route::has('register') && ! config('chat.public_access_enabled'))
                             <a href="{{ route('register') }}" wire:navigate class="marketing-button-secondary !min-h-10 !px-4">
                                 {{ __('Create account') }}
                             </a>
@@ -57,6 +57,11 @@
                         <p class="mt-7 max-w-2xl text-lg leading-8 text-[#496159] sm:text-xl">
                             {{ __('LocAlmanac brings local reporting, public meetings, community events, and civic answers together in one clear daily briefing.') }}
                         </p>
+                        @if (config('chat.public_access_enabled'))
+                            <p class="mt-4 text-base font-semibold text-[#1f654f]">
+                                {{ __('Browse any city. No account or ZIP code required.') }}
+                            </p>
+                        @endif
 
                         <div class="mt-9 flex flex-wrap items-center gap-3">
                             @if ($cities->isNotEmpty())
@@ -131,7 +136,9 @@
                                 {{ __('Start with your city.') }}
                             </h2>
                             <p class="mt-5 max-w-md text-base leading-7 text-[#c9d8d1]">
-                                {{ __('News and calendars are open to everyone. Members can unlock the local assistant with their city access code.') }}
+                                {{ config('chat.public_access_enabled')
+                                    ? __('Explore news, events, and Chat in any city. No sign-in or access code needed. Switch cities anytime.')
+                                    : __('News and calendars are open to everyone. Members can unlock the local assistant with their city access code.') }}
                             </p>
                         </div>
 
@@ -176,7 +183,7 @@
                     @foreach ([
                         ['icon' => 'newspaper', 'title' => __('A readable local feed'), 'body' => __('Reporting and public notices are organized by city, source, and civic topic.')],
                         ['icon' => 'calendar-days', 'title' => __('Events in one calendar'), 'body' => __('Public meetings and community events are gathered from calendars across the city.')],
-                        ['icon' => 'chat-bubble-left-right', 'title' => __('Answers with receipts'), 'body' => __('Members can ask local questions and follow the sources behind every useful answer.')],
+                        ['icon' => 'chat-bubble-left-right', 'title' => __('Answers with receipts'), 'body' => __('Ask local questions and follow the sources behind every useful answer.')],
                     ] as $feature)
                         <article class="border-b editorial-rule py-8 last:border-b-0 md:border-b-0 md:px-8 md:first:pl-0 md:last:pr-0">
                             <div class="grid size-11 place-items-center rounded-xl bg-[#e7f0eb] text-[#1f654f]">

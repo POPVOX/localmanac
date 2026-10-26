@@ -44,6 +44,13 @@ Localmanac is a city-scoped civic information platform that ingests local public
 ## City Scoping
 All core data paths are city-scoped. Wichita is the current default city in active use, without hard-coded single-city logic.
 
+## Public Access
+Visitors can browse `/dashboard`, city news, and city calendars without an account. The city selector is available to everyone.
+
+`CHAT_PUBLIC_ACCESS_ENABLED=true` (the default) also opens Chat without email verification or a city access code. Anonymous questions use the same retrieval and synthesis path, but do not read or persist member conversation history; each guest question is independent. Signed-in conversation memory remains scoped to the selected city. Questions are limited to 5,000 characters and the configured per-minute limit, per account or guest IP.
+
+Set `CHAT_PUBLIC_ACCESS_ENABLED=false` and rebuild the configuration cache to restore the verified-member and city-code requirement for Chat. News and calendars stay public. Administration and account settings always require authentication.
+
 ## Documentation
 Detailed technical documentation is organized in `docs/`:
 

@@ -57,9 +57,7 @@ Route::middleware(['auth'])->group(function () {
         ->name('two-factor.show');
 });
 
-Route::middleware(['auth', 'verified'])->group(function () {
-    Route::get('dashboard', UserDashboard::class)->name('dashboard');
-});
+Route::get('dashboard', UserDashboard::class)->name('dashboard');
 
 Route::middleware(['auth', 'verified', 'can:access-admin'])->group(function () {
     Route::prefix('admin')->as('admin.')->group(function () {

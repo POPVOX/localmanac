@@ -240,6 +240,9 @@ it('returns an immediate city-scoped meeting empty state without prompting the m
 });
 
 it('returns an immediate Lawrence article digest without prompting the model', function () {
+    // Keep the Tuesday fixture in the past even when the test runs on Monday.
+    $this->travelTo(now()->setDate(2026, 10, 28)->setTime(12, 0));
+
     $city = City::factory()->create([
         'name' => 'Lawrence, KS',
         'slug' => 'lawrence-ks',

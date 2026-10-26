@@ -1,5 +1,11 @@
 <x-layouts.auth>
     <div class="flex flex-col gap-6">
+        @if (config('chat.public_access_enabled'))
+            <div class="space-y-3 text-center">
+                <p class="text-sm text-zinc-600 dark:text-zinc-400">{{ __('News, calendars, and Chat are open to everyone. No account or ZIP code required.') }}</p>
+                <flux:button :href="route('home').'#cities'" variant="primary" class="w-full" wire:navigate>{{ __('Browse cities without signing in') }}</flux:button>
+            </div>
+        @endif
         <x-auth-header :title="__('Log in to your account')" :description="__('Enter your email and password below to log in')" />
 
         <!-- Session Status -->

@@ -13,6 +13,9 @@ use App\Services\Chat\AskService;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
 
+// Access codes remain available when the temporary public Chat setting is disabled.
+beforeEach(fn () => config()->set('chat.public_access_enabled', false));
+
 test('landing page links to every public city feed', function () {
     $lawrence = City::factory()->create([
         'name' => 'Lawrence',
