@@ -72,10 +72,10 @@
                     @endif
 
                     @guest
-                        <a href="{{ route('login') }}" wire:navigate class="hidden text-sm font-semibold text-[#496159] transition hover:text-[#1f654f] sm:inline-flex">
+                        <a href="{{ route('login') }}" wire:navigate class="text-sm font-semibold text-[#496159] transition hover:text-[#1f654f]">
                             {{ __('Log in') }}
                         </a>
-                        @if (Route::has('register'))
+                        @if (Route::has('register') && ! config('chat.public_access_enabled'))
                             <a href="{{ route('register') }}" wire:navigate class="inline-flex h-10 items-center rounded-xl bg-[#123e32] px-3.5 text-sm font-semibold text-white transition hover:bg-[#1f654f]">
                                 {{ __('Join') }}
                             </a>

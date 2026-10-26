@@ -62,12 +62,13 @@ class AnswerSynthesizer
         string $question,
         City $city,
         Collection $sources,
-        User $user,
+        ?User $user,
         ?string $conversationId,
         callable $onDelta,
         ?string $originalQuestion = null,
     ): array {
         $originalQuestion ??= $question;
+        $conversationId = $user ? $conversationId : null;
 
         if ($this->evidenceModeClassifier->classify($question) === ChatEvidenceModeClassifier::UPDATES) {
             return $this->updatesResponse(
@@ -106,9 +107,9 @@ class AnswerSynthesizer
             tools: $this->buildTools($city, $sources, $question, $eventContext, $seedEvidence !== []),
         );
 
-        if ($conversationId) {
+        if ($user && $conversationId) {
             $agent->continue($conversationId, as: $user);
-        } else {
+        } elseif ($user) {
             $agent->forUser($user);
         }
 

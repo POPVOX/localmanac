@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'public_access_enabled' => (bool) env('CHAT_PUBLIC_ACCESS_ENABLED', true),
     'provider' => env('CHAT_PROVIDER', config('enrichment.provider', 'openai')),
     'provider_chain' => array_values(array_filter(array_map(
         'trim',

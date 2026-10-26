@@ -20,10 +20,13 @@
 
             @guest
                 <flux:navbar class="-mb-px">
+                    <flux:navbar.item href="{{ route('home') }}#cities" wire:navigate>
+                        {{ __('Browse cities') }}
+                    </flux:navbar.item>
                     <flux:navbar.item href="{{ route('login') }}" wire:navigate>
                         {{ __('Log in') }}
                     </flux:navbar.item>
-                    @if (Route::has('register'))
+                    @if (Route::has('register') && ! config('chat.public_access_enabled'))
                         <flux:navbar.item href="{{ route('register') }}" wire:navigate>
                             {{ __('Create account') }}
                         </flux:navbar.item>

@@ -69,6 +69,8 @@ class Dashboard extends Component
 
     public function ask(): void
     {
+        $this->resetErrorBag('question');
+        $this->dispatch('chat-request-finished');
         $question = trim($this->question);
 
         if ($question === '') {
@@ -78,11 +80,25 @@ class Dashboard extends Component
         $city = $this->resolveCity();
         $user = auth()->user();
 
-        if (! $city || ! $user instanceof User || ! $user->hasVerifiedEmail() || ! $user->canAccessCity($city)) {
+        if (! $this->canUseChat($city)) {
             $this->addError('question', __('Enter the access code for this city to use chat.'));
 
             return;
         }
+
+        $this->validate(['question' => ['required', 'string', 'max:5000']]);
+
+        $rateLimitKey = 'chat-questions:'.($user instanceof User ? 'user:'.$user->getKey() : 'ip:'.request()->ip());
+
+        if (RateLimiter::tooManyAttempts($rateLimitKey, max(1, (int) config('chat.rate_limit_per_minute', 30)))) {
+            $this->addError('question', __('Please wait :seconds seconds before asking another question.', [
+                'seconds' => RateLimiter::availableIn($rateLimitKey),
+            ]));
+
+            return;
+        }
+
+        RateLimiter::hit($rateLimitKey, 60);
 
         $this->appendMessage('user', $question);
         $assistantMessageId = $this->appendMessage('assistant');
@@ -100,7 +116,7 @@ class Dashboard extends Component
                 },
             );
 
-            $this->conversationId = is_string($response['conversation_id'] ?? null)
+            $this->conversationId = $user instanceof User && is_string($response['conversation_id'] ?? null)
                 ? $response['conversation_id']
                 : null;
 
@@ -711,9 +727,10 @@ class Dashboard extends Component
         $user = auth()->user();
 
         return $city !== null
-            && $user instanceof User
-            && $user->hasVerifiedEmail()
-            && $user->canAccessCity($city);
+            && ((bool) config('chat.public_access_enabled', true)
+                || ($user instanceof User
+                    && $user->hasVerifiedEmail()
+                    && $user->canAccessCity($city)));
     }
 
     /**

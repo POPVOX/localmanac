@@ -5,18 +5,18 @@ use App\Models\IssueArea;
 use App\Models\User;
 use Livewire\Livewire;
 
-test('guests are redirected to the login page', function () {
+test('guests can visit the dashboard', function () {
     $response = $this->get(route('dashboard'));
-    $response->assertRedirect(route('login'));
+    $response->assertOk();
 });
 
-test('unverified users are redirected to verification notice', function () {
+test('unverified users can browse the dashboard', function () {
     $user = User::factory()->unverified()->create();
     $this->actingAs($user);
 
     $response = $this->get(route('dashboard'));
 
-    $response->assertRedirect(route('verification.notice'));
+    $response->assertOk();
 });
 
 test('verified users can visit the dashboard', function () {

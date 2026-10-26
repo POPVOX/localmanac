@@ -44,14 +44,17 @@ class AskService
     public function answerStreamingForUser(
         string $question,
         int|string|null $citySelector,
-        User $user,
+        ?User $user,
         ?string $conversationId,
         callable $onDelta,
     ): array {
         $question = trim($question);
         $city = $this->resolveCityFromSelector($citySelector);
         $normalizedQuestion = $this->normalizeQuestionForCity($question, $city);
-        $effectiveConversationId = $this->resolveConversationIdForQuestion($question, $conversationId);
+        // Anonymous questions must never load a member's saved conversation.
+        $effectiveConversationId = $user
+            ? $this->resolveConversationIdForQuestion($question, $conversationId)
+            : null;
 
         $sources = $this->selector->select($city->id, $normalizedQuestion);
 
@@ -80,7 +83,7 @@ class AskService
             return array_merge($fallback, ['conversation_id' => $effectiveConversationId]);
         }
 
-        $resolvedConversationId = is_string($answerPayload['conversation_id'] ?? null)
+        $resolvedConversationId = $user && is_string($answerPayload['conversation_id'] ?? null)
             ? $answerPayload['conversation_id']
             : $effectiveConversationId;
 
